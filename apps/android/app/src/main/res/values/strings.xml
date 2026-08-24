@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">DroidRelay</string>
+    <string name="notif_channel_name">다운로드 상태</string>
+    <string name="notif_running_title">DroidRelay 서버 실행 중</string>
+    <string name="notif_running_text">테더링 기기에서 접속 가능</string>
+    <string name="notif_done_title">다운로드 완료</string>
+    <string name="notif_fail_title">다운로드 실패</string>
+</resources>
