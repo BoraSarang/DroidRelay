@@ -1,16 +1,19 @@
 package com.borasarang.droidrelay.relay
 
 import android.content.Context
+import android.os.StatFs
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.Application
 import io.ktor.server.application.ApplicationCall
+import io.ktor.server.application.call
+import io.ktor.server.application.ApplicationCallPipeline
 import io.ktor.server.cio.CIO
 import io.ktor.server.cio.CIOApplicationEngine
 import io.ktor.server.engine.EmbeddedServer
 import io.ktor.server.engine.embeddedServer
-import io.ktor.server.request.httpMethod
+import io.ktor.server.plugins.origin
 import io.ktor.server.request.path
 import io.ktor.server.request.receiveText
 import io.ktor.server.response.header
@@ -25,6 +28,9 @@ import java.io.File
 import java.io.RandomAccessFile
 import java.net.InetAddress
 import java.net.NetworkInterface
+import java.util.Base64
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.ConcurrentHashMap
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -34,8 +40,13 @@ object RelayApp {
 
     fun get(ctx: Context): DownloadEngine =
         engine ?: synchronized(this) {
-            DebugLogger.i(TAG, "DownloadEngine 최초 생성")
-            engine ?: DownloadEngine(ctx.applicationContext).also { engine = it }
+            DebugLogger.i(TAG, "DownloadEngine 최초 생성 (설정·영구저장 연동)")
+            val appCtx = ctx.applicationContext
+            engine ?: DownloadEngine(
+                appCtx,
+                SettingsRepository.get(appCtx),
+                JobsPersistence(appCtx),
+            ).also { engine = it }
         }
 }
 
@@ -49,31 +60,62 @@ fun lanAddress(): String? {
             val host = addr.hostAddress ?: continue
             if (addr.isLoopbackAddress || addr.address.size != 4) continue
             if (host.startsWith("169.254")) continue
-            if (nif.name in preferred) {
-                DebugLogger.d("Net", "LAN 주소 확정: $host ($nif.name)")
-                return host
-            }
+            if (nif.name in preferred) return host
             candidates += host
         }
     }
-    val fallback = candidates.firstOrNull()
-    DebugLogger.d("Net", "선호 인터페이스 없음 → 폴백: ${fallback ?: "없음"}")
-    return fallback
+    return candidates.firstOrNull()
+}
+
+/** 신규 기기 승인 게이트 (T-112) */
+object DeviceGate {
+    private const val TAG = "Gate"
+    private val pending = ConcurrentHashMap<String, CompletableFuture<Boolean>>()
+    private val deniedSession = ConcurrentHashMap.newKeySet<String>()
+
+    /** 서비스가 연결 — 팝업/알림으로 사용자 결정 유도 */
+    @Volatile var onRequest: ((ip: String, resolve: (Boolean) -> Unit) -> Unit)? = null
+
+    fun awaitDecision(ip: String): Boolean {
+        val f = pending.computeIfAbsent(ip) {
+            DebugLogger.i(TAG, "신규 기기 접속 감지 → 승인 요청 $ip")
+            onRequest?.invoke(ip) { allowed ->
+                DebugLogger.i(TAG, "기기 결정 $ip allowed=$allowed")
+                if (!allowed) deniedSession.add(ip)
+                pending.remove(ip)?.complete(allowed)
+            }
+            CompletableFuture<Boolean>()
+        }
+        return runCatching { f.get() }.getOrDefault(false)
+    }
+
+    /** 서비스 알림 액션 등 외부에서 결정 주입 */
+    fun resolve(ip: String, allowed: Boolean) {
+        DebugLogger.i(TAG, "기기 결정 $ip allowed=$allowed")
+        if (!allowed) deniedSession.add(ip)
+        pending.remove(ip)?.complete(allowed)
+    }
+
+    fun isDenied(ip: String) = ip in deniedSession
 }
 
 class RelayServer(
     private val context: Context,
-    private val port: Int = 8080,
+    val port: Int = 8080,
 ) {
     @Volatile private var server: EmbeddedServer<CIOApplicationEngine, CIOApplicationEngine.Configuration>? = null
+    @Volatile var settings: AppSettings = AppSettings()
+        private set
+
+    fun updateSettings(s: AppSettings) {
+        settings = s
+        DebugLogger.d("Server", "설정 스냅샷 갱신 port=${s.port} auth=${s.webAuthEnabled} limit=${s.speedLimitKbps}KB/s")
+    }
 
     fun start() {
-        if (server != null) {
-            DebugLogger.w("Server", "이미 실행 중 — 중복 시작 무시")
-            return
-        }
+        if (server != null) return
         val ctx = context
-        server = embeddedServer(CIO, port = port, host = "0.0.0.0") { relayRoutes(ctx) }
+        server = embeddedServer(CIO, port = port, host = "0.0.0.0") { relayRoutes(ctx, this@RelayServer) }
             .start(wait = false)
         DebugLogger.i("Server", "기동 완료 http://0.0.0.0:$port (LAN=${lanAddress() ?: "?"})")
     }
@@ -85,15 +127,97 @@ class RelayServer(
     }
 }
 
-private fun Application.relayRoutes(context: Context) {
+private fun isLocalHost(host: String): Boolean {
+    if (host in listOf("127.0.0.1", "::1", "localhost")) return true
+    return host == lanAddress()
+}
+
+/** IPv4 문자열 → 부호없는 정수 */
+private fun ipToLong(ip: String): Long? = runCatching {
+    val p = ip.split('.').map { it.toLong() }
+    if (p.size != 4 || p.any { it < 0 || it > 255 }) return null
+    (p[0] shl 24) or (p[1] shl 16) or (p[2] shl 8) or p[3]
+}.getOrNull()
+
+/**
+ * 자기 핫스팟/로컬 인터페이스와 같은 서브넷인지 검사.
+ * 개인 테더링 AP에 붙은 기기는 사용자가 비밀번호를 공유한 대상이므로 신뢰한다. (Transfer식 승인 팝업은 타 서브넷만)
+ */
+private fun sameSubnetAsLocal(host: String): Boolean {
+    val h = ipToLong(host) ?: return false
+    val ifaces = NetworkInterface.getNetworkInterfaces() ?: return false
+    for (nif in ifaces.asSequence()) {
+        if (!nif.isUp || nif.isLoopback) continue
+        for (addr in nif.interfaceAddresses) {
+            val a = addr.address?.hostAddress ?: continue
+            val self = ipToLong(a) ?: continue
+            val prefix = addr.networkPrefixLength
+            if (prefix !in 1..32) continue
+            val mask = (-1L shl (32 - prefix)) and 0xFFFFFFFFL
+            if ((self and mask) == (h and mask)) return true
+        }
+    }
+    return false
+}
+
+private fun Application.relayRoutes(context: Context, serverRef: RelayServer) {
+    // 보안 파이프라인: IP 게이트 → Basic Auth
+    intercept(ApplicationCallPipeline.Plugins) {
+        val s = serverRef.settings
+        val host = runCatching { call.request.origin.remoteHost }.getOrDefault("?")
+
+        if (!isLocalHost(host) && !sameSubnetAsLocal(host)) {
+            when {
+                DeviceGate.isDenied(host) -> {
+                    DebugLogger.w("Security", "차단 세션 기기 접속 거부 $host ${call.request.path()}")
+                    call.respondText("거부된 기기입니다", ContentType.Text.Plain, HttpStatusCode.Forbidden)
+                    finish()
+                    return@intercept
+                }
+                host !in s.allowedIps -> {
+                    val allowed = DeviceGate.awaitDecision(host)
+                    if (!allowed) {
+                        call.respondText("거부된 기기입니다", ContentType.Text.Plain, HttpStatusCode.Forbidden)
+                        finish()
+                        return@intercept
+                    }
+                    DebugLogger.i("Security", "기기 허가됨 $host")
+                }
+            }
+        }
+
+        if (s.webAuthEnabled && s.webPassword.isNotEmpty()) {
+            val expected = "Basic " + Base64.getEncoder()
+                .encodeToString("${s.webUser}:${s.webPassword}".toByteArray())
+            if (call.request.headers[HttpHeaders.Authorization] != expected) {
+                DebugLogger.w("Security", "인증 실패 from=$host ${call.request.path()} (E-AND-DOWN-1003)")
+                call.response.header(HttpHeaders.WWWAuthenticate, "Basic realm=\"DroidRelay\"")
+                call.respondText("인증 필요", ContentType.Text.Plain, HttpStatusCode.Unauthorized)
+                finish()
+            }
+        }
+    }
+
     routing {
-        get("/") {
-            DebugLogger.d("Http", "${call.request.httpMethod.value} / 대시보드 요청")
-            call.respondText(WebAssets.dashboardHtml, ContentType.Text.Html)
+        get("/") { call.respondText(WebAssets.dashboardHtml, ContentType.Text.Html) }
+
+        get("/api/info") {
+            val dir = RelayApp.get(context).workDir
+            val stat = runCatching { StatFs(dir.path) }.getOrNull()
+            val jobs = JobsRepository.all()
+            val info = JSONObject().apply {
+                put("ip", lanAddress() ?: JSONObject.NULL)
+                put("port", serverRef.port)
+                put("version", "0.2")
+                put("storageFree", stat?.availableBytes ?: JSONObject.NULL)
+                put("storageTotal", stat?.totalBytes ?: JSONObject.NULL)
+                put("running", jobs.count { it.state == JobState.RUNNING })
+                put("speedTotalBps", jobs.filter { it.state == JobState.RUNNING }.sumOf { it.speedBps })
+            }
+            call.respondText(info.toString(), ContentType.Application.Json)
         }
 
         get("/api/jobs") {
-            DebugLogger.d("Http", "GET /api/jobs (${JobsRepository.all().size}건)")
             val arr = JSONArray()
             JobsRepository.all().forEach { j ->
                 arr.put(JSONObject().apply {
@@ -104,6 +228,7 @@ private fun Application.relayRoutes(context: Context) {
                     put("progress", j.progress.toDouble())
                     put("downloadedBytes", j.downloadedBytes)
                     put("totalBytes", j.totalBytes)
+                    put("speedBps", j.speedBps)
                     put("errorMessage", j.errorMessage ?: JSONObject.NULL)
                 })
             }
@@ -114,10 +239,7 @@ private fun Application.relayRoutes(context: Context) {
             val body = call.receiveText()
             val url = try { JSONObject(body).optString("url") } catch (_: Exception) { "" }
             if (!url.startsWith("http://") && !url.startsWith("https://")) {
-                DebugLogger.w(
-                    "Http",
-                    "POST 거부 — 유효하지 않은 URL (E-AND-DOWN-1003) body='${body.take(80)}'",
-                )
+                DebugLogger.w("Http", "POST 거부 — 유효하지 않은 URL (E-AND-DOWN-1003) body='${body.take(80)}'")
                 call.respondText(
                     "E-AND-DOWN-1003: 유효한 http(s) URL이 아닙니다",
                     ContentType.Text.Plain,
@@ -126,7 +248,7 @@ private fun Application.relayRoutes(context: Context) {
                 return@post
             }
             val job = RelayApp.get(context).enqueue(url.trim())
-            DebugLogger.i("Http", "POST 수락 id=${job.id}")
+            DebugLogger.i("Http", "POST 수락 id=${job.id} file='${job.filename}'")
             call.respondText(
                 JSONObject().put("id", job.id).toString(),
                 ContentType.Application.Json,
@@ -134,15 +256,23 @@ private fun Application.relayRoutes(context: Context) {
             )
         }
 
+        post("/api/jobs/{id}/{action}") {
+            val id = call.parameters["id"]!!
+            val action = call.parameters["action"]
+            val engine = RelayApp.get(context)
+            when (action) {
+                "pause" -> { engine.pause(id); call.respondText("ok") }
+                "resume" -> { engine.resume(id); call.respondText("ok") }
+                else -> call.respondText("지원 없는 동작", ContentType.Text.Plain, HttpStatusCode.BadRequest)
+            }
+        }
+
         delete("/api/jobs/{id}") {
             val id = call.parameters["id"]!!
             when (JobsRepository.get(id)) {
-                null -> {
-                    DebugLogger.w("Http", "DELETE 실패(대상 없음) id=$id")
-                    call.respondText("없음", ContentType.Text.Plain, HttpStatusCode.NotFound)
-                }
+                null -> call.respondText("없음", ContentType.Text.Plain, HttpStatusCode.NotFound)
                 else -> {
-                    DebugLogger.i("Http", "DELETE 처리 id=$id")
+                    DebugLogger.i("Http", "DELETE id=$id")
                     RelayApp.get(context).cancel(id)
                     JobsRepository.remove(id)
                     call.respondText("ok")
@@ -155,18 +285,14 @@ private fun Application.relayRoutes(context: Context) {
             val job = JobsRepository.get(id)
             val file = job?.let { RelayApp.get(context).doneFile(it) }
             when {
-                job == null || file == null -> {
-                    DebugLogger.w("Http", "파일 404 id=$id")
+                job == null || file == null ->
                     call.respondText("404 없음", ContentType.Text.Plain, HttpStatusCode.NotFound)
-                }
-                job.state != JobState.DONE -> {
-                    DebugLogger.w("Http", "미완료 파일 요청 id=$id state=${job.state} → 409")
+                job.state != JobState.DONE ->
                     call.respondText(
                         "아직 완료되지 않았습니다 (${job.state})",
                         ContentType.Text.Plain,
                         HttpStatusCode.Conflict,
                     )
-                }
                 else -> {
                     DebugLogger.d(
                         "Http",
@@ -186,7 +312,6 @@ private suspend fun ApplicationCall.serveFile(file: File, jobId: String) {
 
     val range = RangeParser.parse(request.headers[HttpHeaders.Range], total)
     if (range.invalid) {
-        DebugLogger.w("Serve", "416 범위 불가 id=$jobId range='${request.headers[HttpHeaders.Range]}' total=$total (E-AND-DOWN-1003)")
         response.header(HttpHeaders.ContentRange, "bytes */$total")
         respondText("", status = HttpStatusCode.RequestedRangeNotSatisfiable)
         return
@@ -221,7 +346,6 @@ private suspend fun ApplicationCall.serveFile(file: File, jobId: String) {
     )
 }
 
-/** HTTP Range 헤더 파서 (순수 로직 — 단위 테스트 대상) */
 internal object RangeParser {
     data class Result(val from: Long, val to: Long, val partial: Boolean, val invalid: Boolean)
 

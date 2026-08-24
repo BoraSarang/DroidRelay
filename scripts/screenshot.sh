@@ -5,7 +5,7 @@ set -e
 CMD="${1:-android}"
 NAME="${2:-main}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-VER="0.1"
+VER="0.2"
 
 if [ "$CMD" != "android" ]; then echo "지원: android"; exit 1; fi
 

@@ -1,20 +1,29 @@
 # Changelog
 
-## [0.1.0] - 2026-08-25
+## [0.2.0] - 2026-08-25
+
+### Changed [android]
+- **디자인 시스템 전면 개편 (material-3 감사 기반)**: 하드코딩 색상 15곳+ 제거 → `MaterialTheme.colorScheme` 토큰화
+- **테마 3모드 지원**: 시스템 / 라이트 / 다크 (설정에서 선택, DataStore 저장)
+- **Material You 동적 색상**: Android 12+ 배경화면 기반 색상 옵션 추가
+- 라이트/다크 명암비 준수 — 서버 주소 등 안 보이던 텍스트 문제 해결
+- 하단 NavigationBar 3탭 구조: 다운로드 / 파일 / 설정
 
 ### Added [android]
-- DroidRelay 첫 출시: LTE 릴레이 다운로드 서버 앱
-- 내장 HTTP 서버(Ktor, :8080): 웹 대시보드(한국어) + 관리 API + 파일 서빙
-- Range(206 Partial Content) 지원 — 끊긴 지점부터 이어받기
-- OkHttp 다운로드 엔진: 동시 2개 큐, 자동 재시도 3회, .part 이어받기
-- 포그라운드 서비스(dataSync) + WakeLock — 화면 꺼짐에도 유지
-- 완료/실패 시스템 알림, MediaStore 게시(Downloads/DroidRelay)
-- Compose MD3 UI: 접속 주소·QR 카드, 작업 목록·진행률
-- 적응형 아이콘 + Android 13 테마 아이콘(monochrome)
-- 단위 테스트 18개(RangeParser/JobsRepository), ktlint 통합
+- 설정 화면: 포트 변경(유효성 검사+서버 무중단 재시작), 동시 다운로드 수(1~4), 속도 제한(스로틀), 웹 접속 암호(HTTP Basic), 알림 토글
+- 다운로드 중 알림 진행바 + 실시간 속도(KB/s) 표시
+- 작업 일시정지/재개 (.part 유지)
+- 저장공간 여유/전체 표시 (앱 카드 + 웹 대시보드 `GET /api/info`)
+- 작업 목록 영구 저장(jobs.json) — 앱 재시작 시 .part 이어받기 복원
+- 완료 파일 탭: MediaStore 조회 + 공유 인텐트 + 삭제
+- 클립보드 URL 감지 → 스낵바 추가 제안
+- 신규 기기 접속 승인 게이트: 같은 핫스팟 서브넷 자동 신뢰, 타 서브넷은 알림 허용/거부
 
 ### Fixed [android]
-- 범용 URL 파일명(`__down` 등) → `file-{호스트}-{시각}` 폴백 개선
+- 단위 테스트에서 android.util.Log 미목 문제 (`isReturnDefaultValues`)
 
-### Perf [android]
-- 저대역폭 LTE(~400KB/s) 환경 검증: 10MB 실전 다운로드 + 중단 재개 확인
+### Security [android]
+- HTTP Basic 인증 옵션, IP 화이트리스트, 세션 차단 목록
+
+## [0.1.0] - 2026-08-25
+- 초판 (v0.1 상세는 PLAN_v0.1 및 커밋 7574486 참조)

@@ -3,6 +3,7 @@ package com.borasarang.droidrelay.relay
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
@@ -14,6 +15,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
@@ -23,6 +25,8 @@ class RelayService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var wakeLock: PowerManager.WakeLock? = null
     private var server: RelayServer? = null
+    private var currentPort: Int = -1
+    private var notificationsOn = true
 
     override fun onCreate() {
         super.onCreate()
@@ -31,36 +35,85 @@ class RelayService : Service() {
         startInForeground()
         acquireWakeLock()
 
-        server = RelayServer(applicationContext).also { it.start() }
+        val settingsRepo = SettingsRepository.get(applicationContext)
+        val engine = RelayApp.get(applicationContext)
+        val persistence = JobsPersistence(applicationContext)
 
-        // 상태 전이 → 시스템 알림 (T-006)
+        // ① 설정 감시: 포트 변경 → 서버 재시작 / 알림 토글 / 서버 스냅샷 갱신
         scope.launch {
+            var lastPort = -1
+            settingsRepo.settings.collectLatest { s ->
+                notificationsOn = s.notifications
+                if (server == null) {
+                    server = RelayServer(applicationContext, s.port).also { it.updateSettings(s); it.start() }
+                    lastPort = s.port
+                } else {
+                    server?.updateSettings(s)
+                    if (s.port != lastPort) {
+                        DebugLogger.i(TAG, "포트 변경 감지 $lastPort → ${s.port} — 서버 재시작")
+                        server?.stop()
+                        server = RelayServer(applicationContext, s.port).also { it.updateSettings(s); it.start() }
+                        lastPort = s.port
+                        updateRunningNotification(s.port)
+                    }
+                }
+            }
+        }
+
+        // ② 작업 상태 → 완료/실패 알림 + 진행바 갱신 (T-105)
+        scope.launch {
+            var lastNotifUpdate = 0L
             var last: Map<String, JobState> = emptyMap()
             JobsRepository.jobs.collectLatest { jobs ->
+                // 영구 저장 디바운스 (T-107)
+                persistence.save(jobs)
+
                 val current = jobs.associate { it.id to it.state }
-                jobs.forEach { j ->
-                    if (last[j.id] == JobState.RUNNING && j.state == JobState.DONE) {
-                        DebugLogger.i(TAG, "완료 알림 발행 '${j.filename}'")
-                        notify(j, done = true)
-                    }
-                    if (last[j.id] != null && j.state == JobState.FAILED) {
-                        DebugLogger.i(TAG, "실패 알림 발행 '${j.filename}' (${j.errorCode})")
-                        notify(j, done = false)
+                if (notificationsOn) {
+                    jobs.forEach { j ->
+                        if (last[j.id] == JobState.RUNNING && j.state == JobState.DONE) {
+                            DebugLogger.i(TAG, "완료 알림 '${j.filename}'")
+                            notify(j.id.hashCode(), getString(R.string.notif_done_title), j.filename, done = true)
+                        }
+                        if (last[j.id] != null && j.state == JobState.FAILED) {
+                            DebugLogger.i(TAG, "실패 알림 '${j.filename}' (${j.errorCode})")
+                            notify(j.id.hashCode(), getString(R.string.notif_fail_title), j.filename + (j.errorMessage?.let { " — $it" } ?: ""), done = false)
+                        }
                     }
                 }
                 last = current
+
+                // 진행바 실시간 갱신 (0.7s 스로틀)
+                val now = System.currentTimeMillis()
+                if (now - lastNotifUpdate >= 700) {
+                    lastNotifUpdate = now
+                    updateProgressNotification(jobs)
+                }
             }
         }
-        DebugLogger.i(TAG, "서비스 준비 완료 — 접속: http://${lanAddress() ?: "?"}:$PORT")
+
+        // ③ 신규 기기 승인 팝업 (T-112)
+        DeviceGate.onRequest = { ip, resolve ->
+            showDeviceGateNotification(ip, resolve)
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        DebugLogger.d(TAG, "onStartCommand startId=$startId → START_STICKY")
+        when (intent?.action) {
+            ACTION_ALLOW -> {
+                val ip = intent.getStringExtra(EXTRA_IP) ?: return START_NOT_STICKY
+                scope.launch { SettingsRepository.get(this@RelayService).addAllowedIp(ip) }
+                DeviceGate.resolve(ip, allowed = true)
+            }
+            ACTION_DENY -> DeviceGate.resolve(ip(intent), allowed = false)
+        }
         return START_STICKY
     }
 
+    private fun ip(intent: Intent?) = intent?.getStringExtra(EXTRA_IP) ?: ""
+
     override fun onDestroy() {
-        DebugLogger.i(TAG, "서비스 종료 — 서버·WakeLock 해제")
+        DebugLogger.i(TAG, "서비스 종료")
         server?.stop()
         wakeLock?.takeIf { it.isHeld }?.release()
         scope.cancel()
@@ -75,7 +128,7 @@ class RelayService : Service() {
             setReferenceCounted(false)
             acquire(WAKE_TIMEOUT_MS)
         }
-        DebugLogger.d(TAG, "WakeLock 획득 (PARTIAL, ${WAKE_TIMEOUT_MS / 3600000}h)")
+        DebugLogger.d(TAG, "WakeLock 획득")
     }
 
     private fun startInForeground() {
@@ -87,29 +140,86 @@ class RelayService : Service() {
         }
     }
 
-    private fun runningNotification(ip: String?): Notification {
-        val text = if (ip != null) "http://$ip:$PORT 접속 가능" else getString(R.string.notif_running_text)
-        return Notification.Builder(this, CHANNEL_ID)
+    private fun baseNotif(): Notification.Builder =
+        Notification.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.stat_sys_download_done)
+
+    private fun runningNotification(ip: String?): Notification =
+        baseNotif()
             .setContentTitle(getString(R.string.notif_running_title))
-            .setContentText(text)
+            .setContentText(if (ip != null) "http://$ip:$PORT 접속 가능" else getString(R.string.notif_running_text))
             .setOngoing(true)
             .build()
+
+    private fun updateRunningNotification(port: Int) {
+        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        nm.notify(NOTIF_ID, runningNotification(lanAddress()?.let { "$it:$port" }))
     }
 
-    private fun notify(job: Job, done: Boolean) {
+    private fun updateProgressNotification(jobs: List<Job>) {
         val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        val title = getString(if (done) R.string.notif_done_title else R.string.notif_fail_title)
+        val running = jobs.filter { it.state == JobState.RUNNING }
+        val ip = lanAddress()
+        val totalSpeed = running.sumOf { it.speedBps }
+
+        val notif = if (running.isEmpty()) {
+            baseNotif()
+                .setContentTitle(getString(R.string.notif_running_title))
+                .setContentText("http://$ip:$PORT · 대기 중인 다운로드 없음")
+                .setOngoing(true)
+                .build()
+        } else {
+            val first = running.maxByOrNull { it.progress }!!
+            val pct = (first.progress * 100).toInt().coerceIn(0, 100)
+            baseNotif()
+                .setContentTitle("${running.size}건 다운로드 중 · ⚡ ${totalSpeed / 1024} KB/s")
+                .setContentText("${first.filename} $pct% (${fmtBytes(first.downloadedBytes)}${if (first.totalBytes > 0) "/" + fmtBytes(first.totalBytes) else ""})")
+                .setProgress(100, pct, first.totalBytes <= 0)
+                .setOngoing(true)
+                .setOnlyAlertOnce(true)
+                .build()
+        }
+        nm.notify(NOTIF_ID, notif)
+    }
+
+    private fun showDeviceGateNotification(ip: String, resolve: (Boolean) -> Unit) {
+        val allow = PendingIntent.getService(
+            this, ip.hashCode(),
+            Intent(this, RelayService::class.java).setAction(ACTION_ALLOW).putExtra(EXTRA_IP, ip),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        val deny = PendingIntent.getService(
+            this, ("deny$ip").hashCode(),
+            Intent(this, RelayService::class.java).setAction(ACTION_DENY).putExtra(EXTRA_IP, ip),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        val notif = Notification.Builder(this, CHANNEL_GATE_ID)
+            .setSmallIcon(android.R.drawable.ic_dialog_alert)
+            .setContentTitle("새 기기 접속 요청")
+            .setContentText("$ip — 이 기기를 허용할까요?")
+            .setAutoCancel(true)
+            .addAction(0, "허용", allow)
+            .addAction(0, "거부", deny)
+            .build()
+        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        nm.notify(GATE_NOTIF_PREFIX + ip.hashCode(), notif)
+
+        // 알림 액션 없이 무응답이면 대기 유지 (웹은 503 반환)
+        scope.launch {
+            delay(GATE_TIMEOUT_MS)
+            runCatching { resolve(false) }
+        }
+    }
+
+    private fun notify(id: Int, title: String, text: String, done: Boolean) {
+        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         val notif = Notification.Builder(this, CHANNEL_ID)
-            .setSmallIcon(
-                if (done) android.R.drawable.stat_sys_download_done
-                else android.R.drawable.stat_notify_error,
-            )
+            .setSmallIcon(if (done) android.R.drawable.stat_sys_download_done else android.R.drawable.stat_notify_error)
             .setContentTitle(title)
-            .setContentText(job.filename + (job.errorMessage?.let { " — $it" } ?: ""))
+            .setContentText(text)
             .setAutoCancel(true)
             .build()
-        nm.notify(job.id.hashCode(), notif)
+        nm.notify(id, notif)
     }
 
     private fun createChannel() {
@@ -117,17 +227,24 @@ class RelayService : Service() {
         nm.createNotificationChannel(
             NotificationChannel(CHANNEL_ID, getString(R.string.notif_channel_name), NotificationManager.IMPORTANCE_LOW),
         )
-        DebugLogger.d(TAG, "알림 채널 생성/확인")
+        nm.createNotificationChannel(
+            NotificationChannel(CHANNEL_GATE_ID, "기기 접속 승인", NotificationManager.IMPORTANCE_HIGH),
+        )
     }
 
     companion object {
         const val PORT = 8080
         private const val CHANNEL_ID = "relay_status"
+        private const val CHANNEL_GATE_ID = "relay_gate"
         private const val NOTIF_ID = 1001
         private const val WAKE_TIMEOUT_MS = 24L * 60 * 60 * 1000
+        private const val GATE_TIMEOUT_MS = 60_000L
+        private const val GATE_NOTIF_PREFIX = 20000
+        const val ACTION_ALLOW = "com.borasarang.droidrelay.ALLOW"
+        const val ACTION_DENY = "com.borasarang.droidrelay.DENY"
+        const val EXTRA_IP = "ip"
 
         fun start(context: Context) {
-            DebugLogger.i("App", "RelayService 시작 요청")
             context.startForegroundService(Intent(context, RelayService::class.java))
         }
 
@@ -135,4 +252,10 @@ class RelayService : Service() {
             context.stopService(Intent(context, RelayService::class.java))
         }
     }
+}
+
+private fun fmtBytes(n: Long): String = when {
+    n < 1_048_576 -> "${n / 1024} KB"
+    n < 1_073_741_824 -> String.format("%.1f MB", n / 1_048_576.0)
+    else -> String.format("%.2f GB", n / 1_073_741_824.0)
 }

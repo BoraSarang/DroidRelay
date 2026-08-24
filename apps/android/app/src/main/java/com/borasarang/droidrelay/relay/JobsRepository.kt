@@ -5,7 +5,7 @@ import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
-enum class JobState { QUEUED, RUNNING, DONE, FAILED, CANCELED }
+enum class JobState { QUEUED, RUNNING, PAUSED, DONE, FAILED, CANCELED }
 
 data class Job(
     val id: String,
@@ -15,6 +15,7 @@ data class Job(
     val progress: Float = 0f,
     val downloadedBytes: Long = 0L,
     val totalBytes: Long = -1L,
+    val speedBps: Long = 0L,
     val errorCode: String? = null,
     val errorMessage: String? = null,
 )
@@ -63,8 +64,7 @@ object JobsRepository {
         refresh()
     }
 
-    fun remove(id: String): Boolean {
-        val removed = map.remove(id)
+    fun remove(id: String): Boolean {        val removed = map.remove(id)
         if (removed != null) {
             DebugLogger.i(TAG, "작업 삭제 id=$id '${removed.filename}' state=${removed.state}")
         } else {
@@ -113,6 +113,13 @@ object JobsRepository {
     private val GENERIC_NAMES = setOf(
         "__down", "download", "index", "file", "get", "blob", "raw", "dl",
     )
+
+    /** 복원용 — 상태 보존하여 직접 등록 (엔진 초기화 시 jobs.json 로드) */
+    fun restore(job: Job) {
+        map[job.id] = job
+        refresh()
+        DebugLogger.d(TAG, "복원 등록 id=${job.id} '${job.filename}' state=${job.state}")
+    }
 
     private fun refresh() {
         _jobs.value = map.values.sortedByDescending { it.id }
