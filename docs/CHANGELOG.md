@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.5.0] - 2026-08-25
+
+### Added [macos]
+- **macOS 네이티브 클라이언트**: DroidRelayClient 메뉴바 앱 (MenuBarExtra .window)
+- **서버 자동 스캔**: 실행 시 LAN /24 서브넷 동시 프로브 (128 동시, 0.7초 타임아웃)
+- **수동 서버 입력**: IP:port 직접 입력으로 연결 (설정에 저장)
+- **다운로드 관리**: URL 추가 → 잡 목록 → 진행률/속도 표시 → 일시정지/재개/삭제
+- **⬇ 받기**: 완료된 파일을 로컬 저장 폴더로 스트리밍 (Range 이어받기, .part 임시파일)
+- **토렌트 관리**: magnet 링크 입력 + .torrent 파일 추가 → 목록 표시 + 제어
+- **보관함 탐색**: 서버 /sdcard/Download/DroidRelay 폴더/파일 브라우징
+- **보관함 관리**: 폴더 생성, 이름 변경, 잘라내기/붙여넣기(이동), 삭제, 파일 업로드
+- **설정**: 저장 폴더 지정, 자동 스캔 토글, Basic Auth 인증, 로그인 시 실행(SMAppService), 메뉴바 속도 표시
+- **디버그 로그 창**: os.Logger + 500줄 순환 버퍼, 전체 복사
+- **앱 아이콘**: CoreGraphics + iconutil 생성 (다운로드 화살표 디자인)
+- **테스트**: Models JSON 디코딩 + Discovery URL 생성 + 포맷 계산 등 10건
+
 ## [0.4.0] - 2026-08-25
 
 ### Added [android]

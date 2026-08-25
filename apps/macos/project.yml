@@ -1,0 +1,57 @@
+name: DroidRelayClient
+options:
+  bundleIdPrefix: com.borasarang
+  deploymentTarget:
+    macOS: "14.0"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    SWIFT_VERSION: "5.10"
+    MACOSX_DEPLOYMENT_TARGET: "14.0"
+    CODE_SIGN_IDENTITY: "-"
+    CODE_SIGN_STYLE: Manual
+    DEVELOPMENT_TEAM: ""
+
+targets:
+  DroidRelayClient:
+    type: application
+    platform: macOS
+    sources:
+      - path: DroidRelayClient/Sources
+      - path: DroidRelayClient/Resources
+        buildPhase: resources
+    info:
+      path: DroidRelayClient/Info.plist
+      properties:
+        CFBundleName: DroidRelayClient
+        CFBundleDisplayName: DroidRelay
+        CFBundleShortVersionString: 0.1.0
+        CFBundleVersion: 1
+        LSMinimumSystemVersion: "14.0"
+        LSUIElement: true
+        CFBundleIconFile: AppIcon
+        NSHumanReadableCopyright: "© 2026 BoRaSaRang"
+        NSLocalNetworkUsageDescription: "같은 네트워크의 DroidRelay 서버(휴대폰)를 찾아 연결하기 위해 로컬 네트워크 접근이 필요합니다."
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+
+  DroidRelayClientTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: Tests
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: "YES"
+    dependencies:
+      - target: DroidRelayClient
+
+schemes:
+  DroidRelayClient:
+    build:
+      targets:
+        DroidRelayClient: all
+    test:
+      targets:
+        - DroidRelayClientTests

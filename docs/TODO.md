@@ -38,6 +38,23 @@
 | T-314 | 스크린샷 + CHANGELOG + 커밋 | ✅ |
 | T-315 | GitHub Release + APK 배포 | 🔄 |
 
+## v0.5 (2026-08-25) — macOS 네이티브 클라이언트 (메뉴바)
+
+| 항목 | 내용 | 상태 |
+|------|------|------|
+| T-401 | project.yml(xcodegen) + 디렉터리 골격 | ✅ |
+| T-402 | Models + RelayAPI (18 엔드포인트 클라이언트) | ✅ |
+| T-403 | DebugLog (os.Logger + 순환버퍼) | ✅ |
+| T-404 | ServerDiscovery (/24 서브넷 스캔) | ✅ |
+| T-405 | AppState (폴링 1초, 자동재연결) | ✅ |
+| T-406 | TransferManager (Range 이어받기 + 완료 알림) | ✅ |
+| T-407 | MenuBarExtra 팝오버 + 다운로드/토렌트/보관함 3탭 UI | ✅ |
+| T-408 | Settings (주소/자동스캔/저장폴더/BasicAuth/로그인실행/속도표시) | ✅ |
+| T-409 | 앱 아이콘 생성 스크립트 → icns | ✅ |
+| T-410 | XCTest (Models 파싱, Range, Discovery) | ✅ |
+| T-411 | build_and_run.sh macos 확장 + ~/Applications 배치 | ✅ |
+| T-412 | CHANGELOG + 세션로그 + 커밋 | ✅ |
+
 ## v0.2 아카이브
 T-101~T-115 전부 완료 (커밋 5956cfc).
 
