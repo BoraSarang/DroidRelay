@@ -35,7 +35,7 @@
 | T-311 | 웹 대시보드 Torrent API | ✅ |
 | T-312 | Torrent 알림 (진행률 + 완료) | ✅ |
 | T-313 | 테스트 + ktlint + 크래시 검증 | ✅ |
-| T-314 | 스크린샷 + CHANGELOG + 커밋 | 🔄 |
+| T-314 | 스크린샷 + CHANGELOG + 커밋 | ✅ |
 | T-315 | GitHub Release + APK 배포 | 🔄 |
 
 ## v0.2 아카이브
