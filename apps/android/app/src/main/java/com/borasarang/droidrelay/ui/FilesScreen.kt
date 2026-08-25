@@ -1,203 +1,278 @@
 package com.borasarang.droidrelay.ui
 
 import android.content.Intent
-import android.provider.MediaStore
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ContentCut
+import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.InsertDriveFile
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.borasarang.droidrelay.relay.DebugLogger
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
 
-private data class PublishedFile(
-    val uri: android.net.Uri,
+private data class StorageItem(
     val name: String,
-    val size: Long,
-    val dateModified: Long,
+    val isDir: Boolean,
+    val size: Long = 0,
+    val count: Int = 0,
 )
 
-/** 확장자별 아이콘·색상 매핑 (T-117) */
-private data class FileTypeStyle(val icon: String, val color: Color)
-
-private fun fileTypeOf(name: String): FileTypeStyle {
-    val ext = name.substringAfterLast('.', "").lowercase()
-    return when (ext) {
-        "mp4", "mkv", "mov", "avi", "wmv", "webm" -> FileTypeStyle("🎬", Color(0xFFE53935))
-        "mp3", "flac", "wav", "aac", "ogg", "m4a" -> FileTypeStyle("🎵", Color(0xFF8E24AA))
-        "jpg", "jpeg", "png", "webp", "gif", "bmp", "heic" -> FileTypeStyle("🖼", Color(0xFF1E88E5))
-        "pdf", "doc", "docx", "txt", "hwp", "pptx", "xlsx" -> FileTypeStyle("📄", Color(0xFFFF8F00))
-        "zip", "7z", "tar", "gz", "rar" -> FileTypeStyle("📦", Color(0xFF43A047))
-        "apk", "exe", "dmg", "deb", "rpm" -> FileTypeStyle("⚙", Color(0xFF546E7A))
-        else -> FileTypeStyle("📎", Color(0xFF90A4AE))
-    }
-}
-
-private fun fmtBytesFs(n: Long): String = when {
+private fun fmtBytesS(n: Long): String = when {
     n < 1_048_576 -> "${n / 1024} KB"
     n < 1_073_741_824 -> String.format("%.1f MB", n / 1_048_576.0)
     else -> String.format("%.2f GB", n / 1_073_741_824.0)
 }
 
-private fun fmtDate(millis: Long): String {
-    if (millis <= 0) return ""
-    val sdf = SimpleDateFormat("MM/dd HH:mm", Locale.KOREA)
-    return sdf.format(Date(millis))
-}
+private val DL_ROOT = File("/sdcard/Download/DroidRelay")
 
 @Composable
 fun FilesScreen() {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val snackbarHostState = remember { SnackbarHostState() }
     val cs = MaterialTheme.colorScheme
-    val files = remember { mutableStateListOf<PublishedFile>() }
 
-    // 삭제 확인 다이얼로그 상태
-    val deleteTarget = remember { mutableStateOf<PublishedFile?>(null) }
-    // 이름변경 다이얼로그 상태
-    val renameTarget = remember { mutableStateOf<PublishedFile?>(null) }
+    val currentPath = remember { mutableStateOf("") }
+    val items = remember { mutableStateListOf<StorageItem>() }
+
+    val showNewFolder = remember { mutableStateOf(false) }
+    val newFolderName = remember { mutableStateOf("") }
+
+    val renameTarget = remember { mutableStateOf<StorageItem?>(null) }
     val renameText = remember { mutableStateOf("") }
 
+    val deleteTarget = remember { mutableStateOf<StorageItem?>(null) }
+
+    val cutItem = remember { mutableStateOf<StorageItem?>(null) }
+
     val refresh = {
-        files.clear()
-        runCatching {
-            val resolver = context.contentResolver
-            val collection = MediaStore.Downloads.EXTERNAL_CONTENT_URI
-            val projection = arrayOf(
-                MediaStore.Downloads._ID,
-                MediaStore.Downloads.DISPLAY_NAME,
-                MediaStore.Downloads.SIZE,
-                MediaStore.Downloads.DATE_MODIFIED,
-            )
-            resolver.query(
-                collection,
-                projection,
-                "${MediaStore.Downloads.RELATIVE_PATH} LIKE ?",
-                arrayOf("%Download/DroidRelay%"),
-                "${MediaStore.Downloads.DATE_MODIFIED} DESC",
-            )?.use { c ->
-                while (c.moveToNext()) {
-                    files += PublishedFile(
-                        uri = android.net.Uri.withAppendedPath(collection, c.getLong(0).toString()),
-                        name = c.getString(1) ?: "(이름 없음)",
-                        size = c.getLong(2),
-                        dateModified = c.getLong(3) * 1000,
+        scope.launch(Dispatchers.IO) {
+            runCatching {
+                val dir = if (currentPath.value.isEmpty()) DL_ROOT else File(DL_ROOT, currentPath.value)
+                if (!dir.exists()) dir.mkdirs()
+                val list = dir.listFiles()?.sortedWith(
+                    compareByDescending<File> { it.isDirectory }.thenBy { it.name }
+                )?.map { f ->
+                    StorageItem(
+                        name = f.name,
+                        isDir = f.isDirectory,
+                        size = if (f.isFile) f.length() else 0,
+                        count = if (f.isDirectory) (f.listFiles()?.size ?: 0) else 0,
                     )
+                } ?: emptyList()
+                withContext(Dispatchers.Main) {
+                    items.clear()
+                    items.addAll(list)
                 }
-            }
-        }.onFailure { DebugLogger.e("Files", "파일 목록 조회 실패", it) }
+            }.onFailure { DebugLogger.e("Storage", "목록 조회 실패", it) }
+        }
     }
 
-    androidx.compose.runtime.LaunchedEffect(Unit) { refresh.invoke() }
+    LaunchedEffect(currentPath.value) { refresh.invoke() }
 
-    LazyColumn(
-        modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        item {
+    fun fullPath(name: String) = if (currentPath.value.isEmpty()) name else "${currentPath.value}/$name"
+
+    fun toast(msg: String) { scope.launch { snackbarHostState.showSnackbar(msg) } }
+
+    Column(Modifier.fillMaxSize()) {
+        // 상단 브레드크럼
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (currentPath.value.isNotEmpty()) {
+                IconButton(onClick = {
+                    currentPath.value = currentPath.value.substringBeforeLast('/')
+                }) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, "뒤로")
+                }
+            }
+            val parts = currentPath.value.split('/').filter { it.isNotEmpty() }
             Text(
-                "완료된 파일 (${files.size}) · Download/DroidRelay",
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                style = MaterialTheme.typography.labelMedium,
+                "📱 보관함",
+                fontWeight = FontWeight.SemiBold,
+                color = cs.onSurface,
+                modifier = Modifier.clickable { currentPath.value = "" },
             )
+            parts.forEachIndexed { idx, part ->
+                Text(" / ", color = cs.onSurfaceVariant)
+                Text(
+                    part,
+                    color = cs.primary,
+                    modifier = Modifier.clickable {
+                        currentPath.value = parts.take(idx + 1).joinToString("/")
+                    },
+                )
+            }
         }
-        items(files.size, key = { files[it].uri.toString() }) { idx ->
-            val f = files[idx]
-            val style = fileTypeOf(f.name)
-            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)) {
-                Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                    // 확장자 아이콘
-                    Text(style.icon, modifier = Modifier.size(32.dp))
-                    Spacer(Modifier.padding(start = 8.dp))
-                    Column(Modifier.weight(1f)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(f.name, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, color = cs.onSurface)
+
+        // 도구 모음
+        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            IconButton(onClick = { showNewFolder.value = true }) {
+                Icon(Icons.Filled.CreateNewFolder, "폴더 만들기", tint = cs.primary)
+            }
+            if (cutItem.value != null) {
+                IconButton(onClick = {
+                    val cut = cutItem.value ?: return@IconButton
+                    scope.launch(Dispatchers.IO) {
+                        runCatching {
+                            val src = File(DL_ROOT, fullPath(cut.name))
+                            val dstDir = if (currentPath.value.isEmpty()) DL_ROOT else File(DL_ROOT, currentPath.value)
+                            val dst = File(dstDir, cut.name)
+                            src.copyTo(dst, overwrite = true)
+                            src.deleteRecursively()
+                            cutItem.value = null
+                            withContext(Dispatchers.Main) { refresh.invoke() }
+                            toast("이동 완료")
+                        }.onFailure { toast("이동 실패") }
+                    }
+                }) {
+                    Icon(Icons.Filled.Add, "붙여넣기", tint = cs.tertiary)
+                }
+            }
+        }
+
+        // 파일 목록
+        LazyColumn(
+            Modifier.weight(1f).padding(horizontal = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            items(items.size, key = { items[it].name + items[it].isDir }) { idx ->
+                val item = items[idx]
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = cs.surfaceContainerHigh),
+                    modifier = Modifier.fillMaxWidth().clickable {
+                        if (item.isDir) {
+                            currentPath.value = fullPath(item.name)
                         }
-                        Spacer(Modifier.height(2.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text(fmtBytesFs(f.size), style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
-                            if (f.dateModified > 0) {
-                                Text(fmtDate(f.dateModified), style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
+                    },
+                ) {
+                    Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            if (item.isDir) Icons.Filled.Folder else Icons.Filled.InsertDriveFile,
+                            null,
+                            tint = if (item.isDir) cs.tertiary else cs.onSurfaceVariant,
+                            modifier = Modifier.size(28.dp),
+                        )
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(item.name, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis, color = cs.onSurface)
+                            Text(
+                                if (item.isDir) "${item.count}개" else fmtBytesS(item.size),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = cs.onSurfaceVariant,
+                            )
+                        }
+                        // 이름 변경
+                        IconButton(onClick = { renameTarget.value = item; renameText.value = item.name }) {
+                            Icon(Icons.Filled.Edit, "이름변경", tint = cs.onSurfaceVariant, modifier = Modifier.size(20.dp))
+                        }
+                        // 잘라내기 (파일만)
+                        if (!item.isDir) {
+                            IconButton(onClick = { cutItem.value = item; toast("${item.name} 잘라냄") }) {
+                                Icon(Icons.Filled.ContentCut, "잘라내기", tint = cs.onSurfaceVariant, modifier = Modifier.size(20.dp))
+                            }
+                        }
+                        // 삭제
+                        IconButton(onClick = { deleteTarget.value = item }) {
+                            Icon(Icons.Filled.Delete, "삭제", tint = cs.error, modifier = Modifier.size(20.dp))
+                        }
+                    }
+                }
+            }
+            if (items.isEmpty()) {
+                item { Text("비어 있습니다", color = cs.onSurfaceVariant, modifier = Modifier.padding(top = 40.dp)) }
+            }
+        }
+
+        SnackbarHost(hostState = snackbarHostState)
+    }
+
+    // 새 폴더 다이얼로그
+    if (showNewFolder.value) {
+        AlertDialog(
+            onDismissRequest = { showNewFolder.value = false },
+            title = { Text("폴더 만들기") },
+            text = {
+                OutlinedTextField(
+                    value = newFolderName.value,
+                    onValueChange = { newFolderName.value = it },
+                    label = { Text("폴더 이름") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val name = newFolderName.value.trim()
+                    if (name.isNotBlank()) {
+                        scope.launch(Dispatchers.IO) {
+                            val dir = if (currentPath.value.isEmpty()) DL_ROOT else File(DL_ROOT, currentPath.value)
+                            val target = File(dir, name)
+                            if (target.exists()) {
+                                toast("이미 존재")
+                            } else {
+                                target.mkdirs()
+                                withContext(Dispatchers.Main) { refresh.invoke() }
+                                toast("폴더 생성: $name")
                             }
                         }
                     }
-                    IconButton(onClick = {
-                        DebugLogger.i("Files", "공유 '${f.name}'")
-                        val send = Intent(Intent.ACTION_SEND).apply {
-                            type = "application/octet-stream"
-                            putExtra(Intent.EXTRA_STREAM, f.uri)
-                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                        }
-                        context.startActivity(Intent.createChooser(send, "파일 공유"))
-                    }) { Icon(Icons.Filled.Share, "공유", tint = cs.primary) }
-                    IconButton(onClick = {
-                        renameTarget.value = f
-                        renameText.value = f.name
-                    }) { Icon(Icons.Filled.Edit, "이름변경", tint = cs.onSurfaceVariant) }
-                    IconButton(onClick = {
-                        deleteTarget.value = f
-                    }) { Icon(Icons.Filled.Delete, "삭제", tint = cs.error) }
-                }
-            }
-        }
-        if (files.isEmpty()) {
-            item { Text("아직 완료된 파일이 없습니다", color = MaterialTheme.colorScheme.onSurfaceVariant) }
-        }
-    }
-
-    // 삭제 확인 다이얼로그
-    deleteTarget.value?.let { f ->
-        AlertDialog(
-            onDismissRequest = { deleteTarget.value = null },
-            title = { Text("파일 삭제") },
-            text = { Text("'${f.name}'을(를) 정말 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.") },
-            confirmButton = {
-                TextButton(onClick = {
-                    DebugLogger.i("Files", "삭제 확인 '${f.name}'")
-                    runCatching {
-                        context.contentResolver.delete(f.uri, null, null)
-                    }.onFailure { DebugLogger.e("Files", "삭제 실패", it) }
-                    deleteTarget.value = null
-                    refresh.invoke()
-                }) { Text("삭제", color = cs.error) }
+                    showNewFolder.value = false
+                    newFolderName.value = ""
+                }) { Text("만들기") }
             },
             dismissButton = {
-                TextButton(onClick = { deleteTarget.value = null }) { Text("취소") }
+                TextButton(onClick = { showNewFolder.value = false; newFolderName.value = "" }) { Text("취소") }
             },
         )
     }
 
     // 이름변경 다이얼로그
-    renameTarget.value?.let { f ->
+    renameTarget.value?.let { item ->
         AlertDialog(
             onDismissRequest = { renameTarget.value = null },
             title = { Text("이름변경") },
@@ -205,7 +280,7 @@ fun FilesScreen() {
                 OutlinedTextField(
                     value = renameText.value,
                     onValueChange = { renameText.value = it },
-                    label = { Text("파일 이름") },
+                    label = { Text("이름") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -213,21 +288,43 @@ fun FilesScreen() {
             confirmButton = {
                 TextButton(onClick = {
                     val newName = renameText.value.trim()
-                    if (newName.isNotBlank() && newName != f.name) {
-                        DebugLogger.i("Files", "이름변경 '${f.name}' → '$newName'")
-                        val values = android.content.ContentValues().apply {
-                            put(MediaStore.Downloads.DISPLAY_NAME, newName)
+                    if (newName.isNotBlank() && newName != item.name) {
+                        scope.launch(Dispatchers.IO) {
+                            val src = File(DL_ROOT, fullPath(item.name))
+                            val dst = File(DL_ROOT, fullPath(newName))
+                            if (dst.exists()) toast("이미 존재") else {
+                                src.renameTo(dst)
+                                withContext(Dispatchers.Main) { refresh.invoke() }
+                            }
                         }
-                        runCatching {
-                            context.contentResolver.update(f.uri, values, null, null)
-                        }.onFailure { DebugLogger.e("Files", "이름변경 실패", it) }
-                        renameTarget.value = null
-                        refresh.invoke()
                     }
+                    renameTarget.value = null
                 }) { Text("변경") }
             },
             dismissButton = {
                 TextButton(onClick = { renameTarget.value = null }) { Text("취소") }
+            },
+        )
+    }
+
+    // 삭제 확인 다이얼로그
+    deleteTarget.value?.let { item ->
+        AlertDialog(
+            onDismissRequest = { deleteTarget.value = null },
+            title = { Text("삭제") },
+            text = { Text("'${item.name}'을(를) 정말 삭제하시겠습니까?") },
+            confirmButton = {
+                TextButton(onClick = {
+                    scope.launch(Dispatchers.IO) {
+                        val target = File(DL_ROOT, fullPath(item.name))
+                        target.deleteRecursively()
+                        withContext(Dispatchers.Main) { refresh.invoke() }
+                    }
+                    deleteTarget.value = null
+                }) { Text("삭제", color = cs.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { deleteTarget.value = null }) { Text("취소") }
             },
         )
     }
