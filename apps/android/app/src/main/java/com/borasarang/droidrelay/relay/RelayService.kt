@@ -46,14 +46,26 @@ class RelayService : Service() {
             settingsRepo.settings.collectLatest { s ->
                 notificationsOn = s.notifications
                 if (server == null) {
-                    server = RelayServer(applicationContext, s.port).also { it.updateSettings(s); it.start() }
+                    try {
+                        server = RelayServer(applicationContext, s.port).also { it.updateSettings(s); it.start() }
+                        val url = lanAddress()?.let { "http://$it:${s.port}" }
+                        settingsRepo.updateServerState(ServerState(running = true, port = s.port, url = url))
+                    } catch (e: Exception) {
+                        settingsRepo.updateServerState(ServerState(running = false, port = s.port, error = "포트 ${s.port}이(가) 이미 사용 중입니다"))
+                    }
                     lastPort = s.port
                 } else {
                     server?.updateSettings(s)
                     if (s.port != lastPort) {
                         DebugLogger.i(TAG, "포트 변경 감지 $lastPort → ${s.port} — 서버 재시작")
                         server?.stop()
-                        server = RelayServer(applicationContext, s.port).also { it.updateSettings(s); it.start() }
+                        try {
+                            server = RelayServer(applicationContext, s.port).also { it.updateSettings(s); it.start() }
+                            val url = lanAddress()?.let { "http://$it:${s.port}" }
+                            settingsRepo.updateServerState(ServerState(running = true, port = s.port, url = url))
+                        } catch (e: Exception) {
+                            settingsRepo.updateServerState(ServerState(running = false, port = s.port, error = "포트 ${s.port}이(가) 이미 사용 중입니다"))
+                        }
                         lastPort = s.port
                         updateRunningNotification(s.port)
                     }
@@ -120,7 +132,10 @@ class RelayService : Service() {
     override fun onDestroy() {
         DebugLogger.i(TAG, "서비스 종료")
         server?.stop()
+        server = null
         networkMonitor?.unregister()
+        // 서버 상태 갱신
+        SettingsRepository.get(applicationContext).updateServerState(ServerState(running = false, port = currentPort))
         // 강제종료/서비스 종료 시 즉시 영구 저장 (T-111)
         val jobs = com.borasarang.droidrelay.relay.JobsRepository.all()
         JobsPersistence(applicationContext).save(jobs)

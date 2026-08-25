@@ -8,6 +8,8 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 
@@ -15,6 +17,14 @@ enum class ThemeMode { SYSTEM, LIGHT, DARK }
 
 /** 접속 범위 (T-112: 같은 핫스팟 기본값) */
 enum class AccessScope { SUBNET_ONLY, ANY_WITH_PASSWORD, APPROVED_ONLY }
+
+/** 서버 상태 (메모리만, DataStore 불필요) */
+data class ServerState(
+    val running: Boolean = false,
+    val port: Int = 8080,
+    val url: String? = null,
+    val error: String? = null,
+)
 
 data class AppSettings(
     val port: Int = 8080,
@@ -34,6 +44,15 @@ data class AppSettings(
 private val Context.settingsDataStore by preferencesDataStore("droidrelay_settings")
 
 class SettingsRepository(private val context: Context) {
+
+    // 서버 상태 (메모리 StateFlow)
+    private val _serverState = MutableStateFlow(ServerState())
+    val serverState: StateFlow<ServerState> = _serverState
+
+    fun updateServerState(state: ServerState) {
+        _serverState.value = state
+        DebugLogger.d("Settings", "서버 상태 갱신 running=${state.running} port=${state.port} error=${state.error}")
+    }
 
     private object Keys {
         val PORT = intPreferencesKey("port")

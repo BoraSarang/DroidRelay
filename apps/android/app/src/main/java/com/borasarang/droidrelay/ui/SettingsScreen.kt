@@ -6,8 +6,12 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
@@ -23,11 +27,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.borasarang.droidrelay.relay.AccessScope
 import com.borasarang.droidrelay.relay.DebugLogger
 import com.borasarang.droidrelay.relay.RelayService
+import com.borasarang.droidrelay.relay.ServerState
 import com.borasarang.droidrelay.relay.SettingsRepository
 import com.borasarang.droidrelay.relay.ThemeMode
+import com.borasarang.droidrelay.relay.lanAddress
 import kotlinx.coroutines.launch
 
 @Composable
@@ -38,31 +45,76 @@ fun SettingsScreen(onPortChanged: (Int) -> Unit) {
     val s = settings ?: return
     val cs = MaterialTheme.colorScheme
 
-    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+    Column(
+        modifier = Modifier.verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
 
         // ── 서버 ──
         SettingSection("서버") {
             var portText by remember(s.port) { mutableStateOf(s.port.toString()) }
-            OutlinedTextField(
-                value = portText,
-                onValueChange = { portText = it.filter { c -> c.isDigit() } },
-                label = { Text("포트 (1024~65535)") },
-                singleLine = true,
-                shape = MaterialTheme.shapes.small,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+            val serverState by repo.serverState.collectAsState()
+
+            // Line 1: 포트 입력 + 랜덤 + 적용
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                OutlinedTextField(
+                    value = portText,
+                    onValueChange = { portText = it.filter { c -> c.isDigit() } },
+                    label = { Text("포트") },
+                    singleLine = true,
+                    shape = MaterialTheme.shapes.small,
+                    modifier = Modifier.weight(1f),
+                )
+                Spacer(Modifier.width(8.dp))
+                OutlinedButton(onClick = {
+                    val random = (9000..9999).random()
+                    portText = random.toString()
+                    DebugLogger.i("Settings", "랜덤 포트 생성 $random")
+                    kotlinx.coroutines.MainScope().launch {
+                        repo.setPort(random)
+                        onPortChanged(random)
+                    }
+                }) { Text("랜덤") }
+                Spacer(Modifier.width(4.dp))
                 Button(onClick = {
                     val p = portText.toIntOrNull()
                     if (p == null || p !in 1024..65535) {
                         DebugLogger.w("Settings", "포트 무효 값: $portText (E-AND-DOWN-2002)")
                     } else if (p != s.port) {
                         DebugLogger.i("Settings", "포트 변경 ${s.port} → $p")
-                        onPortChanged(p)
-                        kotlinx.coroutines.MainScope().launch { repo.setPort(p) }
+                        kotlinx.coroutines.MainScope().launch {
+                            repo.setPort(p)
+                            onPortChanged(p)
+                        }
                     }
-                }) { Text("포트 적용") }
+                }) { Text("적용") }
             }
+
+            // Line 2: 상태 표시
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                val dotColor = when {
+                    serverState.error != null -> cs.error
+                    serverState.running -> cs.primary
+                    else -> cs.onSurfaceVariant
+                }
+                Text("●", color = dotColor, fontSize = 12.sp)
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    when {
+                        serverState.error != null -> "에러: ${serverState.error}"
+                        serverState.running -> "${serverState.port} 포트로 실행 중"
+                        else -> "${serverState.port} 포트로 대기 중"
+                    },
+                    color = dotColor,
+                    style = MaterialTheme.typography.labelMedium,
+                    modifier = Modifier.weight(1f),
+                )
+                if (serverState.running && serverState.url != null) {
+                    Text(serverState.url!!, color = cs.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
+                }
+            }
+
+            // Line 3: 자동 시작
             SwitchRow("앱 실행 시 서버 자동 시작", s.autoStart) { v -> kotlinx.coroutines.MainScope().launch { repo.setAutoStart(v) } }
         }
 
