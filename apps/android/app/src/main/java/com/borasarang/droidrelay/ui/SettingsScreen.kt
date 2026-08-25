@@ -255,7 +255,7 @@ fun SettingsScreen(onPortChanged: (Int) -> Unit) {
         SettingSection("Torrent") {
             // 업로드 속도
             Text(
-                "기본 업로드 속도: ${if (s.torrentUploadLimit == 0L) "무제한" else "${s.torrentUploadLimit / 1024} KB/s"}",
+                "기본 업로드 속도: ${if (s.torrentUploadLimit == 0L) "무제한" else "${s.torrentUploadLimit / 1024} MB/s"}",
                 color = cs.onSurface,
             )
             Slider(
@@ -264,12 +264,20 @@ fun SettingsScreen(onPortChanged: (Int) -> Unit) {
                     val kbps = (v / 128).toInt() * 128
                     kotlinx.coroutines.MainScope().launch { repo.setTorrentUploadLimit(kbps) }
                 },
-                valueRange = 0f..1024f,
+                valueRange = 0f..2048f,
+                steps = 9,
             )
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                listOf("무제한", "0.1", "0.2", "0.3", "0.5", "0.7", "1.0", "1.5", "2.0", "2.0").forEach { label ->
+                    Text(label, style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
+                }
+            }
+
+            Spacer(Modifier.height(8.dp))
 
             // 다운로드 속도
             Text(
-                "기본 다운로드 속도: ${if (s.torrentDownloadLimit == 0L) "무제한" else "${s.torrentDownloadLimit / 1024} KB/s"}",
+                "기본 다운로드 속도: ${if (s.torrentDownloadLimit == 0L) "무제한" else "${s.torrentDownloadLimit / 1024} MB/s"}",
                 color = cs.onSurface,
             )
             Slider(
@@ -278,8 +286,14 @@ fun SettingsScreen(onPortChanged: (Int) -> Unit) {
                     val kbps = (v / 128).toInt() * 128
                     kotlinx.coroutines.MainScope().launch { repo.setTorrentDownloadLimit(kbps) }
                 },
-                valueRange = 0f..4096f,
+                valueRange = 0f..8192f,
+                steps = 9,
             )
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                listOf("무제한", "0.1", "0.25", "0.5", "1", "2", "3", "4", "6", "8").forEach { label ->
+                    Text(label, style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
+                }
+            }
 
             // 최대 활성 torrent
             Text("최대 활성 torrent: ${s.torrentMaxActive}개", color = cs.onSurface)

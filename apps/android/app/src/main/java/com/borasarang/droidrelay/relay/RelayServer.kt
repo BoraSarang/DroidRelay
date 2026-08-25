@@ -392,6 +392,138 @@ private fun Application.relayRoutes(context: Context, serverRef: RelayServer) {
             }
         }
 
+        // ── 보관함 API ──
+        val dlRoot = java.io.File("/sdcard/Download/DroidRelay")
+
+        get("/api/storage") {
+            val subPath = call.request.queryParameters["path"] ?: ""
+            val dir = if (subPath.isEmpty()) dlRoot else java.io.File(dlRoot, subPath)
+            if (!dir.exists() || !dir.isDirectory) {
+                call.respondText("[]", ContentType.Application.Json)
+                return@get
+            }
+            val arr = org.json.JSONArray()
+            dir.listFiles()?.sortedWith(compareByDescending<java.io.File> { it.isDirectory }.thenBy { it.name })?.forEach { f ->
+                val obj = org.json.JSONObject()
+                obj.put("name", f.name)
+                obj.put("type", if (f.isDirectory) "dir" else "file")
+                obj.put("size", if (f.isFile) f.length() else 0)
+                obj.put("count", if (f.isDirectory) (f.listFiles()?.size ?: 0) else 0)
+                arr.put(obj)
+            }
+            call.respondText(arr.toString(), ContentType.Application.Json)
+        }
+
+        post("/api/storage/mkdir") {
+            val body = call.receiveText()
+            val json = org.json.JSONObject(body)
+            val subPath = json.optString("path", "")
+            val name = json.optString("name", "")
+            if (name.isBlank()) {
+                call.respondText("""{"error":"이름 없음"}""", ContentType.Application.Json)
+                return@post
+            }
+            val dir = if (subPath.isEmpty()) dlRoot else java.io.File(dlRoot, subPath)
+            val target = java.io.File(dir, name)
+            if (target.exists()) {
+                call.respondText("""{"error":"이미 존재"}""", ContentType.Application.Json)
+            } else {
+                target.mkdirs()
+                call.respondText("""{"ok":true}""", ContentType.Application.Json)
+            }
+        }
+
+        post("/api/storage/rename") {
+            val body = call.receiveText()
+            val json = org.json.JSONObject(body)
+            val fromName = json.optString("from", "")
+            val toName = json.optString("to", "")
+            if (fromName.isBlank() || toName.isBlank()) {
+                call.respondText("""{"error":"이름 없음"}""", ContentType.Application.Json)
+                return@post
+            }
+            val fromFile = java.io.File(dlRoot, fromName)
+            val toFile = java.io.File(dlRoot, toName)
+            if (!fromFile.exists()) {
+                call.respondText("""{"error":"원본 없음"}""", ContentType.Application.Json)
+            } else if (toFile.exists()) {
+                call.respondText("""{"error":"대상 이미 존재"}""", ContentType.Application.Json)
+            } else {
+                fromFile.renameTo(toFile)
+                call.respondText("""{"ok":true}""", ContentType.Application.Json)
+            }
+        }
+
+        post("/api/storage/delete") {
+            val body = call.receiveText()
+            val json = org.json.JSONObject(body)
+            val path = json.optString("path", "")
+            val target = java.io.File(dlRoot, path)
+            if (!target.exists()) {
+                call.respondText("""{"error":"없음"}""", ContentType.Application.Json)
+            } else {
+                target.deleteRecursively()
+                call.respondText("""{"ok":true}""", ContentType.Application.Json)
+            }
+        }
+
+        post("/api/storage/move") {
+            val body = call.receiveText()
+            val json = org.json.JSONObject(body)
+            val fromName = json.optString("from", "")
+            val toDir = json.optString("to", "")
+            if (fromName.isBlank()) {
+                call.respondText("""{"error":"원본 없음"}""", ContentType.Application.Json)
+                return@post
+            }
+            val src = java.io.File(dlRoot, fromName)
+            val dstDir = if (toDir.isEmpty()) dlRoot else java.io.File(dlRoot, toDir)
+            val dst = java.io.File(dstDir, src.name)
+            if (!src.exists()) {
+                call.respondText("""{"error":"원본 없음"}""", ContentType.Application.Json)
+            } else {
+                src.copyTo(dst, overwrite = true)
+                src.deleteRecursively()
+                call.respondText("""{"ok":true}""", ContentType.Application.Json)
+            }
+        }
+
+        post("/api/storage/upload") {
+            val body = call.receiveText()
+            val json = org.json.JSONObject(body)
+            val subPath = json.optString("path", "")
+            val name = json.optString("name", "")
+            val data = json.optString("data", "")
+            if (name.isBlank() || data.isBlank()) {
+                call.respondText("""{"error":"파일 없음"}""", ContentType.Application.Json)
+                return@post
+            }
+            val dir = if (subPath.isEmpty()) dlRoot else java.io.File(dlRoot, subPath)
+            dir.mkdirs()
+            val file = java.io.File(dir, name)
+            file.writeBytes(java.util.Base64.getDecoder().decode(data))
+            call.respondText("""{"ok":true}""", ContentType.Application.Json)
+        }
+
+        get("/dl-file/{name...}") {
+            val name = call.parameters.getAll("name")?.joinToString("/") ?: ""
+            val file = java.io.File(dlRoot, name)
+            if (!file.exists() || !file.isFile) {
+                call.respondText("404 없음", ContentType.Text.Plain, HttpStatusCode.NotFound)
+            } else {
+                call.response.header(HttpHeaders.ContentDisposition, "attachment; filename=\"${file.name}\"")
+                call.respondBytesWriter(contentType = ContentType.Application.OctetStream, contentLength = file.length()) {
+                    file.inputStream().use { input ->
+                        val buf = ByteArray(64 * 1024)
+                        var read: Int
+                        while (input.read(buf).also { read = it } != -1) {
+                            writeFully(buf, 0, read)
+                        }
+                    }
+                }
+            }
+        }
+
         get("/file/{id}") {
             val id = call.parameters["id"]!!
             val job = JobsRepository.get(id)

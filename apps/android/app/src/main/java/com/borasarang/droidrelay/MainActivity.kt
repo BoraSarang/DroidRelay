@@ -154,7 +154,7 @@ fun RootApp() {
                     selected = tab == 2,
                     onClick = { tab = 2 },
                     icon = { Icon(Icons.Filled.Folder, null) },
-                    label = { Text("파일") },
+                    label = { Text("보관함") },
                 )
                 NavigationBarItem(
                     selected = tab == 3,
