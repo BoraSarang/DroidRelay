@@ -13,6 +13,9 @@ import kotlinx.coroutines.flow.map
 
 enum class ThemeMode { SYSTEM, LIGHT, DARK }
 
+/** 접속 범위 (T-112: 같은 핫스팟 기본값) */
+enum class AccessScope { SUBNET_ONLY, ANY_WITH_PASSWORD, APPROVED_ONLY }
+
 data class AppSettings(
     val port: Int = 8080,
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
@@ -25,6 +28,7 @@ data class AppSettings(
     val webPassword: String = "",
     val speedLimitKbps: Int = 0,
     val allowedIps: Set<String> = emptySet(),
+    val accessScope: AccessScope = AccessScope.SUBNET_ONLY,
 )
 
 private val Context.settingsDataStore by preferencesDataStore("droidrelay_settings")
@@ -43,6 +47,7 @@ class SettingsRepository(private val context: Context) {
         val WEB_PASS = stringPreferencesKey("web_password")
         val SPEED_LIMIT = intPreferencesKey("speed_limit_kbps")
         val ALLOWED_IPS = stringSetPreferencesKey("allowed_ips")
+        val ACCESS_SCOPE = stringPreferencesKey("access_scope")
     }
 
     val settings: Flow<AppSettings> = context.settingsDataStore.data.map { p ->
@@ -59,6 +64,8 @@ class SettingsRepository(private val context: Context) {
             webPassword = p[Keys.WEB_PASS] ?: "",
             speedLimitKbps = (p[Keys.SPEED_LIMIT] ?: 0).coerceAtLeast(0),
             allowedIps = p[Keys.ALLOWED_IPS] ?: emptySet(),
+            accessScope = runCatching { AccessScope.valueOf(p[Keys.ACCESS_SCOPE] ?: AccessScope.SUBNET_ONLY.name) }
+                .getOrDefault(AccessScope.SUBNET_ONLY),
         )
     }
 
@@ -98,6 +105,9 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun removeAllowedIp(ip: String) =
         context.settingsDataStore.edit { it[Keys.ALLOWED_IPS] = (it[Keys.ALLOWED_IPS] ?: emptySet()) - ip }
+
+    suspend fun setAccessScope(scope: AccessScope) =
+        context.settingsDataStore.edit { it[Keys.ACCESS_SCOPE] = scope.name }
 
     companion object {
         @Volatile private var instance: SettingsRepository? = null

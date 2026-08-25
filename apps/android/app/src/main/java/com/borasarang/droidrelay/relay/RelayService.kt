@@ -27,6 +27,7 @@ class RelayService : Service() {
     private var server: RelayServer? = null
     private var currentPort: Int = -1
     private var notificationsOn = true
+    private var networkMonitor: NetworkMonitor? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -96,6 +97,10 @@ class RelayService : Service() {
         DeviceGate.onRequest = { ip, resolve ->
             showDeviceGateNotification(ip, resolve)
         }
+
+        // ④ 네트워크 복구 시 FAILED 작업 자동 재시도
+        networkMonitor = NetworkMonitor(applicationContext) { engine.retryFailed() }
+        networkMonitor?.register()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -115,9 +120,21 @@ class RelayService : Service() {
     override fun onDestroy() {
         DebugLogger.i(TAG, "서비스 종료")
         server?.stop()
+        networkMonitor?.unregister()
+        // 강제종료/서비스 종료 시 즉시 영구 저장 (T-111)
+        val jobs = com.borasarang.droidrelay.relay.JobsRepository.all()
+        JobsPersistence(applicationContext).save(jobs)
         wakeLock?.takeIf { it.isHeld }?.release()
         scope.cancel()
         super.onDestroy()
+    }
+
+    /** 강제종료 직전 상태 저장 (onTaskRemoved = 사용자가 앱 스와이프/終了 시) */
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        DebugLogger.i(TAG, "onTaskRemoved → 즉시 영구 저장")
+        val jobs = com.borasarang.droidrelay.relay.JobsRepository.all()
+        JobsPersistence(applicationContext).save(jobs)
+        super.onTaskRemoved(rootIntent)
     }
 
     override fun onBind(intent: Intent?) = null
@@ -213,7 +230,7 @@ class RelayService : Service() {
 
     private fun notify(id: Int, title: String, text: String, done: Boolean) {
         val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        val notif = Notification.Builder(this, CHANNEL_ID)
+        val notif = Notification.Builder(this, CHANNEL_RESULT_ID)
             .setSmallIcon(if (done) android.R.drawable.stat_sys_download_done else android.R.drawable.stat_notify_error)
             .setContentTitle(title)
             .setContentText(text)
@@ -224,9 +241,19 @@ class RelayService : Service() {
 
     private fun createChannel() {
         val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        // 서버 실행 상태 알림 — 배지 없음
         nm.createNotificationChannel(
-            NotificationChannel(CHANNEL_ID, getString(R.string.notif_channel_name), NotificationManager.IMPORTANCE_LOW),
+            NotificationChannel(CHANNEL_ID, getString(R.string.notif_channel_name), NotificationManager.IMPORTANCE_LOW).apply {
+                setShowBadge(false)
+            },
         )
+        // 다운로드 완료/실패 알림 — 배지 표시
+        nm.createNotificationChannel(
+            NotificationChannel(CHANNEL_RESULT_ID, "다운로드 결과", NotificationManager.IMPORTANCE_DEFAULT).apply {
+                setShowBadge(true)
+            },
+        )
+        // 기기 접속 승인 알림
         nm.createNotificationChannel(
             NotificationChannel(CHANNEL_GATE_ID, "기기 접속 승인", NotificationManager.IMPORTANCE_HIGH),
         )
@@ -235,6 +262,7 @@ class RelayService : Service() {
     companion object {
         const val PORT = 8080
         private const val CHANNEL_ID = "relay_status"
+        private const val CHANNEL_RESULT_ID = "relay_result"
         private const val CHANNEL_GATE_ID = "relay_gate"
         private const val NOTIF_ID = 1001
         private const val WAKE_TIMEOUT_MS = 24L * 60 * 60 * 1000

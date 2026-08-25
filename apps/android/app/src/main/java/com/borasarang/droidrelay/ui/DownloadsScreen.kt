@@ -38,6 +38,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -64,6 +65,7 @@ import com.borasarang.droidrelay.relay.JobState
 import com.borasarang.droidrelay.relay.JobsRepository
 import com.borasarang.droidrelay.relay.RelayApp
 import com.borasarang.droidrelay.relay.RelayService
+import com.borasarang.droidrelay.relay.currentNetworkType
 import com.borasarang.droidrelay.relay.lanAddress
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.EncodeHintType
@@ -122,7 +124,7 @@ fun DownloadsScreen(onCopyAddress: (String) -> Unit) {
     }
 }
 
-/** 서버 주소·QR·저장공간 카드 */
+/** 서버 주소·QR·저장공간 카드 + 네트워크 타입 + 공유 */
 @Composable
 private fun ServerCard(onCopyAddress: (String) -> Unit) {
     val ctx = LocalContext.current
@@ -130,6 +132,15 @@ private fun ServerCard(onCopyAddress: (String) -> Unit) {
     val ip = remember { lanAddress() }
     val addr = "http://$ip:${RelayService.PORT}"
     val cs = MaterialTheme.colorScheme
+    val netType = remember { mutableStateOf(currentNetworkType(ctx)) }
+
+    // 네트워크 변화 실시간 반영 (5초 폴링)
+    LaunchedEffect(Unit) {
+        while (true) {
+            netType.value = currentNetworkType(ctx)
+            kotlinx.coroutines.delay(5000)
+        }
+    }
 
     val storage = remember {
         runCatching {
@@ -151,12 +162,40 @@ private fun ServerCard(onCopyAddress: (String) -> Unit) {
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                     )
+                    Spacer(Modifier.height(4.dp))
+                    val nt = netType.value
+                    Text(
+                        "${nt.icon} 네트워크: ${nt.label}",
+                        color = if (nt.label == "오프라인") cs.error else cs.onSurfaceVariant,
+                        style = MaterialTheme.typography.labelSmall,
+                    )
                     Spacer(Modifier.height(8.dp))
-                    Button(onClick = {
-                        val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                        cm.setPrimaryClip(ClipData.newPlainText("DroidRelay", addr))
-                        onCopyAddress(addr)
-                    }) { Text("복사") }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(onClick = {
+                            val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                            cm.setPrimaryClip(ClipData.newPlainText("DroidRelay", addr))
+                            onCopyAddress(addr)
+                        }) { Text("복사") }
+                        OutlinedButton(onClick = {
+                            val shareText = "DroidRelay 접속 주소\n$addr\nQR 코드를 스캔하거나 위 주소를 브라우저에 입력하세요."
+                            val sendIntent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                                type = "text/plain"
+                                putExtra(android.content.Intent.EXTRA_TEXT, shareText)
+                                addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            }
+                            // QR 비트맵을 jpg로 저장 후 공유
+                            qrBitmap(addr)?.let { bmp ->
+                                val file = java.io.File(ctx.cacheDir, "droidrelay_qr.jpg")
+                                file.outputStream().use { bmp.compress(android.graphics.Bitmap.CompressFormat.JPEG, 90, it) }
+                                val uri = androidx.core.content.FileProvider.getUriForFile(
+                                    ctx, "${ctx.packageName}.fileprovider", file,
+                                )
+                                sendIntent.putExtra(android.content.Intent.EXTRA_STREAM, uri)
+                                sendIntent.type = "image/jpeg"
+                            }
+                            ctx.startActivity(android.content.Intent.createChooser(sendIntent, "서버 주소 공유"))
+                        }) { Text("공유") }
+                    }
                 }
                 qrBitmap(addr)?.let { bmp ->
                     Image(bitmap = bmp.asImageBitmap(), contentDescription = "QR", modifier = Modifier.size(96.dp))

@@ -23,6 +23,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import com.borasarang.droidrelay.relay.AccessScope
 import com.borasarang.droidrelay.relay.DebugLogger
 import com.borasarang.droidrelay.relay.RelayService
 import com.borasarang.droidrelay.relay.SettingsRepository
@@ -127,6 +128,37 @@ fun SettingsScreen(onPortChanged: (Int) -> Unit) {
 
         // ── 보안 ──
         SettingSection("보안") {
+            // 접속 범위
+            Text("클라이언트 접속 범위", color = cs.onSurfaceVariant, style = MaterialTheme.typography.labelMedium)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                AccessScope.entries.forEach { scope ->
+                    val selected = s.accessScope == scope
+                    val label = when (scope) {
+                        AccessScope.SUBNET_ONLY -> "같은 핫스팟"
+                        AccessScope.ANY_WITH_PASSWORD -> "암호만 있으면"
+                        AccessScope.APPROVED_ONLY -> "승인만"
+                    }
+                    androidx.compose.material3.FilterChip(
+                        selected = selected,
+                        onClick = {
+                            DebugLogger.i("Settings", "접속 범위 변경 → $scope")
+                            kotlinx.coroutines.MainScope().launch { repo.setAccessScope(scope) }
+                        },
+                        label = { Text(label) },
+                    )
+                }
+            }
+            Text(
+                when (s.accessScope) {
+                    AccessScope.SUBNET_ONLY -> "같은 Wi-Fi/핫스팟에 연결된 기기만 접속 가능 (기본값)"
+                    AccessScope.ANY_WITH_PASSWORD -> "비밀번호를 아는 모든 기기 접속 가능"
+                    AccessScope.APPROVED_ONLY -> "허용된 IP만 접속 가능 (승인 팝업)"
+                },
+                color = cs.onSurfaceVariant,
+                style = MaterialTheme.typography.labelSmall,
+            )
+            Spacer(Modifier.height(12.dp))
+
             var authEnabled by remember(s.webAuthEnabled) { mutableStateOf(s.webAuthEnabled) }
             var user by remember(s.webUser) { mutableStateOf(s.webUser) }
             var pass by remember(s.webPassword) { mutableStateOf("") }

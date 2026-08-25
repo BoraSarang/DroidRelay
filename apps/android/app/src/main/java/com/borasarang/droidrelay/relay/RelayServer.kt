@@ -166,7 +166,14 @@ private fun Application.relayRoutes(context: Context, serverRef: RelayServer) {
         val s = serverRef.settings
         val host = runCatching { call.request.origin.remoteHost }.getOrDefault("?")
 
-        if (!isLocalHost(host) && !sameSubnetAsLocal(host)) {
+        // accessScope에 따른 클라이언트 접속 범위 제어
+        val isTrusted = when (s.accessScope) {
+            AccessScope.SUBNET_ONLY -> isLocalHost(host) || sameSubnetAsLocal(host)
+            AccessScope.ANY_WITH_PASSWORD -> true
+            AccessScope.APPROVED_ONLY -> isLocalHost(host) || host in s.allowedIps
+        }
+
+        if (!isTrusted) {
             when {
                 DeviceGate.isDenied(host) -> {
                     DebugLogger.w("Security", "차단 세션 기기 접속 거부 $host ${call.request.path()}")

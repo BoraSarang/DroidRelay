@@ -112,6 +112,20 @@ class DownloadEngine(
         scope.launch { partialFile(job).takeIf { it.exists() }?.delete() }
     }
 
+    /** 네트워크 복구 시 FAILED 작업 자동 재시도 (NetworkMonitor 콜백) */
+    fun retryFailed() {
+        val failed = JobsRepository.all().filter { it.state == JobState.FAILED }
+        if (failed.isEmpty()) return
+        DebugLogger.i(TAG, "네트워크 복구 → FAILED 작업 ${failed.size}건 재시도")
+        failed.forEach { job ->
+            JobsRepository.update(job.id) {
+                it.copy(state = JobState.QUEUED, errorMessage = null, errorCode = null)
+            }
+            pending.add(job.id)
+        }
+        tryStart()
+    }
+
     private fun tryStart() {
         while (active.get() < concurrencyTarget) {
             val id = pending.poll() ?: break
@@ -191,7 +205,7 @@ class DownloadEngine(
                 )
 
                 JobsRepository.update(id) { j ->
-                    j.copy(state = JobState.RUNNING, totalBytes = total, downloadedBytes = offset, progress = if (total > 0) offset.toFloat() / total else 0f)
+                    j.copy(state = JobState.RUNNING, totalBytes = total, downloadedBytes = offset, progress = if (total > 0) offset.toFloat() / total else 0f, startedAt = if (j.startedAt > 0) j.startedAt else System.currentTimeMillis())
                 }
 
                 RandomAccessFile(partial, "rw").use { raf ->
@@ -269,7 +283,7 @@ class DownloadEngine(
                 }
                 publishToDownloads(done, id)
                 JobsRepository.update(id) { j ->
-                    j.copy(state = JobState.DONE, progress = 1f, downloadedBytes = finalSize, totalBytes = finalSize, speedBps = 0L)
+                    j.copy(state = JobState.DONE, progress = 1f, downloadedBytes = finalSize, totalBytes = finalSize, speedBps = 0L, finishedAt = System.currentTimeMillis())
                 }
                 DebugLogger.perf(TAG, "다운로드 id=$id '${done.name}' ${fmt(finalSize)} 평균=${fmt(finalSize * 1000 / elapsed)}/s") {}
                 return@withContext Outcome.COMPLETED

@@ -34,6 +34,8 @@ class JobsPersistence(
                     put("state", j.state.name)
                     put("downloadedBytes", j.downloadedBytes)
                     put("totalBytes", j.totalBytes)
+                    if (j.startedAt > 0) put("startedAt", j.startedAt)
+                    if (j.finishedAt > 0) put("finishedAt", j.finishedAt)
                 })
             }
             val tmp = File(file.parentFile, file.name + ".tmp")
@@ -62,6 +64,8 @@ class JobsPersistence(
                     state = state,
                     downloadedBytes = o.optLong("downloadedBytes", 0L),
                     totalBytes = o.optLong("totalBytes", -1L),
+                    startedAt = o.optLong("startedAt", 0L),
+                    finishedAt = o.optLong("finishedAt", 0L),
                 )
                 when (job.state) {
                     JobState.RUNNING, JobState.QUEUED ->

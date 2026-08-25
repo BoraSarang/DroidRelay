@@ -18,6 +18,8 @@ data class Job(
     val speedBps: Long = 0L,
     val errorCode: String? = null,
     val errorMessage: String? = null,
+    val startedAt: Long = 0L,
+    val finishedAt: Long = 0L,
 )
 
 object JobsRepository {
