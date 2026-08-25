@@ -17,6 +17,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
@@ -42,6 +43,7 @@ import com.borasarang.droidrelay.relay.SettingsRepository
 import com.borasarang.droidrelay.ui.DownloadsScreen
 import com.borasarang.droidrelay.ui.FilesScreen
 import com.borasarang.droidrelay.ui.SettingsScreen
+import com.borasarang.droidrelay.ui.TorrentScreen
 import com.borasarang.droidrelay.ui.theme.DroidRelayTheme
 import kotlinx.coroutines.launch
 
@@ -145,12 +147,18 @@ fun RootApp() {
                 NavigationBarItem(
                     selected = tab == 1,
                     onClick = { tab = 1 },
-                    icon = { Icon(Icons.Filled.Folder, null) },
-                    label = { Text("파일") },
+                    icon = { Icon(Icons.Filled.CloudDownload, null) },
+                    label = { Text("Torrent") },
                 )
                 NavigationBarItem(
                     selected = tab == 2,
                     onClick = { tab = 2 },
+                    icon = { Icon(Icons.Filled.Folder, null) },
+                    label = { Text("파일") },
+                )
+                NavigationBarItem(
+                    selected = tab == 3,
+                    onClick = { tab = 3 },
                     icon = { Icon(Icons.Filled.Settings, null) },
                     label = { Text("설정") },
                 )
@@ -171,7 +179,8 @@ fun RootApp() {
                         DebugLogger.d("UI", "주소 복사 → $addr")
                     },
                 )
-                1 -> FilesScreen()
+                1 -> TorrentScreen()
+                2 -> FilesScreen()
                 else -> SettingsScreen(onPortChanged = {})
             }
         }

@@ -17,6 +17,8 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
+import com.borasarang.droidrelay.relay.TorrentRepository
+import com.borasarang.droidrelay.relay.TorrentState
 import kotlinx.coroutines.launch
 
 class RelayService : Service() {
@@ -28,6 +30,7 @@ class RelayService : Service() {
     private var currentPort: Int = -1
     private var notificationsOn = true
     private var networkMonitor: NetworkMonitor? = null
+    private var torrentEngine: TorrentEngine? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -39,6 +42,12 @@ class RelayService : Service() {
         val settingsRepo = SettingsRepository.get(applicationContext)
         val engine = RelayApp.get(applicationContext)
         val persistence = JobsPersistence(applicationContext)
+        val torrentEng = RelayApp.getTorrent(applicationContext)
+        torrentEngine = torrentEng
+
+        // TorrentEngine 시작
+        torrentEng.start()
+        DebugLogger.i(TAG, "TorrentEngine 시작 완료")
 
         // ① 설정 감시: 포트 변경 → 서버 재시작 / 알림 토글 / 서버 스냅샷 갱신
         scope.launch {
@@ -113,6 +122,27 @@ class RelayService : Service() {
         // ④ 네트워크 복구 시 FAILED 작업 자동 재시도
         networkMonitor = NetworkMonitor(applicationContext) { engine.retryFailed() }
         networkMonitor?.register()
+
+        // ⑤ torrent 완료/실패 알림
+        scope.launch {
+            var lastTorrentStates: Map<String, TorrentState> = emptyMap()
+            TorrentRepository.torrents.collectLatest { torrents ->
+                if (notificationsOn) {
+                    torrents.forEach { t ->
+                        val prev = lastTorrentStates[t.id]
+                        if (prev == TorrentState.DOWNLOADING && t.state == TorrentState.DONE) {
+                            DebugLogger.i(TAG, "torrent 완료 알림 '${t.name}'")
+                            notifyTorrent(t.id.hashCode(), "Torrent 완료", t.name)
+                        }
+                        if (prev != null && prev != TorrentState.FAILED && t.state == TorrentState.FAILED) {
+                            DebugLogger.i(TAG, "torrent 실패 알림 '${t.name}'")
+                            notifyTorrent(t.id.hashCode() + 10000, "Torrent 실패", t.name + (t.errorMessage?.let { " — $it" } ?: ""))
+                        }
+                    }
+                }
+                lastTorrentStates = torrents.associate { it.id to it.state }
+            }
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -134,11 +164,15 @@ class RelayService : Service() {
         server?.stop()
         server = null
         networkMonitor?.unregister()
+        torrentEngine?.stop()
+        torrentEngine = null
         // 서버 상태 갱신
         SettingsRepository.get(applicationContext).updateServerState(ServerState(running = false, port = currentPort))
         // 강제종료/서비스 종료 시 즉시 영구 저장 (T-111)
         val jobs = com.borasarang.droidrelay.relay.JobsRepository.all()
         JobsPersistence(applicationContext).save(jobs)
+        // Torrent 상태 저장
+        TorrentRepository.all().let { TorrentPersistence(applicationContext).save(it) }
         wakeLock?.takeIf { it.isHeld }?.release()
         scope.cancel()
         super.onDestroy()
@@ -149,6 +183,7 @@ class RelayService : Service() {
         DebugLogger.i(TAG, "onTaskRemoved → 즉시 영구 저장")
         val jobs = com.borasarang.droidrelay.relay.JobsRepository.all()
         JobsPersistence(applicationContext).save(jobs)
+        TorrentRepository.all().let { TorrentPersistence(applicationContext).save(it) }
         super.onTaskRemoved(rootIntent)
     }
 
@@ -254,6 +289,17 @@ class RelayService : Service() {
         nm.notify(id, notif)
     }
 
+    private fun notifyTorrent(id: Int, title: String, text: String) {
+        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val notif = Notification.Builder(this, CHANNEL_TORRENT_ID)
+            .setSmallIcon(android.R.drawable.stat_sys_download_done)
+            .setContentTitle(title)
+            .setContentText(text)
+            .setAutoCancel(true)
+            .build()
+        nm.notify(TORRENT_NOTIF_PREFIX + id, notif)
+    }
+
     private fun createChannel() {
         val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         // 서버 실행 상태 알림 — 배지 없음
@@ -272,6 +318,12 @@ class RelayService : Service() {
         nm.createNotificationChannel(
             NotificationChannel(CHANNEL_GATE_ID, "기기 접속 승인", NotificationManager.IMPORTANCE_HIGH),
         )
+        // torrent 다운로드 알림
+        nm.createNotificationChannel(
+            NotificationChannel(CHANNEL_TORRENT_ID, "Torrent 다운로드", NotificationManager.IMPORTANCE_LOW).apply {
+                setShowBadge(true)
+            },
+        )
     }
 
     companion object {
@@ -279,7 +331,9 @@ class RelayService : Service() {
         private const val CHANNEL_ID = "relay_status"
         private const val CHANNEL_RESULT_ID = "relay_result"
         private const val CHANNEL_GATE_ID = "relay_gate"
+        private const val CHANNEL_TORRENT_ID = "relay_torrent"
         private const val NOTIF_ID = 1001
+        private const val TORRENT_NOTIF_PREFIX = 30000
         private const val WAKE_TIMEOUT_MS = 24L * 60 * 60 * 1000
         private const val GATE_TIMEOUT_MS = 60_000L
         private const val GATE_NOTIF_PREFIX = 20000

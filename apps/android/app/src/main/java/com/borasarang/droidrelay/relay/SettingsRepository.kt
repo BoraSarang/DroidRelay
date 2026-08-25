@@ -39,6 +39,14 @@ data class AppSettings(
     val speedLimitKbps: Int = 0,
     val allowedIps: Set<String> = emptySet(),
     val accessScope: AccessScope = AccessScope.SUBNET_ONLY,
+    val torrentSavePath: String = "",
+    val torrentUploadLimit: Long = 0L,
+    val torrentDownloadLimit: Long = 0L,
+    val torrentMaxActive: Int = 3,
+    val torrentSeedRatio: Float = 2.0f,
+    val torrentDhtEnabled: Boolean = true,
+    val torrentPexEnabled: Boolean = true,
+    val torrentListenPort: Int = 6881,
 )
 
 private val Context.settingsDataStore by preferencesDataStore("droidrelay_settings")
@@ -67,6 +75,14 @@ class SettingsRepository(private val context: Context) {
         val SPEED_LIMIT = intPreferencesKey("speed_limit_kbps")
         val ALLOWED_IPS = stringSetPreferencesKey("allowed_ips")
         val ACCESS_SCOPE = stringPreferencesKey("access_scope")
+        val TORRENT_SAVE_PATH = stringPreferencesKey("torrent_save_path")
+        val TORRENT_UPLOAD_LIMIT = intPreferencesKey("torrent_upload_limit")
+        val TORRENT_DOWNLOAD_LIMIT = intPreferencesKey("torrent_download_limit")
+        val TORRENT_MAX_ACTIVE = intPreferencesKey("torrent_max_active")
+        val TORRENT_SEED_RATIO = intPreferencesKey("torrent_seed_ratio")
+        val TORRENT_DHT = booleanPreferencesKey("torrent_dht")
+        val TORRENT_PEX = booleanPreferencesKey("torrent_pex")
+        val TORRENT_LISTEN_PORT = intPreferencesKey("torrent_listen_port")
     }
 
     val settings: Flow<AppSettings> = context.settingsDataStore.data.map { p ->
@@ -85,6 +101,14 @@ class SettingsRepository(private val context: Context) {
             allowedIps = p[Keys.ALLOWED_IPS] ?: emptySet(),
             accessScope = runCatching { AccessScope.valueOf(p[Keys.ACCESS_SCOPE] ?: AccessScope.SUBNET_ONLY.name) }
                 .getOrDefault(AccessScope.SUBNET_ONLY),
+            torrentSavePath = p[Keys.TORRENT_SAVE_PATH] ?: "",
+            torrentUploadLimit = (p[Keys.TORRENT_UPLOAD_LIMIT] ?: 0).toLong().coerceAtLeast(0),
+            torrentDownloadLimit = (p[Keys.TORRENT_DOWNLOAD_LIMIT] ?: 0).toLong().coerceAtLeast(0),
+            torrentMaxActive = (p[Keys.TORRENT_MAX_ACTIVE] ?: 3).coerceIn(1, 10),
+            torrentSeedRatio = (p[Keys.TORRENT_SEED_RATIO] ?: 200).toInt().coerceIn(0, 1000) / 100f,
+            torrentDhtEnabled = p[Keys.TORRENT_DHT] ?: true,
+            torrentPexEnabled = p[Keys.TORRENT_PEX] ?: true,
+            torrentListenPort = (p[Keys.TORRENT_LISTEN_PORT] ?: 6881).coerceIn(1024, 65535),
         )
     }
 
@@ -127,6 +151,30 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun setAccessScope(scope: AccessScope) =
         context.settingsDataStore.edit { it[Keys.ACCESS_SCOPE] = scope.name }
+
+    suspend fun setTorrentSavePath(path: String) =
+        context.settingsDataStore.edit { it[Keys.TORRENT_SAVE_PATH] = path }
+
+    suspend fun setTorrentUploadLimit(kbps: Int) =
+        context.settingsDataStore.edit { it[Keys.TORRENT_UPLOAD_LIMIT] = kbps.coerceAtLeast(0) }
+
+    suspend fun setTorrentDownloadLimit(kbps: Int) =
+        context.settingsDataStore.edit { it[Keys.TORRENT_DOWNLOAD_LIMIT] = kbps.coerceAtLeast(0) }
+
+    suspend fun setTorrentMaxActive(n: Int) =
+        context.settingsDataStore.edit { it[Keys.TORRENT_MAX_ACTIVE] = n.coerceIn(1, 10) }
+
+    suspend fun setTorrentSeedRatio(ratio: Float) =
+        context.settingsDataStore.edit { it[Keys.TORRENT_SEED_RATIO] = (ratio * 100).toInt().coerceIn(0, 1000) }
+
+    suspend fun setTorrentDhtEnabled(enabled: Boolean) =
+        context.settingsDataStore.edit { it[Keys.TORRENT_DHT] = enabled }
+
+    suspend fun setTorrentPexEnabled(enabled: Boolean) =
+        context.settingsDataStore.edit { it[Keys.TORRENT_PEX] = enabled }
+
+    suspend fun setTorrentListenPort(port: Int) =
+        context.settingsDataStore.edit { it[Keys.TORRENT_LISTEN_PORT] = port.coerceIn(1024, 65535) }
 
     companion object {
         @Volatile private var instance: SettingsRepository? = null

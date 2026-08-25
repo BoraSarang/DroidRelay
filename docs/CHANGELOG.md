@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.4.0] - 2026-08-25
+
+### Added [android]
+- **Torrent 클라이언트**: libtorrent4j 기반 torrent 다운로드 엔진 추가
+- **magnet 링크 지원**: magnet:?xt=... 직접 입력 → 다운로드
+- **.torrent 파일 지원**: 파일 선택 → torrent 추가
+- **4탭 내비게이션**: 다운로드 / Torrent / 파일 / 설정
+- **Torrent 탭 UI**: torrent 목록, 상태 표시, 일시정지/재개/삭제
+- **대역폭 제한**: 다운로드 무제한 / 업로드 0KB/s (기본, 설정에서 변경 가능)
+- **DHT/PEX**: 분산 해시 테이블 + 피어 교환 지원
+- **웹 대시보드 Torrent API**: /api/torrents, /api/torrents/add, /api/torrents/{id}/*, DELETE
+- **Torrent 알림**: torrent 완료/실패 시 알림 (별도 채널)
+- **Torrent 설정**: 업로드/다운로드 속도, 최대 활성 torrent, 시드 ratio, DHT/PEX 설정
+- **Torrent 상태 영구 저장**: torrent.json 기반 저장/복원
+- **GitHub Releases**: APK 자동 빌드/배포
+
 ## [0.3.0] - 2026-08-25
 
 ### Added [android]

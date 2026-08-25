@@ -18,6 +18,26 @@
 | T-212 | 설정 서버 섹션 리디자인 (3줄 압축 + 랜덤 포트 + 상태표시) | ✅ |
 | T-213 | 설정 탭 verticalScroll (하단 잘림 해결) | ✅ |
 
+## v0.4 (2026-08-25) — Torrent 클라이언트
+
+| 항목 | 내용 | 상태 |
+|------|------|------|
+| T-301 | PLAN 문서 + libtorrent4j 의존성 추가 | ✅ |
+| T-302 | TorrentEngine 클래스 (세션 관리) | ✅ |
+| T-303 | TorrentRepository (상태 관리) | ✅ |
+| T-304 | TorrentPersistence (JSON 영구 저장) | ✅ |
+| T-305 | magnet 링크 입력 → 다운로드 | ✅ |
+| T-306 | .torrent 파일 업로드 → 다운로드 | ✅ |
+| T-307 | torrent 정보 표시 (이름/크기/파일목록/시드/피어) | ✅ |
+| T-308 | 대역폭 제한 (다운로드 무제한/업로드 0KB/s) | ✅ |
+| T-309 | Torrent 탭 UI (4탭 내비게이션) | ✅ |
+| T-310 | 설정 탭 Torrent 섹션 | ✅ |
+| T-311 | 웹 대시보드 Torrent API | ✅ |
+| T-312 | Torrent 알림 (진행률 + 완료) | ✅ |
+| T-313 | 테스트 + ktlint + 크래시 검증 | ✅ |
+| T-314 | 스크린샷 + CHANGELOG + 커밋 | 🔄 |
+| T-315 | GitHub Release + APK 배포 | 🔄 |
+
 ## v0.2 아카이브
 T-101~T-115 전부 완료 (커밋 5956cfc).
 

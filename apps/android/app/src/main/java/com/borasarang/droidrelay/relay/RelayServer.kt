@@ -33,10 +33,12 @@ import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
 import org.json.JSONArray
 import org.json.JSONObject
+import com.borasarang.droidrelay.relay.TorrentRepository
 
 object RelayApp {
     private const val TAG = "App"
     @Volatile var engine: DownloadEngine? = null
+    @Volatile var torrentEngine: TorrentEngine? = null
 
     fun get(ctx: Context): DownloadEngine =
         engine ?: synchronized(this) {
@@ -47,6 +49,17 @@ object RelayApp {
                 SettingsRepository.get(appCtx),
                 JobsPersistence(appCtx),
             ).also { engine = it }
+        }
+
+    fun getTorrent(ctx: Context): TorrentEngine =
+        torrentEngine ?: synchronized(this) {
+            DebugLogger.i(TAG, "TorrentEngine 최초 생성")
+            val appCtx = ctx.applicationContext
+            torrentEngine ?: TorrentEngine(
+                appCtx,
+                SettingsRepository.get(appCtx),
+                TorrentPersistence(appCtx),
+            ).also { torrentEngine = it }
         }
 }
 
@@ -282,6 +295,98 @@ private fun Application.relayRoutes(context: Context, serverRef: RelayServer) {
                     DebugLogger.i("Http", "DELETE id=$id")
                     RelayApp.get(context).cancel(id)
                     JobsRepository.remove(id)
+                    call.respondText("ok")
+                }
+            }
+        }
+
+        // ── Torrent API ──
+
+        get("/api/torrents") {
+            val arr = JSONArray()
+            TorrentRepository.all().forEach { t ->
+                arr.put(JSONObject().apply {
+                    put("id", t.id)
+                    put("name", t.name)
+                    put("state", t.state.name)
+                    put("progress", t.progress.toDouble())
+                    put("downloadSpeed", t.downloadSpeed)
+                    put("uploadSpeed", t.uploadSpeed)
+                    put("totalSize", t.totalSize)
+                    put("downloadedSize", t.downloadedSize)
+                    put("seeds", t.seeds)
+                    put("peers", t.peers)
+                    put("files", JSONArray().apply {
+                        t.files.forEach { f ->
+                            put(JSONObject().apply {
+                                put("index", f.index)
+                                put("path", f.path)
+                                put("size", f.size)
+                                put("progress", f.progress.toDouble())
+                                put("selected", f.selected)
+                            })
+                        }
+                    })
+                })
+            }
+            call.respondText(arr.toString(), ContentType.Application.Json)
+        }
+
+        post("/api/torrents/add") {
+            val body = call.receiveText()
+            val json = try { JSONObject(body) } catch (_: Exception) { null }
+            val magnet = json?.optString("magnet")?.trim() ?: ""
+            val torrentFile = json?.optString("torrentFileBase64")?.trim() ?: ""
+
+            when {
+                magnet.startsWith("magnet:") -> {
+                    val job = RelayApp.getTorrent(context).addMagnet(magnet)
+                    DebugLogger.i("Http", "torrent magnet 추가 id=${job.id}")
+                    call.respondText(
+                        JSONObject().put("id", job.id).toString(),
+                        ContentType.Application.Json,
+                        HttpStatusCode.Created,
+                    )
+                }
+                torrentFile.isNotEmpty() -> {
+                    val bytes = java.util.Base64.getDecoder().decode(torrentFile)
+                    val filename = json?.optString("filename", "torrent") ?: "torrent"
+                    val job = RelayApp.getTorrent(context).addTorrentFile(bytes, filename)
+                    DebugLogger.i("Http", "torrent 파일 추가 id=${job.id} name=$filename")
+                    call.respondText(
+                        JSONObject().put("id", job.id).toString(),
+                        ContentType.Application.Json,
+                        HttpStatusCode.Created,
+                    )
+                }
+                else -> {
+                    call.respondText(
+                        "magnet 또는 torrentFileBase64 필요",
+                        ContentType.Text.Plain,
+                        HttpStatusCode.UnprocessableEntity,
+                    )
+                }
+            }
+        }
+
+        post("/api/torrents/{id}/{action}") {
+            val id = call.parameters["id"]!!
+            val action = call.parameters["action"]
+            val engine = RelayApp.getTorrent(context)
+            when (action) {
+                "pause" -> { engine.pause(id); call.respondText("ok") }
+                "resume" -> { engine.resume(id); call.respondText("ok") }
+                else -> call.respondText("지원 없는 동작", ContentType.Text.Plain, HttpStatusCode.BadRequest)
+            }
+        }
+
+        delete("/api/torrents/{id}") {
+            val id = call.parameters["id"]!!
+            when (TorrentRepository.get(id)) {
+                null -> call.respondText("없음", ContentType.Text.Plain, HttpStatusCode.NotFound)
+                else -> {
+                    DebugLogger.i("Http", "torrent DELETE id=$id")
+                    RelayApp.getTorrent(context).cancel(id)
                     call.respondText("ok")
                 }
             }

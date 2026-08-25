@@ -51,6 +51,8 @@ dependencies {
     implementation(libs.ktor.server.core)
     implementation(libs.ktor.server.cio)
     implementation(libs.zxing.core)
+    implementation(libs.libtorrent4j)
+    implementation(libs.libtorrent4j.android.arm64)
 
     testImplementation(libs.junit)
 }

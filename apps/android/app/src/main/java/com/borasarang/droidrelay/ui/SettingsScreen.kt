@@ -248,6 +248,60 @@ fun SettingsScreen(onPortChanged: (Int) -> Unit) {
                 }
             }
         }
+
+        HorizontalDivider(color = cs.outlineVariant)
+
+        // ── Torrent ──
+        SettingSection("Torrent") {
+            // 업로드 속도
+            Text(
+                "기본 업로드 속도: ${if (s.torrentUploadLimit == 0L) "무제한" else "${s.torrentUploadLimit / 1024} KB/s"}",
+                color = cs.onSurface,
+            )
+            Slider(
+                value = s.torrentUploadLimit.toFloat() / 1024,
+                onValueChange = { v ->
+                    val kbps = (v / 128).toInt() * 128
+                    kotlinx.coroutines.MainScope().launch { repo.setTorrentUploadLimit(kbps) }
+                },
+                valueRange = 0f..1024f,
+            )
+
+            // 다운로드 속도
+            Text(
+                "기본 다운로드 속도: ${if (s.torrentDownloadLimit == 0L) "무제한" else "${s.torrentDownloadLimit / 1024} KB/s"}",
+                color = cs.onSurface,
+            )
+            Slider(
+                value = s.torrentDownloadLimit.toFloat() / 1024,
+                onValueChange = { v ->
+                    val kbps = (v / 128).toInt() * 128
+                    kotlinx.coroutines.MainScope().launch { repo.setTorrentDownloadLimit(kbps) }
+                },
+                valueRange = 0f..4096f,
+            )
+
+            // 최대 활성 torrent
+            Text("최대 활성 torrent: ${s.torrentMaxActive}개", color = cs.onSurface)
+            Slider(
+                value = s.torrentMaxActive.toFloat(),
+                onValueChange = { kotlinx.coroutines.MainScope().launch { repo.setTorrentMaxActive(it.toInt()) } },
+                valueRange = 1f..10f,
+                steps = 8,
+            )
+
+            // 시드 ratio
+            Text("최대 시드 ratio: ${String.format("%.1f", s.torrentSeedRatio)}", color = cs.onSurface)
+            Slider(
+                value = s.torrentSeedRatio,
+                onValueChange = { kotlinx.coroutines.MainScope().launch { repo.setTorrentSeedRatio(it) } },
+                valueRange = 0f..10f,
+                steps = 9,
+            )
+
+            SwitchRow("DHT (분산 해시 테이블)", s.torrentDhtEnabled) { v -> kotlinx.coroutines.MainScope().launch { repo.setTorrentDhtEnabled(v) } }
+            SwitchRow("PEX (피어 교환)", s.torrentPexEnabled) { v -> kotlinx.coroutines.MainScope().launch { repo.setTorrentPexEnabled(v) } }
+        }
     }
 }
 
