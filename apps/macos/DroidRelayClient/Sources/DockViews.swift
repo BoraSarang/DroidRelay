@@ -4,13 +4,15 @@ import AppKit
 // MARK: - 도크 탭/펼침 상태 컨트롤러
 
 enum DockTab: String, CaseIterable, Identifiable {
-    case downloads = "다운로드"
+    case downloads = "전송"
+    case storage = "보관함"
     case debug = "디버그"
     case settings = "설정"
     var id: String { rawValue }
     var icon: String {
         switch self {
         case .downloads: return "arrow.down.circle"
+        case .storage: return "internaldrive"
         case .debug: return "ant.circle"
         case .settings: return "gearshape.circle"
         }
@@ -24,7 +26,7 @@ final class DockController: ObservableObject {
     var onHeightChange: ((CGFloat) -> Void)?
 
     static let collapsedHeight: CGFloat = 32
-    static let expandedHeight: CGFloat = 262
+    static let expandedHeight: CGFloat = 380
 
     func open(_ t: DockTab) {
         tab = t
@@ -91,6 +93,7 @@ struct DockRootView: View {
                 Group {
                     switch ctl.tab {
                     case .downloads: DownloadsListView()
+                    case .storage: StorageBrowserView()
                     case .debug: DebugLogView()
                     case .settings: SettingsViewMac()
                     }
@@ -138,29 +141,12 @@ struct DownloadsListView: View {
                 Button {
                     showAddSheet = true
                 } label: {
-                    Label("다운로드 추가", systemImage: "plus.circle")
+                    Label("추가", systemImage: "plus.circle")
                         .font(.caption)
                 }
                 .controlSize(.small)
 
-                Button {
-                    let panel = NSOpenPanel()
-                    panel.canChooseFiles = true
-                    panel.canChooseDirectories = false
-                    panel.allowsMultipleSelection = true
-                    panel.message = "서버로 보낼 파일을 선택해 주세요"
-                    if panel.runModal() == .OK {
-                        for url in panel.urls {
-                            AppState.shared.uploadFile(url)
-                        }
-                    }
-                } label: {
-                    Label("업로드", systemImage: "arrow.up.circle")
-                        .font(.caption)
-                }
-                .controlSize(.small)
-
-                Button("완료 항목 정리") { transfers.clearFinished() }
+                Button("완료 정리") { transfers.clearFinished() }
                     .controlSize(.small)
                     .disabled(transfers.actives.isEmpty)
             }
@@ -170,12 +156,19 @@ struct DownloadsListView: View {
 
             ScrollView {
                 VStack(spacing: 6) {
-                    if transfers.actives.isEmpty {
-                        Text("웹 대시보드에서 📥 받기를 누르거나\n⬆ 업로드 버튼으로 파일을 전송하세요")
+                    // ── 서버 잡 (전체/일시정지/진행중) ──
+                    let jobs = AppState.shared.jobs
+                    if !jobs.isEmpty {
+                        serverJobsSection(jobs)
+                    }
+
+                    // ── 로컬 전송 ──
+                    if transfers.actives.isEmpty && jobs.isEmpty {
+                        Text("서버에서 다운로드 중인 작업이 없습니다.\n'추가' 버튼으로 URL을 입력하세요.")
                             .font(.caption)
                             .foregroundStyle(.tertiary)
                             .multilineTextAlignment(.center)
-                            .padding(.top, 36)
+                            .padding(.top, 24)
                     }
                     ForEach(Array(transfers.actives.reversed())) { a in
                         RowView(a: a)
@@ -187,7 +180,103 @@ struct DownloadsListView: View {
         .onReceive(Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()) { _ in
             tick.toggle()
         }
-        .opacity(tick ? 1 : 0.999) // 재렌더 트리거
+        .opacity(tick ? 1 : 0.999)
+    }
+
+    @ViewBuilder
+    private func serverJobsSection(_ jobs: [Job]) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("서버 다운로드")
+                .font(.caption2)
+                .fontWeight(.semibold)
+                .foregroundStyle(.secondary)
+                .padding(.leading, 4)
+
+            ForEach(jobs) { job in
+                serverJobRow(job)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func serverJobRow(_ job: Job) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: stateIcon(job.state))
+                .font(.system(size: 11))
+                .foregroundStyle(stateColor(job.state))
+                .frame(width: 14)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(job.filename)
+                    .font(.system(size: 12, weight: .medium))
+                    .lineLimit(1)
+                HStack(spacing: 6) {
+                    Text(job.state)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                    if job.totalBytes > 0 {
+                        Text("\(Int(job.progress * 100))%")
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+
+            Spacer()
+
+            // ⬇ 로컬에 저장
+            Button {
+                AppState.shared.receiveJob(job)
+            } label: {
+                Image(systemName: "arrow.down.circle")
+                    .font(.system(size: 13))
+            }
+            .buttonStyle(.plain)
+            .help("서버에서 로컬 저장 폴더로 다운로드")
+            .disabled(job.state == "DONE" || job.state == "FAILED")
+
+            // ⏸ ▶ 일시정지/재개
+            Button {
+                Task { await AppState.shared.toggleJob(job) }
+            } label: {
+                Image(systemName: job.state == "PAUSED" ? "play.circle" : "pause.circle")
+                    .font(.system(size: 13))
+            }
+            .buttonStyle(.plain)
+            .help(job.state == "PAUSED" ? "재개" : "일시정지")
+
+            // 🗑 삭제
+            Button {
+                Task { await AppState.shared.removeJob(job) }
+            } label: {
+                Image(systemName: "trash")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .help("서버에서 삭제")
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.04)))
+    }
+
+    private func stateIcon(_ s: String) -> String {
+        switch s {
+        case "DONE": return "checkmark.circle.fill"
+        case "FAILED": return "xmark.circle.fill"
+        case "PAUSED": return "pause.circle.fill"
+        default: return "arrow.down.circle.fill"
+        }
+    }
+
+    private func stateColor(_ s: String) -> Color {
+        switch s {
+        case "DONE": return .green
+        case "FAILED": return .red
+        case "PAUSED": return .orange
+        default: return .accentColor
+        }
     }
 }
 

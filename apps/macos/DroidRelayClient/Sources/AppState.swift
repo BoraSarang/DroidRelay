@@ -42,10 +42,15 @@ final class AppState {
 
     /// 메뉴바 표시 텍스트 (연결됨 + 속도 > 0일 때만)
     var menuBarSpeedText: String? {
-        guard settings.showSpeedInMenuBar,
-              isConnected,
-              let speed = info?.speedTotalBps, speed > 0 else { return nil }
-        return "↓" + Fmt.speed(speed)
+        guard settings.showSpeedInMenuBar, isConnected else { return nil }
+        transfers.sampleSpeeds()
+        let down = (info?.speedTotalBps ?? 0) + Int64(transfers.downSpeed)
+        let up = Int64(transfers.upSpeed)
+        if down <= 0 && up <= 0 { return "대기중" }
+        var lines: [String] = []
+        if up > 0 { lines.append("↑ " + Fmt.speed(up)) }
+        if down > 0 { lines.append("↓ " + Fmt.speed(down)) }
+        return lines.joined(separator: "\n")
     }
 
     func showToast(_ msg: String) {
@@ -389,6 +394,16 @@ final class AppState {
                                      folderURL: URL(fileURLWithPath: settings.downloadFolder),
                                      notifyEnabled: settings.notificationsEnabled,
                                      auth: settings.basicAuthHeader())
+        } catch {
+            showToast(friendly(error))
+        }
+    }
+
+    @MainActor
+    func storageDelete(at path: String) async {
+        do {
+            let a = try requireAPI()
+            try await a.storageDelete(path: path)
         } catch {
             showToast(friendly(error))
         }

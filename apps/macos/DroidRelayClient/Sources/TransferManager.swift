@@ -23,7 +23,7 @@ final class TransferManager {
     enum Direction: String, Hashable { case download, upload }
 
     struct Active: Identifiable, Hashable {
-        let id: String // jobId 또는 "dl:" + 경로 또는 "up:" + UUID
+        let id: String
         var name: String
         var received: Int64 = 0
         var total: Int64 = 0
@@ -31,9 +31,40 @@ final class TransferManager {
         var failed: Bool = false
         var destPath: String = ""
         var direction: Direction = .download
+        var speedBps: Double = 0
+        var lastReceived: Int64 = 0
+        var lastSampleTime: Date = Date.distantPast
     }
 
     var actives: [Active] = []
+
+    var downSpeed: Double {
+        actives.filter { $0.direction == .download && !$0.finished && !$0.failed }
+            .reduce(0) { $0 + $1.speedBps }
+    }
+    var upSpeed: Double {
+        actives.filter { $0.direction == .upload && !$0.finished && !$0.failed }
+            .reduce(0) { $0 + $1.speedBps }
+    }
+
+    func sampleSpeeds() {
+        let now = Date()
+        for i in actives.indices {
+            let a = actives[i]
+            guard !a.finished && !a.failed else { continue }
+            if a.lastSampleTime == .distantPast {
+                actives[i].lastReceived = a.received
+                actives[i].lastSampleTime = now
+                continue
+            }
+            let dt = now.timeIntervalSince(a.lastSampleTime)
+            if dt >= 0.5 {
+                actives[i].speedBps = Double(a.received - a.lastReceived) / dt
+                actives[i].lastReceived = a.received
+                actives[i].lastSampleTime = now
+            }
+        }
+    }
 
     func isActive(_ key: String) -> Bool {
         actives.contains { $0.id == key && !$0.finished && !$0.failed }

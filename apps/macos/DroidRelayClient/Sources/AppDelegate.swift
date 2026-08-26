@@ -82,8 +82,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     private func setupStatusItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let btn = statusItem.button {
-            btn.image = Self.makeMenuBarIcon()
+            btn.image = NSImage(named: "AppIcon") ?? Self.makeMenuBarIcon()
             btn.image?.size = NSSize(width: 18, height: 18)
+            btn.image?.isTemplate = true
             btn.action = #selector(statusClicked(_:))
             btn.target = self
             btn.sendAction(on: [.leftMouseUp, .rightMouseUp])
@@ -100,7 +101,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate, 
     private func updateMenuBarText() {
         guard let btn = statusItem.button else { return }
         if let text = appState.menuBarSpeedText {
-            btn.title = " " + text
+            let isIdle = text == "대기중"
+            let color: NSColor = isIdle ? .secondaryLabelColor : .labelColor
+            let attr = NSAttributedString(string: " " + text, attributes: [
+                .font: NSFont.monospacedDigitSystemFont(ofSize: 9, weight: isIdle ? .regular : .medium),
+                .foregroundColor: color,
+            ])
+            btn.attributedTitle = attr
             statusItem.length = NSStatusItem.variableLength
         } else {
             btn.title = ""
