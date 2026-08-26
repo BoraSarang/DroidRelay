@@ -67,3 +67,36 @@ T-001~T-008 전부 완료 (커밋 7574486).
 - [ ] 다중 URL 일괄 붙여넣기
 - [ ] Content-Disposition 파일명 우선
 - [ ] iPad Safari 실기기 검증
+
+## v0.5 긴급 수정 + UX (2026-08-25, T-501~T-512)
+| ID | 작업 | 상태 |
+|----|------|------|
+| T-501 | 다운로드 115% 버그 (이중 카운트) — curBytes=filePointer + clamp | ✅ |
+| T-502 | 재시도 사유 표시 (friendlyReason + errorMessage) | ✅ |
+| T-503 | 웹 드래그 전면 수리 (따옴표 버그→이벤트 위임, 카드 순서 드래그, 폴링 억제) | ✅ |
+| T-504 | 보관함 move 자기참조 소실 버그 — rename우선+크기검증+원본보존 | ✅ |
+| T-505 | 경로 탈출 차단 전면 적용 (storageFile 헬퍼 — list/mkdir/rename/delete/move/upload/dl-file) | ✅ |
+| T-506 | 토렌트 속도 설정→TorrentEngine 연결 (미연결 버그) + 프리셋 5단계 + 0=업로드끔/다운무제한 | ✅ |
+| T-507 | 동시 다운로드 기본값 2→1 | ✅ |
+| T-508 | 웹 📥 이모지 + 다운로드 토스트 + <a download> 원복 | ✅ |
+| T-509 | 맥 하단 도크 (다운로드 목록/디버그/설정) + WKDownload 진행 연결 | ✅ |
+| T-510 | 맥 우클릭 메뉴 + 종료 + ⌘Q + ~/Applications 배포 | ✅ |
+| T-511 | 맥 WKUIDelegate (prompt/confirm/alert/파일선택창 — 폴더생성·업로드 수정) | ✅ |
+| T-512 | RelayServer 리팩토링 (respondOk/Err 헬퍼, storageFile/safeLeafName) | ✅ |
+
+## v0.6 후속 UX (2026-08-26, T-701~T-704)
+
+| T-번호 | 내용 | 상태 |
+|--------|------|------|
+| T-701 | 웹 SSE 실시간 푸시 (/api/events + EventSource, 폴링 폴백) | ✅ |
+| T-702 | 다중 URL 일괄 붙여넣기 (공백/줄바꿈 분할 순차 추가) | ✅ |
+| T-703 | 보관함 휴지통 (.trash 이동 삭제/복구/영구삭제/비우기) | ✅ |
+| T-704 | 체크섬 검증 (SHA-256 선택 입력, 불일치 E-AND-DOWN-1004) | ✅ |
+
+## v0.7 후속 (2026-08-26, T-708~T-710)
+
+| T-번호 | 내용 | 상태 |
+|--------|------|------|
+| T-708 | 맥 앱 다운로드 추가 시트 (다중 URL + SHA-256 필드) | ✅ |
+| T-709 | 웹 보관함 폴더 트리 사이드바 (/api/storage/tree + 2단 레이아웃) | ✅ |
+| T-710 | 대용량 업로드 raw 스트리밍 (/api/storage/raw-upload, 196MB 11초) + cleartext 허용 | ✅ |
