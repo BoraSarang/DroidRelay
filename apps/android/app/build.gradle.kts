@@ -12,8 +12,8 @@ android {
         applicationId = "com.borasarang.droidrelay"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.5.0"
     }
 
     buildTypes {
@@ -50,6 +50,7 @@ dependencies {
     implementation(libs.okhttp)
     implementation(libs.ktor.server.core)
     implementation(libs.ktor.server.cio)
+    implementation("io.ktor:ktor-io:3.5.2")
     implementation(libs.zxing.core)
     implementation(libs.libtorrent4j)
     implementation(libs.libtorrent4j.android.arm64)

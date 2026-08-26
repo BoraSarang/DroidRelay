@@ -16,6 +16,8 @@ import io.ktor.server.engine.embeddedServer
 import io.ktor.server.plugins.origin
 import io.ktor.server.request.path
 import io.ktor.server.request.receiveText
+import io.ktor.server.request.receiveMultipart
+import io.ktor.http.content.PartData
 import io.ktor.server.response.header
 import io.ktor.server.response.respondBytesWriter
 import io.ktor.server.response.respondText
@@ -24,6 +26,10 @@ import io.ktor.server.routing.get
 import io.ktor.server.routing.post
 import io.ktor.server.routing.routing
 import io.ktor.utils.io.writeFully
+import io.ktor.utils.io.toByteArray
+import io.ktor.utils.io.readAvailable
+import io.ktor.utils.io.writeStringUtf8
+import kotlinx.coroutines.delay
 import java.io.File
 import java.io.RandomAccessFile
 import java.net.InetAddress
@@ -34,6 +40,16 @@ import java.util.concurrent.ConcurrentHashMap
 import org.json.JSONArray
 import org.json.JSONObject
 import com.borasarang.droidrelay.relay.TorrentRepository
+
+@Suppress("UNCHECKED_CAST")
+private fun Any?.toJsonElement(): Any = when (this) {
+    null -> JSONObject.NULL
+    is Map<*, *> -> JSONObject().apply { (this@toJsonElement as Map<String, Any?>).forEach { (k, v) -> put(k, v.toJsonElement()) } }
+    is List<*> -> JSONArray().apply { this@toJsonElement.forEach { put(it.toJsonElement()) } }
+    is Boolean, is Number, is String -> this
+    else -> toString()
+}
+private fun Map<String, Any?>.toJson(): String = (this.toJsonElement() as JSONObject).toString(2)
 
 object RelayApp {
     private const val TAG = "App"
@@ -128,7 +144,9 @@ class RelayServer(
     fun start() {
         if (server != null) return
         val ctx = context
-        server = embeddedServer(CIO, port = port, host = "0.0.0.0") { relayRoutes(ctx, this@RelayServer) }
+        server = embeddedServer(CIO, port = port, host = "0.0.0.0") {
+            relayRoutes(ctx, this@RelayServer)
+        }
             .start(wait = false)
         DebugLogger.i("Server", "기동 완료 http://0.0.0.0:$port (LAN=${lanAddress() ?: "?"})")
     }
@@ -219,16 +237,22 @@ private fun Application.relayRoutes(context: Context, serverRef: RelayServer) {
     }
 
     routing {
-        get("/") { call.respondText(WebAssets.dashboardHtml, ContentType.Text.Html) }
+        get("/") {
+            call.response.header(HttpHeaders.CacheControl, "no-store, must-revalidate")
+            call.respondText(WebAssets.dashboardHtml, ContentType.Text.Html)
+        }
 
         get("/api/info") {
             val dir = RelayApp.get(context).workDir
             val stat = runCatching { StatFs(dir.path) }.getOrNull()
             val jobs = JobsRepository.all()
+            val appVersion = runCatching {
+                context.packageManager.getPackageInfo(context.packageName, 0).versionName
+            }.getOrNull() ?: "0.5.0"
             val info = JSONObject().apply {
                 put("ip", lanAddress() ?: JSONObject.NULL)
                 put("port", serverRef.port)
-                put("version", "0.2")
+                put("version", appVersion)
                 put("storageFree", stat?.availableBytes ?: JSONObject.NULL)
                 put("storageTotal", stat?.totalBytes ?: JSONObject.NULL)
                 put("running", jobs.count { it.state == JobState.RUNNING })
@@ -249,7 +273,11 @@ private fun Application.relayRoutes(context: Context, serverRef: RelayServer) {
                     put("downloadedBytes", j.downloadedBytes)
                     put("totalBytes", j.totalBytes)
                     put("speedBps", j.speedBps)
+                    put("startedAt", j.startedAt)
+                    put("order", j.order)
                     put("errorMessage", j.errorMessage ?: JSONObject.NULL)
+                    put("hasChecksum", j.expectedSha256 != null)
+                    put("verified", j.verified)
                 })
             }
             call.respondText(arr.toString(), ContentType.Application.Json)
@@ -257,7 +285,8 @@ private fun Application.relayRoutes(context: Context, serverRef: RelayServer) {
 
         post("/api/jobs") {
             val body = call.receiveText()
-            val url = try { JSONObject(body).optString("url") } catch (_: Exception) { "" }
+            val json = try { JSONObject(body) } catch (_: Exception) { null }
+            val url = json?.optString("url") ?: ""
             if (!url.startsWith("http://") && !url.startsWith("https://")) {
                 DebugLogger.w("Http", "POST 거부 — 유효하지 않은 URL (E-AND-DOWN-1003) body='${body.take(80)}'")
                 call.respondText(
@@ -267,7 +296,10 @@ private fun Application.relayRoutes(context: Context, serverRef: RelayServer) {
                 )
                 return@post
             }
-            val job = RelayApp.get(context).enqueue(url.trim())
+            // 선택 체크섬 (T-704): 64자리 16진수만 허용
+            val rawSha = json?.optString("sha256", "") ?: ""
+            val sha256 = if (Regex("^[0-9a-fA-F]{64}$").matches(rawSha)) rawSha.lowercase() else null
+            val job = RelayApp.get(context).enqueue(url.trim(), sha256)
             DebugLogger.i("Http", "POST 수락 id=${job.id} file='${job.filename}'")
             call.respondText(
                 JSONObject().put("id", job.id).toString(),
@@ -300,6 +332,19 @@ private fun Application.relayRoutes(context: Context, serverRef: RelayServer) {
             }
         }
 
+        post("/api/jobs/reorder") {
+            val body = call.receiveText()
+            val json = try { JSONObject(body) } catch (_: Exception) { null }
+            val id = json?.optString("id") ?: ""
+            val newOrder = json?.optInt("newOrder", -1) ?: -1
+            if (id.isBlank() || newOrder < 0) {
+                call.respondText("잘못된 요청", ContentType.Text.Plain, HttpStatusCode.BadRequest)
+                return@post
+            }
+            JobsRepository.reorder(id, newOrder)
+            call.respondText("ok")
+        }
+
         // ── Torrent API ──
 
         get("/api/torrents") {
@@ -314,6 +359,8 @@ private fun Application.relayRoutes(context: Context, serverRef: RelayServer) {
                     put("uploadSpeed", t.uploadSpeed)
                     put("totalSize", t.totalSize)
                     put("downloadedSize", t.downloadedSize)
+                    put("startedAt", t.startedAt)
+                    put("order", t.order)
                     put("seeds", t.seeds)
                     put("peers", t.peers)
                     put("files", JSONArray().apply {
@@ -333,39 +380,40 @@ private fun Application.relayRoutes(context: Context, serverRef: RelayServer) {
         }
 
         post("/api/torrents/add") {
-            val body = call.receiveText()
-            val json = try { JSONObject(body) } catch (_: Exception) { null }
-            val magnet = json?.optString("magnet")?.trim() ?: ""
-            val torrentFile = json?.optString("torrentFileBase64")?.trim() ?: ""
+            try {
+                val body = call.receiveText()
+                val json = try { JSONObject(body) } catch (_: Exception) { null }
+                val magnet = json?.optString("magnet")?.trim() ?: ""
+                val torrentFile = json?.optString("torrentFileBase64")?.trim() ?: ""
 
-            when {
-                magnet.startsWith("magnet:") -> {
-                    val job = RelayApp.getTorrent(context).addMagnet(magnet)
-                    DebugLogger.i("Http", "torrent magnet 추가 id=${job.id}")
-                    call.respondText(
-                        JSONObject().put("id", job.id).toString(),
-                        ContentType.Application.Json,
-                        HttpStatusCode.Created,
-                    )
+                when {
+                    magnet.startsWith("magnet:") -> {
+                        val job = RelayApp.getTorrent(context).addMagnet(magnet)
+                        DebugLogger.i("Http", "torrent magnet 추가 id=${job.id}")
+                        call.respondText(
+                            JSONObject().put("id", job.id).toString(),
+                            ContentType.Application.Json,
+                            HttpStatusCode.Created,
+                        )
+                    }
+                    torrentFile.isNotEmpty() -> {
+                        val bytes = java.util.Base64.getDecoder().decode(torrentFile)
+                        val fn = json?.optString("filename", "torrent") ?: "torrent"
+                        val job = RelayApp.getTorrent(context).addTorrentFile(bytes, fn)
+                        DebugLogger.i("Http", "torrent 파일 추가 id=${job.id} name=$fn size=${bytes.size}")
+                        call.respondText(
+                            JSONObject().put("id", job.id).toString(),
+                            ContentType.Application.Json,
+                            HttpStatusCode.Created,
+                        )
+                    }
+                    else -> {
+                        call.respondErr("magnet 또는 torrentFileBase64 필요")
+                    }
                 }
-                torrentFile.isNotEmpty() -> {
-                    val bytes = java.util.Base64.getDecoder().decode(torrentFile)
-                    val filename = json?.optString("filename", "torrent") ?: "torrent"
-                    val job = RelayApp.getTorrent(context).addTorrentFile(bytes, filename)
-                    DebugLogger.i("Http", "torrent 파일 추가 id=${job.id} name=$filename")
-                    call.respondText(
-                        JSONObject().put("id", job.id).toString(),
-                        ContentType.Application.Json,
-                        HttpStatusCode.Created,
-                    )
-                }
-                else -> {
-                    call.respondText(
-                        "magnet 또는 torrentFileBase64 필요",
-                        ContentType.Text.Plain,
-                        HttpStatusCode.UnprocessableEntity,
-                    )
-                }
+            } catch (e: Exception) {
+                DebugLogger.e("Http", "토렌트 추가 실패", e)
+                call.respondErr("토렌트 추가 실패: ${e.message}")
             }
         }
 
@@ -377,6 +425,16 @@ private fun Application.relayRoutes(context: Context, serverRef: RelayServer) {
                 "pause" -> { engine.pause(id); call.respondText("ok") }
                 "resume" -> { engine.resume(id); call.respondText("ok") }
                 else -> call.respondText("지원 없는 동작", ContentType.Text.Plain, HttpStatusCode.BadRequest)
+            }
+        }
+
+        get("/api/torrents/{id}") {
+            val id = call.parameters["id"]!!
+            val detail = RelayApp.getTorrent(context).getTorrentDetail(id)
+            if (detail.isEmpty()) {
+                call.respondText("없음", ContentType.Text.Plain, HttpStatusCode.NotFound)
+            } else {
+                call.respondText(detail.toJson(), ContentType.Application.Json)
             }
         }
 
@@ -392,23 +450,54 @@ private fun Application.relayRoutes(context: Context, serverRef: RelayServer) {
             }
         }
 
+        post("/api/torrents/reorder") {
+            val body = call.receiveText()
+            val json = try { JSONObject(body) } catch (_: Exception) { null }
+            val id = json?.optString("id") ?: ""
+            val newOrder = json?.optInt("newOrder", -1) ?: -1
+            if (id.isBlank() || newOrder < 0) {
+                call.respondText("잘못된 요청", ContentType.Text.Plain, HttpStatusCode.BadRequest)
+                return@post
+            }
+            TorrentRepository.reorder(id, newOrder)
+            call.respondText("ok")
+        }
+
         // ── 보관함 API ──
         val dlRoot = java.io.File("/sdcard/Download/DroidRelay")
+        val dlRootCanonical = dlRoot.canonicalFile
+        val trashDir = java.io.File(dlRoot, ".trash")
+
+        /** dlRoot 하위로 한정된 canonical File — 탈출 경로는 null */
+        fun storageFile(vararg parts: String): java.io.File? {
+            var f = dlRoot
+            for (p in parts) { if (p.isNotEmpty()) f = java.io.File(f, p) }
+            val c = f.canonicalFile
+            return if (c.path.startsWith(dlRootCanonical.path)) c else null
+        }
+
+        /** 파일·폴더 이름 1개 — 경로 구분자/상대경로 금지 */
+        fun safeLeafName(name: String): String? = name.takeIf {
+            it.isNotBlank() && !it.contains('/') && !it.contains('\\') && it != "." && it != ".."
+        }
 
         get("/api/storage") {
             val subPath = call.request.queryParameters["path"] ?: ""
-            val dir = if (subPath.isEmpty()) dlRoot else java.io.File(dlRoot, subPath)
-            if (!dir.exists() || !dir.isDirectory) {
+            val dir = storageFile(subPath)
+            if (dir == null || !dir.exists() || !dir.isDirectory) {
                 call.respondText("[]", ContentType.Application.Json)
                 return@get
             }
             val arr = org.json.JSONArray()
-            dir.listFiles()?.sortedWith(compareByDescending<java.io.File> { it.isDirectory }.thenBy { it.name })?.forEach { f ->
+            dir.listFiles()?.sortedWith(compareByDescending<java.io.File> { it.isDirectory }.thenBy { it.name })
+                ?.filter { it.name != ".trash" }
+                ?.forEach { f ->
                 val obj = org.json.JSONObject()
                 obj.put("name", f.name)
                 obj.put("type", if (f.isDirectory) "dir" else "file")
                 obj.put("size", if (f.isFile) f.length() else 0)
                 obj.put("count", if (f.isDirectory) (f.listFiles()?.size ?: 0) else 0)
+                obj.put("modified", f.lastModified())
                 arr.put(obj)
             }
             call.respondText(arr.toString(), ContentType.Application.Json)
@@ -418,39 +507,44 @@ private fun Application.relayRoutes(context: Context, serverRef: RelayServer) {
             val body = call.receiveText()
             val json = org.json.JSONObject(body)
             val subPath = json.optString("path", "")
-            val name = json.optString("name", "")
-            if (name.isBlank()) {
-                call.respondText("""{"error":"이름 없음"}""", ContentType.Application.Json)
+            val name = safeLeafName(json.optString("name", ""))
+            if (name == null) {
+                call.respondErr("이름 없음")
                 return@post
             }
-            val dir = if (subPath.isEmpty()) dlRoot else java.io.File(dlRoot, subPath)
+            val dir = storageFile(subPath)
+            if (dir == null) {
+                call.respondErr("잘못된 경로")
+                return@post
+            }
             val target = java.io.File(dir, name)
             if (target.exists()) {
-                call.respondText("""{"error":"이미 존재"}""", ContentType.Application.Json)
+                call.respondErr("이미 존재")
             } else {
+                DebugLogger.i("Http", "폴더 생성 ${target.name}")
                 target.mkdirs()
-                call.respondText("""{"ok":true}""", ContentType.Application.Json)
+                call.respondOk()
             }
         }
 
         post("/api/storage/rename") {
             val body = call.receiveText()
             val json = org.json.JSONObject(body)
-            val fromName = json.optString("from", "")
-            val toName = json.optString("to", "")
-            if (fromName.isBlank() || toName.isBlank()) {
-                call.respondText("""{"error":"이름 없음"}""", ContentType.Application.Json)
+            val fromFile = storageFile(json.optString("from", ""))
+            val toName = safeLeafName(json.optString("to", ""))
+            if (fromFile == null || toName == null) {
+                call.respondErr("이름 없음")
                 return@post
             }
-            val fromFile = java.io.File(dlRoot, fromName)
-            val toFile = java.io.File(dlRoot, toName)
+            val toFile = java.io.File(fromFile.parentFile, toName)
             if (!fromFile.exists()) {
-                call.respondText("""{"error":"원본 없음"}""", ContentType.Application.Json)
+                call.respondErr("원본 없음")
             } else if (toFile.exists()) {
-                call.respondText("""{"error":"대상 이미 존재"}""", ContentType.Application.Json)
+                call.respondErr("대상 이미 존재")
             } else {
+                DebugLogger.i("Http", "이름 변경 ${fromFile.name} → $toName")
                 fromFile.renameTo(toFile)
-                call.respondText("""{"ok":true}""", ContentType.Application.Json)
+                call.respondOk()
             }
         }
 
@@ -458,13 +552,110 @@ private fun Application.relayRoutes(context: Context, serverRef: RelayServer) {
             val body = call.receiveText()
             val json = org.json.JSONObject(body)
             val path = json.optString("path", "")
-            val target = java.io.File(dlRoot, path)
-            if (!target.exists()) {
-                call.respondText("""{"error":"없음"}""", ContentType.Application.Json)
-            } else {
-                target.deleteRecursively()
-                call.respondText("""{"ok":true}""", ContentType.Application.Json)
+            val target = storageFile(path)
+            if (target == null) {
+                DebugLogger.w("Http", "삭제 경로 탈출 차단 path=$path")
+                call.respondErr("잘못된 경로")
+                return@post
             }
+            if (!target.exists()) {
+                call.respondErr("없음")
+                return@post
+            }
+            // 휴지통 내부 대상은 즉시 영구삭제 (웹에서 별도 API 사용 권장)
+            if (target.canonicalFile.path.startsWith(trashDir.canonicalFile.path)) {
+                DebugLogger.i("Http", "영구삭제 ${target.name}")
+                target.deleteRecursively()
+                call.respondOk()
+                return@post
+            }
+            // 휴지통 이동 (T-703) — 이름 충돌 시 접미사
+            if (!trashDir.exists()) trashDir.mkdirs()
+            var dest = java.io.File(trashDir, target.name)
+            var i = 2
+            while (dest.exists()) { dest = java.io.File(trashDir, "${target.name}-$i"); i++ }
+            val moved = target.renameTo(dest)
+            if (moved || target.isDirectory.not()) {
+                if (!moved) target.copyTo(dest, overwrite = true).let { target.deleteRecursively() }
+                DebugLogger.i("Http", "휴지통 이동 ${target.name}${if (dest.name != target.name) " → ${dest.name}" else ""}")
+                call.respondOk()
+            } else {
+                DebugLogger.e("E-AND-STOR-1003", "휴지통 이동 실패 ${target.name}")
+                call.respondErr("휴지통 이동 실패")
+            }
+        }
+
+        // 폴더 트리 (T-608) — 깊이 3까지 재귀, .trash 제외
+        get("/api/storage/tree") {
+            fun walk(dir: java.io.File, depth: Int): org.json.JSONArray {
+                val arr = org.json.JSONArray()
+                if (depth > 3) return arr
+                dir.listFiles()
+                    ?.filter { it.isDirectory && it.name != ".trash" }
+                    ?.sortedBy { it.name.lowercase() }
+                    ?.forEach { d ->
+                        arr.put(org.json.JSONObject().apply {
+                            put("name", d.name)
+                            put("path", runCatching { d.relativeTo(dlRoot).path }.getOrDefault(d.name))
+                            put("children", walk(d, depth + 1))
+                        })
+                    }
+                return arr
+            }
+            call.respondText(walk(dlRoot, 0).toString(), ContentType.Application.Json)
+        }
+
+        // ── 휴지통 API (T-703) ──
+        get("/api/storage/trash") {
+            val arr = org.json.JSONArray()
+            trashDir.listFiles()?.sortedByDescending { it.lastModified() }?.forEach { f ->
+                arr.put(org.json.JSONObject().apply {
+                    put("name", f.name)
+                    put("type", if (f.isDirectory) "dir" else "file")
+                    put("size", if (f.isFile) f.length() else 0)
+                    put("modified", f.lastModified())
+                })
+            }
+            call.respondText(arr.toString(), ContentType.Application.Json)
+        }
+
+        post("/api/storage/trash/restore") {
+            val body = call.receiveText()
+            val json = org.json.JSONObject(body)
+            val name = safeLeafName(json.optString("name", ""))
+            if (name == null) { call.respondErr("이름 없음"); return@post }
+            val src = java.io.File(trashDir, name)
+            if (!src.exists()) { call.respondErr("없음"); return@post }
+            var dest = java.io.File(dlRoot, src.name)
+            var i = 2
+            while (dest.exists()) { dest = java.io.File(dlRoot, "${src.name}-$i"); i++ }
+            val moved = src.renameTo(dest)
+            if (moved || !src.isDirectory) {
+                if (!moved) src.copyTo(dest, overwrite = true).let { src.deleteRecursively() }
+                DebugLogger.i("Http", "휴지통 복원 ${src.name} → 보관함 루트${if (dest.name != src.name) " (${dest.name})" else ""}")
+                call.respondOk()
+            } else {
+                call.respondErr("복원 실패")
+            }
+        }
+
+        post("/api/storage/trash/purge") {
+            val body = try { JSONObject(call.receiveText()) } catch (_: Exception) { JSONObject() }
+            val name = safeLeafName(body.optString("name", ""))
+            when {
+                name != null -> {
+                    val t = java.io.File(trashDir, name)
+                    if (!t.exists()) { call.respondErr("없음"); return@post }
+                    t.deleteRecursively()
+                    DebugLogger.i("Http", "휴지통 영구삭제 $name")
+                }
+                else -> {
+                    val count = trashDir.listFiles()?.size ?: 0
+                    trashDir.listFiles()?.forEach { it.deleteRecursively() }
+                    DebugLogger.i("Http", "휴지통 비우기 ${count}건")
+                }
+            }
+            call.respondOk()
         }
 
         post("/api/storage/move") {
@@ -473,44 +664,156 @@ private fun Application.relayRoutes(context: Context, serverRef: RelayServer) {
             val fromName = json.optString("from", "")
             val toDir = json.optString("to", "")
             if (fromName.isBlank()) {
-                call.respondText("""{"error":"원본 없음"}""", ContentType.Application.Json)
+                call.respondErr("원본 없음")
                 return@post
             }
-            val src = java.io.File(dlRoot, fromName)
-            val dstDir = if (toDir.isEmpty()) dlRoot else java.io.File(dlRoot, toDir)
+            val src = storageFile(fromName)
+            val dstDir = storageFile(toDir)
+            if (src == null || dstDir == null) {
+                DebugLogger.w("Http", "이동 경로 탈출 차단 from=$fromName to=$toDir")
+                call.respondErr("잘못된 경로")
+                return@post
+            }
             val dst = java.io.File(dstDir, src.name)
             if (!src.exists()) {
-                call.respondText("""{"error":"원본 없음"}""", ContentType.Application.Json)
+                call.respondErr("원본 없음")
+                return@post
+            }
+            if (src == dst) {
+                DebugLogger.d("Http", "이동 무시(동일 위치) ${src.name}")
+                call.respondOk()
+                return@post
+            }
+            if (src.isDirectory && dst.path.startsWith(src.path + java.io.File.separator)) {
+                call.respondErr("폴더를 자기 하위로 이동할 수 없습니다")
+                return@post
+            }
+            if (!dstDir.exists()) dstDir.mkdirs()
+            DebugLogger.i("Http", "이동 ${src.name} → ${dstDir.path.removePrefix(dlRootCanonical.path)}")
+            // 안전 이동: rename 우선(원자적) → 실패 시 copy + 크기 검증 후 원본 삭제
+            val moved = if (src.renameTo(dst)) {
+                true
             } else {
-                src.copyTo(dst, overwrite = true)
-                src.deleteRecursively()
-                call.respondText("""{"ok":true}""", ContentType.Application.Json)
+                try {
+                    src.copyTo(dst, overwrite = true)
+                    if (dst.length() == src.length()) {
+                        src.deleteRecursively()
+                        true
+                    } else {
+                        DebugLogger.e("E-AND-STOR-1002", "이동 검증 실패 → 복사본 폐기, 원본 보존 ${src.name}")
+                        dst.deleteRecursively()
+                        false
+                    }
+                } catch (e: Exception) {
+                    DebugLogger.e("E-AND-STOR-1002", "이동 실패 ${src.name}: ${e.message}")
+                    dst.deleteRecursively()
+                    false
+                }
+            }
+            if (moved) {
+                call.respondOk()
+            } else {
+                call.respondErr("이동 실패 (원본 보존)")
+            }
+        }
+
+        // Raw binary 업로드 — multipart 없이 스트리밍 (대용량 파일 지원)
+        post("/api/storage/raw-upload") {
+            try {
+                val fileName = call.request.headers["X-File-Name"] ?: "upload"
+                val subPath = call.request.headers["X-File-Path"] ?: ""
+                val dir = storageFile(subPath)
+                if (dir == null) { call.respondErr("잘못된 경로"); return@post }
+                dir.mkdirs()
+                val safeName = safeLeafName(fileName) ?: "upload"
+                val file = java.io.File(dir, safeName)
+
+                // raw body → 파일 스트리밍 (메모리에 로드 없이)
+                val channel = call.request.receiveChannel()
+                java.io.FileOutputStream(file).use { fos ->
+                    val buf = ByteArray(65536)
+                    while (true) {
+                        val n = channel.readAvailable(buf, 0, buf.size)
+                        if (n == -1) break
+                        if (n > 0) fos.write(buf, 0, n)
+                    }
+                }
+                DebugLogger.i("Http", "업로드 완료 ${file.name} (${file.length()}B)")
+                call.respondOk()
+            } catch (e: Exception) {
+                DebugLogger.e("Http", "업로드 실패", e)
+                call.respondErr("업로드 실패: ${e.message}")
             }
         }
 
         post("/api/storage/upload") {
-            val body = call.receiveText()
-            val json = org.json.JSONObject(body)
-            val subPath = json.optString("path", "")
-            val name = json.optString("name", "")
-            val data = json.optString("data", "")
-            if (name.isBlank() || data.isBlank()) {
-                call.respondText("""{"error":"파일 없음"}""", ContentType.Application.Json)
-                return@post
+            try {
+                val isMultipart = call.request.headers["Content-Type"]?.contains("multipart/form-data") == true
+                var subPath = ""
+                var fileName = ""
+                var fileBytes: ByteArray? = null
+
+                if (isMultipart) {
+                    val multipart = call.receiveMultipart()
+                    var part: PartData? = multipart.readPart()
+                    while (part != null) {
+                        when (part) {
+                            is PartData.FormItem -> {
+                                val value = part.value
+                                when (part.name) {
+                                    "path" -> subPath = value
+                                    "name" -> fileName = value
+                                }
+                            }
+                            is PartData.FileItem -> {
+                                fileName = fileName.ifEmpty { part.originalFileName ?: "upload" }
+                                fileBytes = part.provider().toByteArray()
+                            }
+                            else -> {}
+                        }
+                        part.dispose()
+                        part = multipart.readPart()
+                    }
+                } else {
+                    val body = call.receiveText()
+                    val json = org.json.JSONObject(body)
+                    subPath = json.optString("path", "")
+                    fileName = safeLeafName(json.optString("name", "")) ?: ""
+                    val data = json.optString("data", "")
+                    if (data.isNotEmpty()) {
+                        fileBytes = java.util.Base64.getDecoder().decode(data)
+                    }
+                }
+
+                val safeName = safeLeafName(fileName)
+                if (safeName == null || fileBytes == null || fileBytes.isEmpty()) {
+                    call.respondErr("파일 없음")
+                    return@post
+                }
+                val dir = storageFile(subPath)
+                if (dir == null) {
+                    call.respondErr("잘못된 경로")
+                    return@post
+                }
+                dir.mkdirs()
+                val file = java.io.File(dir, safeName)
+                DebugLogger.i("Http", "업로드 ${file.name} (${fileBytes.size}B)")
+                file.writeBytes(fileBytes)
+                call.respondOk()
+            } catch (e: Exception) {
+                DebugLogger.e("Http", "업로드 실패", e)
+                call.respondErr("업로드 실패: ${e.message}")
             }
-            val dir = if (subPath.isEmpty()) dlRoot else java.io.File(dlRoot, subPath)
-            dir.mkdirs()
-            val file = java.io.File(dir, name)
-            file.writeBytes(java.util.Base64.getDecoder().decode(data))
-            call.respondText("""{"ok":true}""", ContentType.Application.Json)
         }
 
         get("/dl-file/{name...}") {
             val name = call.parameters.getAll("name")?.joinToString("/") ?: ""
-            val file = java.io.File(dlRoot, name)
-            if (!file.exists() || !file.isFile) {
+            val file = storageFile(name)
+            if (file == null || !file.exists() || !file.isFile) {
+                DebugLogger.w("Http", "다운로드 경로 차단 name=$name")
                 call.respondText("404 없음", ContentType.Text.Plain, HttpStatusCode.NotFound)
             } else {
+                DebugLogger.i("Http", "파일 다운로드 요청 name=$name")
                 call.response.header(HttpHeaders.ContentDisposition, "attachment; filename=\"${file.name}\"")
                 call.respondBytesWriter(contentType = ContentType.Application.OctetStream, contentLength = file.length()) {
                     file.inputStream().use { input ->
@@ -520,6 +823,22 @@ private fun Application.relayRoutes(context: Context, serverRef: RelayServer) {
                             writeFully(buf, 0, read)
                         }
                     }
+                }
+            }
+        }
+
+        // ── SSE 실시간 푸시 (T-701) — 웹은 tick 수신 시 refresh, 끊기면 폴링 폴백 ──
+        get("/api/events") {
+            call.response.header(HttpHeaders.CacheControl, "no-cache")
+            call.respondBytesWriter(contentType = ContentType.Text.EventStream) {
+                try {
+                    while (true) {
+                        writeStringUtf8("data: tick\n\n")
+                        flush()
+                        delay(1000)
+                    }
+                } catch (_: Exception) {
+                    DebugLogger.d("SSE", "클라이언트 연결 종료")
                 }
             }
         }
@@ -627,6 +946,14 @@ internal const val BUFFER_SIZE = 64 * 1024
 
 private fun fmt(n: Long): String = when {
     n < 1_048_576 -> "${n / 1024}KB"
-    n < 1_073_741_824 -> String.format("%.1fMB", n / 1_048_576.0)
+    n < 1_073_741_824 -> String.format("%.1fMB", n / 1_073_741_824.0)
     else -> String.format("%.2fGB", n / 1_073_741_824.0)
 }
+
+// ── 보관함 JSON 응답 헬퍼 ──
+
+internal suspend fun ApplicationCall.respondOk() =
+    respondText("""{"ok":true}""", ContentType.Application.Json)
+
+internal suspend fun ApplicationCall.respondErr(msg: String) =
+    respondText("""{"error":"$msg"}""", ContentType.Application.Json)

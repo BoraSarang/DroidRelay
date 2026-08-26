@@ -23,6 +23,7 @@ class TorrentPersistence(private val context: Context) {
                     put("progress", t.progress.toDouble())
                     put("totalSize", t.totalSize)
                     put("downloadedSize", t.downloadedSize)
+                    put("order", t.order)
                     put("uploadLimit", t.uploadLimit)
                     put("downloadLimit", t.downloadLimit)
                     put("savePath", t.savePath)
@@ -65,6 +66,7 @@ class TorrentPersistence(private val context: Context) {
                     progress = o.optDouble("progress", 0.0).toFloat(),
                     totalSize = o.optLong("totalSize", 0L),
                     downloadedSize = o.optLong("downloadedSize", 0L),
+                    order = o.optInt("order", 0),
                     uploadLimit = o.optLong("uploadLimit", 0L),
                     downloadLimit = o.optLong("downloadLimit", 0L),
                     savePath = o.optString("savePath", ""),

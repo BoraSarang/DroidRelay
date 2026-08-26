@@ -30,7 +30,7 @@ data class AppSettings(
     val port: Int = 8080,
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
     val dynamicColor: Boolean = true,
-    val concurrency: Int = 2,
+    val concurrency: Int = 1,
     val autoStart: Boolean = true,
     val notifications: Boolean = true,
     val webAuthEnabled: Boolean = false,
@@ -91,7 +91,7 @@ class SettingsRepository(private val context: Context) {
             themeMode = runCatching { ThemeMode.valueOf(p[Keys.THEME] ?: ThemeMode.SYSTEM.name) }
                 .getOrDefault(ThemeMode.SYSTEM),
             dynamicColor = p[Keys.DYNAMIC] ?: true,
-            concurrency = (p[Keys.CONCURRENCY] ?: 2).coerceIn(1, 4),
+            concurrency = (p[Keys.CONCURRENCY] ?: 1).coerceIn(1, 4),
             autoStart = p[Keys.AUTO_START] ?: true,
             notifications = p[Keys.NOTIFICATIONS] ?: true,
             webAuthEnabled = p[Keys.WEB_AUTH] ?: false,

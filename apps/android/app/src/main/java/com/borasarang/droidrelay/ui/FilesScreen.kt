@@ -95,7 +95,7 @@ fun FilesScreen() {
                 if (!dir.exists()) dir.mkdirs()
                 val list = dir.listFiles()?.sortedWith(
                     compareByDescending<File> { it.isDirectory }.thenBy { it.name }
-                )?.map { f ->
+                )?.filter { !(currentPath.value.isEmpty() && it.name == ".trash") }?.map { f ->
                     StorageItem(
                         name = f.name,
                         isDir = f.isDirectory,

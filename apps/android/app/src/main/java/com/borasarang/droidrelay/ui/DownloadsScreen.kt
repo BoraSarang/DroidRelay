@@ -20,7 +20,10 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.ArrowDropUp
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Button
@@ -260,29 +263,68 @@ private fun AddRow() {
 private fun JobCard(job: Job) {
     val engine = RelayApp.get(LocalContext.current)
     val cs = MaterialTheme.colorScheme
+    val now = System.currentTimeMillis()
 
     Card(colors = CardDefaults.cardColors(containerColor = cs.surfaceContainerHigh), shape = MaterialTheme.shapes.medium) {
         Column(Modifier.fillMaxWidth().padding(14.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text(job.filename, color = cs.onSurface, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Spacer(Modifier.height(2.dp))
-                    Text(stateLabel(job), color = cs.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
+                // 좌측 순서 변경 화살표 (고정폭)
+                Column(
+                    modifier = Modifier.width(28.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    IconButton(
+                        onClick = { engine.reorder(job.id, -1) },
+                        modifier = Modifier.size(28.dp),
+                    ) {
+                        Icon(Icons.Filled.ArrowDropUp, "위로", tint = cs.onSurfaceVariant, modifier = Modifier.size(16.dp))
+                    }
+                    IconButton(
+                        onClick = { engine.reorder(job.id, 1) },
+                        modifier = Modifier.size(28.dp),
+                    ) {
+                        Icon(Icons.Filled.ArrowDropDown, "아래로", tint = cs.onSurfaceVariant, modifier = Modifier.size(16.dp))
+                    }
                 }
-                when (job.state) {
-                    JobState.RUNNING -> IconButton(onClick = {
-                        DebugLogger.i("UI", "일시정지 버튼 id=${job.id}")
-                        engine.pause(job.id)
-                    }) { Icon(Icons.Filled.Pause, "일시정지", tint = cs.onSurfaceVariant) }
-                    JobState.PAUSED, JobState.FAILED -> IconButton(onClick = {
-                        DebugLogger.i("UI", "재개 버튼 id=${job.id}")
-                        engine.resume(job.id)
-                    }) { Icon(Icons.Filled.PlayArrow, "재개", tint = cs.primary) }
-                    else -> IconButton(onClick = {
-                        DebugLogger.i("UI", "삭제 버튼 id=${job.id}")
-                        engine.cancel(job.id)
-                        JobsRepository.remove(job.id)
-                    }) { Icon(Icons.Filled.Close, "삭제", tint = cs.onSurfaceVariant) }
+                // 콘텐츠 + 액션
+                Column(Modifier.weight(1f)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(job.filename, color = cs.onSurface, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Spacer(Modifier.height(2.dp))
+                            Text(stateLabel(job), color = cs.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
+                            if (job.state == JobState.RUNNING && job.speedBps > 0) {
+                                val etaParts = mutableListOf<String>()
+                                if (job.startedAt > 0) {
+                                    val elapsed = (now - job.startedAt) / 1000
+                                    etaParts.add("${fmtDuration(elapsed)} 경과")
+                                }
+                                if (job.totalBytes > 0 && job.downloadedBytes < job.totalBytes) {
+                                    val remain = (job.totalBytes - job.downloadedBytes) / job.speedBps
+                                    etaParts.add("${fmtDuration(remain)} 남음")
+                                }
+                                if (etaParts.isNotEmpty()) {
+                                    Spacer(Modifier.height(1.dp))
+                                    Text("⏱ ${etaParts.joinToString(" · ")}", color = cs.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
+                                }
+                            }
+                        }
+                        when (job.state) {
+                            JobState.RUNNING -> IconButton(onClick = {
+                                DebugLogger.i("UI", "일시정지 버튼 id=${job.id}")
+                                engine.pause(job.id)
+                            }) { Icon(Icons.Filled.Pause, "일시정지", tint = cs.onSurfaceVariant) }
+                            JobState.PAUSED, JobState.FAILED -> IconButton(onClick = {
+                                DebugLogger.i("UI", "재개 버튼 id=${job.id}")
+                                engine.resume(job.id)
+                            }) { Icon(Icons.Filled.PlayArrow, "재개", tint = cs.primary) }
+                            else -> IconButton(onClick = {
+                                DebugLogger.i("UI", "삭제 버튼 id=${job.id}")
+                                engine.cancel(job.id)
+                                JobsRepository.remove(job.id)
+                            }) { Icon(Icons.Filled.Close, "삭제", tint = cs.onSurfaceVariant) }
+                        }
+                    }
                 }
             }
             if (job.state in listOf(JobState.RUNNING, JobState.DONE, JobState.PAUSED)) {
@@ -402,6 +444,16 @@ internal fun fmtBytes(n: Long): String = when {
     n < 1_048_576 -> "${n / 1024} KB"
     n < 1_073_741_824 -> String.format("%.1f MB", n / 1_048_576.0)
     else -> String.format("%.2f GB", n / 1_073_741_824.0)
+}
+
+internal fun fmtDuration(seconds: Long): String {
+    if (seconds < 0) return ""
+    val sec = seconds.toInt()
+    return when {
+        sec < 60 -> "${sec}초"
+        sec < 3600 -> "${sec / 60}분 ${sec % 60}초"
+        else -> "${sec / 3600}시간 ${(sec % 3600) / 60}분"
+    }
 }
 
 internal fun qrBitmap(content: String): Bitmap? {

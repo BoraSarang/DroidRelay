@@ -36,6 +36,7 @@ import com.borasarang.droidrelay.relay.SettingsRepository
 import com.borasarang.droidrelay.relay.ThemeMode
 import com.borasarang.droidrelay.relay.lanAddress
 import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 
 @Composable
 fun SettingsScreen(onPortChanged: (Int) -> Unit) {
@@ -252,45 +253,50 @@ fun SettingsScreen(onPortChanged: (Int) -> Unit) {
         HorizontalDivider(color = cs.outlineVariant)
 
         // ── Torrent ──
+        val uploadPresets = remember { listOf(0L, 64L, 256L, 512L, 1024L) } // KB/s
+        val uploadLabels = listOf("끔", "64", "256", "512", "1M")
+        val downloadPresets = remember { listOf(0L, 1024L, 5120L, 10240L, 20480L) } // KB/s
+        val downloadLabels = listOf("무제한", "1M", "5M", "10M", "20M")
+
         SettingSection("Torrent") {
-            // 업로드 속도
+            // 업로드 속도 (0 = 업로드 사용 안 함)
             Text(
-                "기본 업로드 속도: ${if (s.torrentUploadLimit == 0L) "무제한" else "${s.torrentUploadLimit / 1024} MB/s"}",
+                "기본 업로드 속도: ${if (s.torrentUploadLimit == 0L) "사용 안 함" else "${s.torrentUploadLimit} KB/s"}",
                 color = cs.onSurface,
             )
             Slider(
-                value = s.torrentUploadLimit.toFloat() / 1024,
+                value = uploadPresets.indexOfFirst { it == s.torrentUploadLimit }.coerceAtLeast(0).toFloat(),
                 onValueChange = { v ->
-                    val kbps = (v / 128).toInt() * 128
-                    kotlinx.coroutines.MainScope().launch { repo.setTorrentUploadLimit(kbps) }
+                    val idx = v.roundToInt().coerceIn(0, uploadPresets.lastIndex)
+                    kotlinx.coroutines.MainScope().launch { repo.setTorrentUploadLimit(uploadPresets[idx].toInt()) }
                 },
-                valueRange = 0f..2048f,
-                steps = 9,
+                valueRange = 0f..uploadPresets.lastIndex.toFloat(),
+                steps = uploadPresets.size - 2,
             )
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                listOf("무제한", "0.1", "0.2", "0.3", "0.5", "0.7", "1.0", "1.5", "2.0", "2.0").forEach { label ->
+                uploadLabels.forEach { label ->
                     Text(label, style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
                 }
             }
 
             Spacer(Modifier.height(8.dp))
 
-            // 다운로드 속도
+            // 다운로드 속도 (0 = 무제한)
             Text(
-                "기본 다운로드 속도: ${if (s.torrentDownloadLimit == 0L) "무제한" else "${s.torrentDownloadLimit / 1024} MB/s"}",
+                "기본 다운로드 속도: ${if (s.torrentDownloadLimit == 0L) "무제한" else "${s.torrentDownloadLimit} KB/s"}",
                 color = cs.onSurface,
             )
             Slider(
-                value = s.torrentDownloadLimit.toFloat() / 1024,
+                value = downloadPresets.indexOfFirst { it == s.torrentDownloadLimit }.coerceAtLeast(0).toFloat(),
                 onValueChange = { v ->
-                    val kbps = (v / 128).toInt() * 128
-                    kotlinx.coroutines.MainScope().launch { repo.setTorrentDownloadLimit(kbps) }
+                    val idx = v.roundToInt().coerceIn(0, downloadPresets.lastIndex)
+                    kotlinx.coroutines.MainScope().launch { repo.setTorrentDownloadLimit(downloadPresets[idx].toInt()) }
                 },
-                valueRange = 0f..8192f,
-                steps = 9,
+                valueRange = 0f..downloadPresets.lastIndex.toFloat(),
+                steps = downloadPresets.size - 2,
             )
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                listOf("무제한", "0.1", "0.25", "0.5", "1", "2", "3", "4", "6", "8").forEach { label ->
+                downloadLabels.forEach { label ->
                     Text(label, style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
                 }
             }
@@ -316,6 +322,32 @@ fun SettingsScreen(onPortChanged: (Int) -> Unit) {
             SwitchRow("DHT (분산 해시 테이블)", s.torrentDhtEnabled) { v -> kotlinx.coroutines.MainScope().launch { repo.setTorrentDhtEnabled(v) } }
             SwitchRow("PEX (피어 교환)", s.torrentPexEnabled) { v -> kotlinx.coroutines.MainScope().launch { repo.setTorrentPexEnabled(v) } }
         }
+
+        // ── 앱 정보 ──
+        val appVersion = remember {
+            runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName }.getOrNull() ?: "?"
+        }
+        SettingSection("앱 정보") {
+            InfoRow("버전", appVersion)
+            InfoRow("제작자", "BoRaSaRang")
+            InfoRow("문의", "leeborasarang@gmail.com")
+        }
+    }
+}
+
+@Composable
+private fun InfoRow(label: String, value: String) {
+    Row(
+        Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(label, color = MaterialTheme.colorScheme.onSurface)
+        Text(
+            value,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.bodySmall,
+        )
     }
 }
 

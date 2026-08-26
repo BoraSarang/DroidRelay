@@ -35,6 +35,7 @@ data class TorrentJob(
     val errorMessage: String? = null,
     val startedAt: Long = 0L,
     val finishedAt: Long = 0L,
+    val order: Int = 0,
 )
 
 data class TorrentFile(
@@ -55,9 +56,10 @@ object TorrentRepository {
     fun get(id: String): TorrentJob? = map[id]
 
     fun add(job: TorrentJob) {
-        map[job.id] = job
+        val nextOrder = (map.values.maxOfOrNull { it.order } ?: 0) + 1
+        map[job.id] = job.copy(order = nextOrder)
         refresh()
-        DebugLogger.i(TAG, "torrent 추가 id=${job.id} name='${job.name}' state=${job.state}")
+        DebugLogger.i(TAG, "torrent 추가 id=${job.id} name='${job.name}' state=${job.state} order=$nextOrder")
     }
 
     fun update(id: String, transform: (TorrentJob) -> TorrentJob) {
@@ -90,8 +92,19 @@ object TorrentRepository {
         DebugLogger.d(TAG, "복원 등록 id=${job.id} '${job.name}' state=${job.state}")
     }
 
+    fun reorder(id: String, newOrder: Int) {
+        val job = map[id] ?: return
+        val others = map.values.filter { it.id != id }.sortedBy { it.order }.toMutableList()
+        val target = newOrder.coerceIn(0, others.size)
+        others.add(target, job)
+        others.forEachIndexed { i, j -> map[j.id] = j.copy(order = i) }
+        map[id] = map[id]!!.copy(order = target)
+        refresh()
+        DebugLogger.i(TAG, "순서 변경 id=$id → order=$target")
+    }
+
     private fun refresh() {
-        _torrents.value = map.values.sortedByDescending { it.id }
+        _torrents.value = map.values.sortedBy { it.order }
     }
 
     fun newId(): String = System.currentTimeMillis().toString(36) + (0..999).random()

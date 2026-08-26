@@ -21,9 +21,12 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.ArrowDropUp
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Link
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.AlertDialog
@@ -146,6 +149,8 @@ fun TorrentScreen() {
                         onPause = { engine.pause(job.id) },
                         onResume = { engine.resume(job.id) },
                         onDelete = { showDeleteDialog = job },
+                        onMoveUp = { engine.reorder(job.id, -1) },
+                        onMoveDown = { engine.reorder(job.id, 1) },
                     )
                 }
             }
@@ -191,44 +196,81 @@ private fun TorrentItem(
     onPause: () -> Unit,
     onResume: () -> Unit,
     onDelete: () -> Unit,
+    onMoveUp: () -> Unit,
+    onMoveDown: () -> Unit,
 ) {
+    val now = System.currentTimeMillis()
+
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainer,
         ),
     ) {
-        Column(Modifier.padding(16.dp)) {
+        Column(Modifier.fillMaxWidth().padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(
+                    modifier = Modifier.width(28.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    IconButton(onClick = onMoveUp, modifier = Modifier.size(28.dp)) {
+                        Icon(Icons.Filled.ArrowDropUp, "위로", modifier = Modifier.size(16.dp))
+                    }
+                    IconButton(onClick = onMoveDown, modifier = Modifier.size(28.dp)) {
+                        Icon(Icons.Filled.ArrowDropDown, "아래로", modifier = Modifier.size(16.dp))
+                    }
+                }
                 Column(Modifier.weight(1f)) {
-                    Text(
-                        job.name,
-                        style = MaterialTheme.typography.bodyLarge,
-                        fontWeight = FontWeight.Medium,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        stateLabel(job),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = stateColor(job.state),
-                    )
-                }
-                if (job.state == TorrentState.DOWNLOADING || job.state == TorrentState.FETCHING_METADATA) {
-                    IconButton(onClick = onPause) {
-                        Icon(Icons.Filled.Pause, "일시정지")
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                job.name,
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.Medium,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                stateLabel(job),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = stateColor(job.state),
+                            )
+                            if (job.state == TorrentState.DOWNLOADING && job.downloadSpeed > 0) {
+                                val etaParts = mutableListOf<String>()
+                                if (job.startedAt > 0) {
+                                    val elapsed = (now - job.startedAt) / 1000
+                                    etaParts.add("${fmtDurationT(elapsed)} 경과")
+                                }
+                                if (job.totalSize > 0 && job.downloadedSize < job.totalSize) {
+                                    val remain = (job.totalSize - job.downloadedSize) / job.downloadSpeed
+                                    etaParts.add("${fmtDurationT(remain)} 남음")
+                                }
+                                if (etaParts.isNotEmpty()) {
+                                    Spacer(Modifier.height(2.dp))
+                                    Text(
+                                        "⏱ ${etaParts.joinToString(" · ")}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
+                        }
+                        if (job.state == TorrentState.DOWNLOADING || job.state == TorrentState.FETCHING_METADATA) {
+                            IconButton(onClick = onPause) {
+                                Icon(Icons.Filled.Pause, "일시정지")
+                            }
+                        } else if (job.state == TorrentState.PAUSED || job.state == TorrentState.FAILED) {
+                            IconButton(onClick = onResume) {
+                                Icon(Icons.Filled.PlayArrow, "재개")
+                            }
+                        }
+                        IconButton(onClick = onDelete) {
+                            Icon(Icons.Filled.Delete, "삭제")
+                        }
                     }
-                } else if (job.state == TorrentState.PAUSED || job.state == TorrentState.FAILED) {
-                    IconButton(onClick = onResume) {
-                        Icon(Icons.Filled.PlayArrow, "재개")
-                    }
-                }
-                IconButton(onClick = onDelete) {
-                    Icon(Icons.Filled.Delete, "삭제")
                 }
             }
-
             if (job.totalSize > 0) {
                 Spacer(Modifier.height(8.dp))
                 LinearProgressIndicator(
@@ -324,4 +366,14 @@ private fun fmtSpeed(bps: Long): String = when {
     bps < 1_024 -> "${bps}B/s"
     bps < 1_048_576 -> "${bps / 1024}KB/s"
     else -> String.format("%.1fMB/s", bps / 1_048_576.0)
+}
+
+private fun fmtDurationT(seconds: Long): String {
+    if (seconds < 0) return ""
+    val sec = seconds.toInt()
+    return when {
+        sec < 60 -> "${sec}초"
+        sec < 3600 -> "${sec / 60}분 ${sec % 60}초"
+        else -> "${sec / 3600}시간 ${(sec % 3600) / 60}분"
+    }
 }

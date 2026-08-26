@@ -7,6 +7,7 @@ import android.provider.MediaStore
 import java.io.File
 import java.io.RandomAccessFile
 import java.net.URLDecoder
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.CoroutineScope
@@ -31,9 +32,10 @@ class DownloadEngine(
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val pending = ConcurrentLinkedQueue<String>()
+    private val failureReasons = ConcurrentHashMap<String, String>()
     private val active = AtomicInteger(0)
 
-    @Volatile private var concurrencyTarget = 2
+    @Volatile private var concurrencyTarget = 1
     @Volatile private var limitKbps = 0
 
     val workDir: File
@@ -73,9 +75,9 @@ class DownloadEngine(
         if (JobsRepository.get(job.id) == null) JobsRepository.restore(job)
     }
 
-    fun enqueue(url: String): Job {
+    fun enqueue(url: String, expectedSha256: String? = null): Job {
         val name = JobsRepository.filenameFromUrl(url)
-        val job = JobsRepository.add(url, URLDecoder.decode(name, "UTF-8"))
+        val job = JobsRepository.add(url, URLDecoder.decode(name, "UTF-8"), expectedSha256)
         DebugLogger.i(TAG, "큐 진입 id=${job.id} url=$url")
         pending.add(job.id)
         tryStart()
@@ -109,7 +111,18 @@ class DownloadEngine(
         pending.remove(id)
         JobsRepository.update(id) { it.copy(state = JobState.CANCELED, speedBps = 0L) }
         DebugLogger.i(TAG, "취소 id=$id '${job.filename}' (${fmt(job.downloadedBytes)} 시점)")
-        scope.launch { partialFile(job).takeIf { it.exists() }?.delete() }
+        scope.launch {
+            partialFile(job).takeIf { it.exists() }?.delete()
+            doneFile(job).takeIf { it.exists() }?.delete()
+        }
+    }
+
+    fun reorder(id: String, direction: Int) {
+        val jobs = JobsRepository.all()
+        val idx = jobs.indexOfFirst { it.id == id }
+        if (idx < 0) return
+        val target = (idx + direction).coerceIn(0, jobs.size - 1)
+        JobsRepository.reorder(id, target)
     }
 
     /** 네트워크 복구 시 FAILED 작업 자동 재시도 (NetworkMonitor 콜백) */
@@ -154,16 +167,22 @@ class DownloadEngine(
                 Outcome.RETRY -> {
                     if (JobsRepository.get(id)?.state == JobState.CANCELED) return
                     val wait = 2000L * attempt
-                    DebugLogger.w(TAG, "실패 → ${wait}ms 후 재시도 id=$id (E-AND-DOWN-1001)")
+                    val reason = failureReasons.remove(id) ?: "네트워크 오류"
+                    DebugLogger.w(TAG, "실패 → ${wait}ms 후 재시도 id=$id 사유=$reason (E-AND-DOWN-1001)")
                     JobsRepository.update(id) {
-                        it.copy(state = JobState.RUNNING, errorMessage = "재시도 $attempt/$MAX_RETRY (E-AND-DOWN-1001)")
+                        it.copy(state = JobState.RUNNING, errorMessage = "재시도 $attempt/$MAX_RETRY · $reason (E-AND-DOWN-1001)")
                     }
                     delay(wait)
                 }
             }
         }
+        val lastReason = failureReasons.remove(id)
         JobsRepository.update(id) {
-            it.copy(state = JobState.FAILED, errorCode = "E-AND-DOWN-1001", errorMessage = "E-AND-DOWN-1001: 네트워크 단절 ${MAX_RETRY}회 실패", speedBps = 0L)
+            it.copy(
+                state = JobState.FAILED, errorCode = "E-AND-DOWN-1001",
+                errorMessage = "네트워크 단절 ${MAX_RETRY}회 실패${lastReason?.let { r -> " · $r" } ?: ""} (E-AND-DOWN-1001)",
+                speedBps = 0L,
+            )
         }
         DebugLogger.e(TAG, "최종 실패 id=$id")
     }
@@ -261,11 +280,11 @@ class DownloadEngine(
                             firstTick = false
                             lastTick = now
                             lastPos = raf.filePointer
-                            val curBytes = offset + raf.filePointer
+                            val curBytes = raf.filePointer
                             JobsRepository.update(id) { j ->
                                 j.copy(
                                     downloadedBytes = curBytes,
-                                    progress = if (total > 0) (curBytes.toFloat() / total) else 0f,
+                                    progress = if (total > 0) (curBytes.toFloat() / total).coerceIn(0f, 1f) else 0f,
                                     speedBps = emaBps.toLong(),
                                 )
                             }
@@ -281,9 +300,38 @@ class DownloadEngine(
                     DebugLogger.w(TAG, "rename 실패 → copyTo 대체 id=$id")
                     partial.copyTo(done, overwrite = true); partial.delete()
                 }
+
+                // 체크섬 검증 (T-704) — 지정 시 스트리밍 SHA-256 비교
+                val expected = JobsRepository.get(id)?.expectedSha256
+                if (expected != null) {
+                    val actual = sha256(done)
+                    if (!actual.equals(expected, ignoreCase = true)) {
+                        done.delete()
+                        DebugLogger.e(TAG, "체크섬 불일치 id=$id expected=$expected actual=$actual (E-AND-DOWN-1005)")
+                        JobsRepository.update(id) { j ->
+                            j.copy(
+                                state = JobState.FAILED, errorCode = "E-AND-DOWN-1005",
+                                errorMessage = "체크섬 불일치 — 파일이 손상되었을 수 있습니다 (E-AND-DOWN-1005)",
+                                speedBps = 0L,
+                            )
+                        }
+                        return@withContext Outcome.COMPLETED
+                    }
+                    DebugLogger.i(TAG, "체크섬 검증 통과 sha256=${actual.take(16)}… id=$id")
+                }
+
                 publishToDownloads(done, id)
+                // 보관함(MediaStore)에 게시했으므로 앱 전용 원본 삭제
+                try {
+                    if (done.exists()) done.delete()
+                    DebugLogger.d(TAG, "앱 전용 원본 삭제 id=$id")
+                } catch (_: Exception) {}
                 JobsRepository.update(id) { j ->
-                    j.copy(state = JobState.DONE, progress = 1f, downloadedBytes = finalSize, totalBytes = finalSize, speedBps = 0L, finishedAt = System.currentTimeMillis())
+                    j.copy(
+                        state = JobState.DONE, progress = 1f, downloadedBytes = finalSize,
+                        totalBytes = finalSize, speedBps = 0L,
+                        verified = expected != null, finishedAt = System.currentTimeMillis(),
+                    )
                 }
                 DebugLogger.perf(TAG, "다운로드 id=$id '${done.name}' ${fmt(finalSize)} 평균=${fmt(finalSize * 1000 / elapsed)}/s") {}
                 return@withContext Outcome.COMPLETED
@@ -293,7 +341,24 @@ class DownloadEngine(
             if (st == JobState.CANCELED || st == JobState.PAUSED) return@withContext if (st == JobState.PAUSED) Outcome.PAUSED else Outcome.CANCELED
             if (e is kotlinx.coroutines.CancellationException) throw e
             DebugLogger.e(TAG, "예외 → 재시도 예정 id=$id", e)
+            failureReasons[id] = friendlyReason(e)
             return@withContext Outcome.RETRY
+        }
+    }
+
+    /** 예외 → 사용자 친화적 사유 (errorMessage 표시용) */
+    private fun friendlyReason(e: Exception): String {
+        val msg = (e.message ?: "").lowercase()
+        val cls = e.javaClass.simpleName
+        return when {
+            msg.contains("timeout") || cls.contains("Timeout") -> "연결 시간 초과"
+            msg.contains("reset") -> "연결이 끊김 (서버/네트워크)"
+            msg.contains("unknownhost") || msg.contains("unable to resolve") -> "서버 주소 확인 실패 (DNS)"
+            msg.contains("refused") -> "연결 거부됨"
+            msg.contains("space") -> "저장 공간 부족"
+            msg.contains("broken pipe") || msg.contains("eof") -> "전송 중단됨 (연결 끊김)"
+            msg.isNotBlank() -> "${cls}: ${e.message!!.take(60)}"
+            else -> cls.ifBlank { "알 수 없는 오류" }
         }
     }
 
@@ -322,6 +387,17 @@ class DownloadEngine(
         } catch (e: Exception) {
             DebugLogger.e(TAG, "게시 실패(원본 유지) id=$jobId", e)
         }
+    }
+
+    /** 스트리밍 SHA-256 (T-704) — 대용량 파일 메모리 안전 */
+    private fun sha256(file: File): String {
+        val md = java.security.MessageDigest.getInstance("SHA-256")
+        file.inputStream().use { input ->
+            val buf = ByteArray(BUFFER_SIZE)
+            var n: Int
+            while (input.read(buf).also { n = it } != -1) md.update(buf, 0, n)
+        }
+        return md.digest().joinToString("") { "%02x".format(it) }
     }
 
     private fun fmt(n: Long): String = when {

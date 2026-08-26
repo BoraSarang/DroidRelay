@@ -20,6 +20,9 @@ data class Job(
     val errorMessage: String? = null,
     val startedAt: Long = 0L,
     val finishedAt: Long = 0L,
+    val order: Int = 0,
+    val expectedSha256: String? = null,
+    val verified: Boolean = false,
 )
 
 object JobsRepository {
@@ -31,15 +34,19 @@ object JobsRepository {
     fun all(): List<Job> = _jobs.value
     fun get(id: String): Job? = map[id]
 
-    fun add(url: String, filename: String): Job {
+    fun add(url: String, filename: String, expectedSha256: String? = null): Job {
         map.values.none { it.url == url && it.state == JobState.RUNNING }
             .also { dup ->
                 if (!dup) DebugLogger.w(TAG, "중복 URL 재추가 감지: $url")
             }
-        val job = Job(id = newId(), url = url, filename = uniqueName(filename))
+        val nextOrder = (map.values.maxOfOrNull { it.order } ?: 0) + 1
+        val job = Job(
+            id = newId(), url = url, filename = uniqueName(filename),
+            order = nextOrder, expectedSha256 = expectedSha256?.lowercase(),
+        )
         map[job.id] = job
         refresh()
-        DebugLogger.i(TAG, "작업 추가 id=${job.id} file='${job.filename}' state=QUEUED")
+        DebugLogger.i(TAG, "작업 추가 id=${job.id} file='${job.filename}' state=QUEUED order=$nextOrder sha256=${if (expectedSha256 != null) "지정" else "없음"}")
         return job
     }
 
@@ -118,13 +125,30 @@ object JobsRepository {
 
     /** 복원용 — 상태 보존하여 직접 등록 (엔진 초기화 시 jobs.json 로드) */
     fun restore(job: Job) {
-        map[job.id] = job
+        // progress는 파생값이라 저장하지 않음 → 복원 시 bytes로 재계산 (T-601 회귀 방지)
+        val fixed = if (job.totalBytes > 0 && job.downloadedBytes > 0 && job.progress <= 0f)
+            job.copy(progress = (job.downloadedBytes.toFloat() / job.totalBytes).coerceIn(0f, 1f))
+        else job
+        map[fixed.id] = fixed
         refresh()
-        DebugLogger.d(TAG, "복원 등록 id=${job.id} '${job.filename}' state=${job.state}")
+        DebugLogger.d(TAG, "복원 등록 id=${fixed.id} '${fixed.filename}' state=${fixed.state} progress=${(fixed.progress * 100).toInt()}%")
     }
 
+    fun reorder(id: String, newOrder: Int) {
+        val job = map[id] ?: return
+        val others = map.values.filter { it.id != id }.sortedBy { it.order }.toMutableList()
+        val target = newOrder.coerceIn(0, others.size)
+        others.add(target, job)
+        others.forEachIndexed { i, j -> map[j.id] = j.copy(order = i) }
+        map[id] = map[id]!!.copy(order = target)
+        refresh()
+        DebugLogger.i(TAG, "순서 변경 id=$id → order=$target")
+    }
+
+    fun nextOrder(): Int = (map.values.maxOfOrNull { it.order } ?: 0) + 1
+
     private fun refresh() {
-        _jobs.value = map.values.sortedByDescending { it.id }
+        _jobs.value = map.values.sortedBy { it.order }
     }
 
     private fun newId(): String = System.currentTimeMillis().toString(36) + (0..999).random()

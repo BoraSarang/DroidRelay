@@ -61,6 +61,7 @@ class MainActivity : ComponentActivity() {
         // MVP: 서버 미기동 방지 위해 항상 기동 (autoStart 토글 반영은 후속)
         RelayService.start(this)
         requestNotificationPermission()
+        requestStoragePermission()
 
         setContent {
             val settings by settingsRepo.settings.collectAsState(initial = initial)
@@ -96,6 +97,21 @@ class MainActivity : ComponentActivity() {
             registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
                 DebugLogger.i("UI", "알림 권한 결과 granted=$granted")
             }.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
+
+    private fun requestStoragePermission() {
+        if (Build.VERSION.SDK_INT >= 30 && !android.os.Environment.isExternalStorageManager()) {
+            DebugLogger.i("UI", "저장소 권한 요청 MANAGE_EXTERNAL_STORAGE")
+            try {
+                val intent = android.content.Intent(android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
+                    data = android.net.Uri.parse("package:$packageName")
+                }
+                startActivity(intent)
+            } catch (_: Exception) {
+                val intent = android.content.Intent(android.provider.Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
+                startActivity(intent)
+            }
         }
     }
 
