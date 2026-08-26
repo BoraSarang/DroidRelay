@@ -101,10 +101,12 @@ final class RelayAPI: Sendable {
         try await decode([Job].self, request(Self.url(baseURL, "api/jobs")))
     }
 
-    func addJob(url urlString: String) async throws -> String {
+    func addJob(url urlString: String, sha256: String? = nil) async throws -> String {
+        var body: [String: Any] = ["url": urlString]
+        if let sha256, !sha256.isEmpty { body["sha256"] = sha256 }
         let r: AddResult = try await decode(AddResult.self,
                                       request(Self.url(baseURL, "api/jobs"), method: "POST",
-                                              body: ["url": urlString]))
+                                              body: body))
         return r.id
     }
 
@@ -181,5 +183,25 @@ final class RelayAPI: Sendable {
                                      "name": name,
                                      "data": data.base64EncodedString()
                                  ]))
+    }
+
+    /// Raw binary 업로드 — multipart 없이 스트리밍 (대용량 파일 지원)
+    func storageUploadRaw(path: String, name: String, data: Data,
+                          onProgress: ((Int64) -> Void)? = nil) async throws {
+        var req = request(Self.url(baseURL, "api/storage/raw-upload"), method: "POST")
+        req.setValue(name, forHTTPHeaderField: "X-File-Name")
+        req.setValue(path, forHTTPHeaderField: "X-File-Path")
+        req.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
+        req.timeoutInterval = 600
+
+        let (_, resp) = try await session.upload(for: req, from: data, delegate: nil)
+        onProgress?(Int64(data.count))
+        guard let http = resp as? HTTPURLResponse else {
+            throw APIError(code: "E-MAC-NET-1002", message: "응답 없음")
+        }
+        guard (200 ..< 300).contains(http.statusCode) else {
+            throw APIError(code: http.statusCode == 401 ? "E-MAC-AUTH-1004" : "E-MAC-NET-1002",
+                           message: "HTTP \(http.statusCode)")
+        }
     }
 }

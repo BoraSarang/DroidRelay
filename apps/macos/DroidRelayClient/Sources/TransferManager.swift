@@ -17,17 +17,20 @@ enum Notify {
     }
 }
 
-/// ⬇ 받기 매니저 — /file/{id}·/dl-file/{name} 스트리밍 저장, .part 이어받기
+/// ⬇ 받기 / ⬆ 올리기 매니저 — /file/{id}·/dl-file/{name} 스트리밍 저장, .part 이어받기, 업로드
 @Observable
 final class TransferManager {
+    enum Direction: String, Hashable { case download, upload }
+
     struct Active: Identifiable, Hashable {
-        let id: String // jobId 또는 "dl:" + 경로
+        let id: String // jobId 또는 "dl:" + 경로 또는 "up:" + UUID
         var name: String
         var received: Int64 = 0
         var total: Int64 = 0
         var finished: Bool = false
         var failed: Bool = false
         var destPath: String = ""
+        var direction: Direction = .download
     }
 
     var actives: [Active] = []
@@ -43,6 +46,37 @@ final class TransferManager {
     /// 완료 항목 목록 정리
     func clearFinished() {
         actives.removeAll { $0.finished || $0.failed }
+    }
+
+    // MARK: - WKDownload 연동 (웹 대시보드 📥 클릭)
+
+    @MainActor
+    func beginWeb(id: String, name: String) {
+        guard !isActive(id) else { return }
+        let entry = Active(id: id, name: name)
+        actives.append(entry)
+        DebugLog.shared.i("Transfer", "웹 받기 시작: \(name)")
+    }
+
+    @MainActor
+    func updateWeb(id: String, totalWritten: Int64, expected: Int64) {
+        guard let idx = actives.firstIndex(where: { $0.id == id }) else { return }
+        actives[idx].received = totalWritten
+        if expected > 0 { actives[idx].total = expected }
+    }
+
+    @MainActor
+    func finishWeb(id: String, ok: Bool, dest: String, name: String, notifyEnabled: Bool) {
+        guard let idx = actives.firstIndex(where: { $0.id == id }) else { return }
+        actives[idx].finished = true
+        actives[idx].failed = !ok
+        actives[idx].destPath = dest
+        if ok {
+            Notify.send(title: "받기 완료", body: name, enabled: notifyEnabled)
+            DebugLog.shared.i("Transfer", "웹 받기 완료: \(name) → \(dest)")
+        } else {
+            DebugLog.shared.e("E-MAC-NET-1002", "웹 받기 실패: \(name)")
+        }
     }
 
     // MARK: - 받기
@@ -174,6 +208,50 @@ final class TransferManager {
         if ok {
             Notify.send(title: "받기 완료", body: name, enabled: notifyEnabled)
             DebugLog.shared.i("Transfer", "받기 완료: \(name)")
+        }
+    }
+
+    // MARK: - 업로드 (맥 → 안드로이드 서버)
+
+    @MainActor
+    func upload(fileURL: URL, api: RelayAPI, serverPath: String,
+                notifyEnabled: Bool, auth: String?) {
+        let name = fileURL.lastPathComponent
+        let key = "up:" + UUID().uuidString.prefix(8).lowercased()
+        guard !isActive(key) else { return }
+
+        let fileSize = (try? FileManager.default.attributesOfItem(atPath: fileURL.path)[.size] as? Int64) ?? 0
+        var entry = Active(id: key, name: name, direction: .upload)
+        entry.total = fileSize
+        actives.append(entry)
+        DebugLog.shared.i("Transfer", "업로드 시작: \(name) (\(Fmt.bytes(fileSize)))")
+
+        Task { [weak self] in
+            do {
+                let data = try Data(contentsOf: fileURL)
+                guard let self else { return }
+                try await api.storageUploadRaw(path: serverPath, name: name, data: data) { sent in
+                    Task { @MainActor in
+                        guard let idx = self.actives.firstIndex(where: { $0.id == key }) else { return }
+                        self.actives[idx].received = sent
+                    }
+                }
+                await self.finishUpload(key: key, ok: true, name: name, notifyEnabled: notifyEnabled)
+            } catch {
+                DebugLog.shared.e("E-MAC-NET-1002", "업로드 실패 \(name): \(error.localizedDescription)")
+                self?.finishUpload(key: key, ok: false, name: name, notifyEnabled: notifyEnabled)
+            }
+        }
+    }
+
+    @MainActor
+    private func finishUpload(key: String, ok: Bool, name: String, notifyEnabled: Bool) {
+        guard let idx = actives.firstIndex(where: { $0.id == key }) else { return }
+        actives[idx].finished = true
+        actives[idx].failed = !ok
+        if ok {
+            Notify.send(title: "업로드 완료", body: name, enabled: notifyEnabled)
+            DebugLog.shared.i("Transfer", "업로드 완료: \(name)")
         }
     }
 }

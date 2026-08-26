@@ -29,6 +29,7 @@ final class AppState {
     var torrents: [Torrent] = []
     var transfers = TransferManager()
     var toast: String?
+    var serverAddress: String?
     private var toastTask: Task<Void, Never>?
 
     @ObservationIgnored private var api: RelayAPI?
@@ -54,6 +55,7 @@ final class AppState {
             try? await Task.sleep(nanoseconds: 4_000_000_000)
             if !Task.isCancelled { await MainActor.run { self?.toast = nil } }
         }
+        notifyChange()
     }
 
     // MARK: - 연결
@@ -88,10 +90,12 @@ final class AppState {
             let inf = try await client.getInfo()
             api = client
             info = inf
+            serverAddress = address
             connection = .connected(address: address)
             settings.manualAddress = address.replacingOccurrences(of: "^https?://", with: "", options: .regularExpression)
             DebugLog.shared.i("Conn", "연결됨: \(address) v\(inf.version ?? "?")")
             startPolling()
+            notifyChange()
             return true
         } catch {
             DebugLog.shared.w("Conn", "연결 실패 \(address): \(error.localizedDescription)")
@@ -102,11 +106,13 @@ final class AppState {
     @MainActor
     func rescan() async {
         connection = .scanning
+        notifyChange()
         let found = await ServerDiscovery.scan(auth: settings.basicAuthHeader())
         servers = found
         if let first = found.first, await tryConnect(first.address) { return }
         if !isConnected {
             connection = .disconnected("네트워크에서 DroidRelay 서버를 찾지 못했습니다. 서버가 켜져 있는지 확인해 주세요.")
+            notifyChange()
         }
     }
 
@@ -119,6 +125,7 @@ final class AppState {
         torrents = []
         connection = .disconnected("연결이 해제되었습니다.")
         DebugLog.shared.i("Conn", "연결 해제")
+        notifyChange()
     }
 
     static func normalize(_ s: String) -> String {
@@ -145,6 +152,7 @@ final class AppState {
                         guard self.isConnected else { return }
                         self.connection = .disconnected("연결이 끊겼습니다. 서버가 켜져 있는지 확인해 주세요.")
                         DebugLog.shared.e("E-MAC-NET-1001", "폴링 실패로 연결 끊김")
+                        self.notifyChange()
                     }
                     break
                 }
@@ -163,6 +171,7 @@ final class AppState {
                 jobs = j
                 torrents = t
                 info = i
+                self.notifyChange()
             }
             return true
         } catch is CancellationError {
@@ -185,11 +194,40 @@ final class AppState {
 
     @MainActor
     func addDownload(_ urlString: String) async {
-        guard !urlString.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+        await addDownloads(urlString, sha256: "")
+    }
+
+    /// 다중 URL 일괄 추가 (v0.7) — 줄바꿈/공백/쉼표 구분, SHA-256은 단일 URL에만 적용
+    @MainActor
+    func addDownloads(_ text: String, sha256: String) async {
+        let urls = text.split(whereSeparator: { $0.isWhitespace || $0.isNewline || $0 == "," })
+            .map { String($0) }
+            .filter { $0.lowercased().hasPrefix("http://") || $0.lowercased().hasPrefix("https://") }
+        guard !urls.isEmpty else {
+            showToast("유효한 http(s) URL이 없습니다")
+            return
+        }
+        let raw = sha256.trimmingCharacters(in: .whitespaces)
+        let sha: String?
+        if raw.isEmpty {
+            sha = nil
+        } else if raw.count == 64 && raw.allSatisfy({ $0.isHexDigit }) {
+            sha = raw.lowercased()
+        } else {
+            showToast("SHA-256은 64자리 16진수여야 합니다")
+            return
+        }
         do {
             let a = try requireAPI()
-            _ = try await a.addJob(url: urlString.trimmingCharacters(in: .whitespaces))
-            DebugLog.shared.i("Jobs", "다운로드 추가: \(urlString)")
+            var ok = 0, fail = 0
+            for u in urls {
+                do {
+                    _ = try await a.addJob(url: u, sha256: urls.count == 1 ? sha : nil)
+                    ok += 1
+                } catch { fail += 1 }
+            }
+            DebugLog.shared.i("Jobs", "다운로드 추가: \(ok)건 성공 / \(fail)건 실패")
+            showToast("\(ok)건 추가" + (fail > 0 ? " · 실패 \(fail)건" : ""))
             _ = await pollOnce()
         } catch {
             showToast(friendly(error))
@@ -313,6 +351,21 @@ final class AppState {
     }
 
     @MainActor
+    func uploadFile(_ url: URL, serverPath: String = "") {
+        do {
+            let a = try requireAPI()
+            transfers.upload(fileURL: url,
+                             api: a,
+                             serverPath: serverPath,
+                             notifyEnabled: settings.notificationsEnabled,
+                             auth: settings.basicAuthHeader())
+            showToast("업로드 시작: \(url.lastPathComponent)")
+        } catch {
+            showToast(friendly(error))
+        }
+    }
+
+    @MainActor
     func storageOp<T>(_ label: String, _ body: (RelayAPI) async throws -> T) async -> T? {
         do {
             let a = try requireAPI()
@@ -366,4 +419,12 @@ final class AppState {
         }
         return error.localizedDescription
     }
+
+    private func notifyChange() {
+        NotificationCenter.default.post(name: .appStateDidChange, object: self)
+    }
+}
+
+extension Notification.Name {
+    static let appStateDidChange = Notification.Name("appStateDidChange")
 }

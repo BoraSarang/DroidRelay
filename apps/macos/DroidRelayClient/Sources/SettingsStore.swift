@@ -1,6 +1,7 @@
 import Foundation
 import Observation
 import ServiceManagement
+import SwiftUI
 
 /// 앱 설정 저장소 — UserDefaults + Keychain(비밀번호)
 @Observable
@@ -16,6 +17,8 @@ final class SettingsStore {
         showSpeedInMenuBar = d.object(forKey: "ui.showSpeed") as? Bool ?? true
         notificationsEnabled = d.object(forKey: "notify.enabled") as? Bool ?? true
         launchAtLogin = d.bool(forKey: "general.launchAtLogin")
+        let savedTheme = d.string(forKey: "ui.theme") ?? "system"
+        themeMode = ["system", "light", "dark"].contains(savedTheme) ? savedTheme : "system"
 
         if let p = d.string(forKey: "download.folder") {
             downloadFolder = p
@@ -63,6 +66,19 @@ final class SettingsStore {
     /// 받기 완료 시 macOS 알림
     var notificationsEnabled: Bool {
         didSet { d.set(notificationsEnabled, forKey: "notify.enabled") }
+    }
+
+    /// 앱 테마 — "system" | "light" | "dark"
+    var themeMode: String {
+        didSet { d.set(themeMode, forKey: "ui.theme") }
+    }
+
+    var colorScheme: ColorScheme? {
+        switch themeMode {
+        case "light": return .light
+        case "dark": return .dark
+        default: return nil
+        }
     }
 
     /// 로그인 시 자동 실행 (SMAppService)
