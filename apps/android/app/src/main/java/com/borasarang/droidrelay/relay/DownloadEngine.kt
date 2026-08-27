@@ -154,9 +154,9 @@ class DownloadEngine(
         JobsRepository.reorder(id, target)
     }
 
-    /** 네트워크 복구 시 FAILED 작업 자동 재시도 (NetworkMonitor 콜백) */
+    /** 네트워크 복구 시 FAILED 작업 자동 재시도 (NetworkMonitor 콜백) — 비디오 잡(FFmpeg 소관)은 제외 */
     fun retryFailed() {
-        val failed = JobsRepository.all().filter { it.state == JobState.FAILED }
+        val failed = JobsRepository.all().filter { it.state == JobState.FAILED && it.type != "video" }
         if (failed.isEmpty()) return
         DebugLogger.i(TAG, "네트워크 복구 → FAILED 작업 ${failed.size}건 재시도")
         failed.forEach { job ->

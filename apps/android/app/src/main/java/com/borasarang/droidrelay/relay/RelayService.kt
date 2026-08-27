@@ -137,6 +137,7 @@ class RelayService : Service() {
             var lastNotifUpdate = 0L
             var lastSaveAt = 0L
             var last: Map<String, JobState> = emptyMap()
+            val lastFailReason = HashMap<String, String>()
             JobsRepository.jobs.collectLatest { jobs ->
                 // 영구 저장 디바운스 10초 (T-842) — 상태 전이 시 즉시, 진행률 갱신은 10초 간격
                 val now = System.currentTimeMillis()
@@ -160,20 +161,27 @@ class RelayService : Service() {
                                 }, s)
                             }
                         }
-                        if (last[j.id] != null && j.state == JobState.FAILED) {
-                            DebugLogger.i(TAG, "실패 알림 '${j.filename}' (${j.errorCode})")
-                            notify(j.id.hashCode(), getString(R.string.notif_fail_title), j.filename + (j.errorMessage?.let { " — $it" } ?: ""), done = false)
-                            // 웹훅 콜백 전송 (Phase 2.2)
-                            scope.launch {
-                                val s = try { settingsRepo.settings.first() } catch (_: Exception) { return@launch }
-                                webhookManager?.send("download_failed", org.json.JSONObject().apply {
-                                    put("id", j.id); put("filename", j.filename); put("url", j.url)
-                                    put("errorCode", j.errorCode ?: ""); put("errorMessage", j.errorMessage ?: "")
-                                }, s)
+                        val prevState = last[j.id]
+                        if (prevState != null && prevState != JobState.FAILED && j.state == JobState.FAILED) {
+                            // 같은 원인(에러코드+메시지)의 재발신은 1회만 — 상태 재발행/재시도로 인한 알림 폭주 방지
+                            val reason = "${j.errorCode}|${j.errorMessage}"
+                            if (lastFailReason[j.id] != reason) {
+                                lastFailReason[j.id] = reason
+                                DebugLogger.i(TAG, "실패 알림 '${j.filename}' (${j.errorCode})")
+                                notify(j.id.hashCode(), getString(R.string.notif_fail_title), j.filename + (j.errorMessage?.let { " — $it" } ?: ""), done = false)
+                                // 웹훅 콜백 전송 (Phase 2.2)
+                                scope.launch {
+                                    val s = try { settingsRepo.settings.first() } catch (_: Exception) { return@launch }
+                                    webhookManager?.send("download_failed", org.json.JSONObject().apply {
+                                        put("id", j.id); put("filename", j.filename); put("url", j.url)
+                                        put("errorCode", j.errorCode ?: ""); put("errorMessage", j.errorMessage ?: "")
+                                    }, s)
+                                }
                             }
                         }
                     }
                 }
+
                 last = current
 
                 // 진행바 실시간 갱신 (2초 스로틀)
