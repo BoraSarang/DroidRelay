@@ -1895,6 +1895,7 @@ function testYtdlpServer(){
       el.style.color='#FF8A93';
     });
 }
+function detectStorage(){
   var el=document.getElementById('storageList');
   el.textContent='감지 중...';el.style.color='#8FD8FF';
   fetch('/api/storage/external')
