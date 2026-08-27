@@ -657,7 +657,7 @@ private fun Application.relayRoutes(context: Context, serverRef: RelayServer) {
             val json = try { JSONObject(body) } catch (_: Exception) { null }
             val repo = SettingsRepository.get(context)
             if (json?.has("guardEnabled") == true) json?.optBoolean("guardEnabled")?.let { repo.setGuardEnabled(it) }
-            json?.optInt("guardThermalLimit", -1)?.let { if (it in 30..60) repo.setGuardThermalLimit(it) }
+            json?.optInt("guardThermalLimit", -1)?.let { if (it in 50..70) repo.setGuardThermalLimit(it) }
             json?.optInt("guardBatteryLimit", -1)?.let { if (it in 5..50) repo.setGuardBatteryLimit(it) }
             json?.optInt("guardStorageLimit", -1)?.let { if (it in 50..99) repo.setGuardStorageLimit(it) }
             serverRef.settings = repo.firstBlocking()

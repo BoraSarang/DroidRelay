@@ -123,6 +123,8 @@
 - **E2E**: 100MB 전체 수신, 2초 틱, 전이+주기 저장(13s 전송에 3회), 8KB/8192 즉시 확인, 퍼블리시 정상
 
 ## 검증 요지
+- [후속] 가드 온도 임계치 30~60 → 50~70°C 확장 (기본 45→50, setGuardThermalLimit coerceIn 누락분 포함 전 지점 반영, POST 70 허용·71 거부 확인, 사용자 원래 설정 guardEnabled=false·battery50으로 복원)
+- [후속] 목록 버튼 크기 통일 — `.card-acts` 112px 픽스+100%, 보관함 아이콘 34px, box-sizing:border-box (받기/삭제 112px·중심 정렬, 아이콘 34px CDP 좌표 검증). 안드 infosec: 웨일 CDP(localabstract:9222)로 확인 후 forward 정리
 - 속도제한 인터셉터 원인 격리: limit=0 통과 / limit=5MB/s·999999999 실패 → 토큰 수학이 아닌 래핑 구조 결함 → 단일 래핑으로 수정 · 재검증 통과
 - fmt() 0.1MB 미스터리 = MB 분기가 GiB 제수 사용(100MB→0.1MB, 평균속도 왜곡) — MiB 제수로 교정
 - 테스트 산출물 전부 정리: 테스트 잡 12건 삭제, storage dr_test*/small*/perf_test 삭제, 공용 DroidRelay/* 정리, 호스트 python 8081 종료

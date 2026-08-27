@@ -57,7 +57,7 @@ data class AppSettings(
     val debridApiKey: String = "",
     // Guard (Phase 2.4)
     val guardEnabled: Boolean = false,
-    val guardThermalLimit: Int = 45,
+    val guardThermalLimit: Int = 50,
     val guardBatteryLimit: Int = 20,
     val guardStorageLimit: Int = 90,
     // Webhook (Phase 2.2)
@@ -173,7 +173,7 @@ class SettingsRepository(private val context: Context) {
             debridProvider = p[Keys.DEBRID_PROVIDER] ?: "",
             debridApiKey = p[Keys.DEBRID_API_KEY] ?: "",
             guardEnabled = p[Keys.GUARD_ENABLED] ?: false,
-            guardThermalLimit = (p[Keys.GUARD_THERMAL] ?: 45).coerceIn(30, 60),
+            guardThermalLimit = (p[Keys.GUARD_THERMAL] ?: 50).coerceIn(50, 70),
             guardBatteryLimit = (p[Keys.GUARD_BATTERY] ?: 20).coerceIn(5, 50),
             guardStorageLimit = (p[Keys.GUARD_STORAGE] ?: 90).coerceIn(50, 99),
             webhookEnabled = p[Keys.WEBHOOK_ENABLED] ?: false,
@@ -279,7 +279,7 @@ class SettingsRepository(private val context: Context) {
         context.settingsDataStore.edit { it[Keys.GUARD_ENABLED] = enabled }
 
     suspend fun setGuardThermalLimit(limit: Int) =
-        context.settingsDataStore.edit { it[Keys.GUARD_THERMAL] = limit.coerceIn(30, 60) }
+        context.settingsDataStore.edit { it[Keys.GUARD_THERMAL] = limit.coerceIn(50, 70) }
 
     suspend fun setGuardBatteryLimit(limit: Int) =
         context.settingsDataStore.edit { it[Keys.GUARD_BATTERY] = limit.coerceIn(5, 50) }

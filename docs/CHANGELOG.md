@@ -12,6 +12,8 @@
 - **RSS 매니저 누수 수정**: onCreate의 지역 변수 생성으로 서비스 종료 후에도 폴링이 지속되던 것 → 필드 보관 + onDestroy stop
 - **알림 700ms→2000ms 스로틀**: 알림 갱신 동기화 부하 감소
 - **DebugOverlay**: 이중 `startInForeground()` 제거 + 상태 폴링 1초→3초
+- **가드 온도 임계치 30~60 → 50~70°C 확장**: 실제 폰 온도가 60°C에 근접하므로 70까지 설정 가능하게 확장, 기본값 45→50°C. `setGuardThermalLimit`의 누락된 coerceIn(50,70) 포함 모든 지점 반영 (웹 슬라이더, 서버 검증, 로드 클램프)
+- **목록 우측 버튼 크기 통일 (웹)**: 다운로드/토렌트 카드 우측 버튼 영역을 `.card-acts` 클래스로 통합 — 컬럼 폭 112px 고정 + 버튼 `width:100%` (받기는 초록 강조색 유지), 보관함 파일 행 아이콘 버튼(`📥`/`✏️`/`🗑`)은 34px 정사각으로 통일. `box-sizing:border-box`로 픽셀 완전 일치. CDP 좌표 검증: 받기·삭제 112px 동일 폭·중심 정렬, 아이콘 3종 34px 확인
 
 ### Fixed [android]
 - **전역 속도제한 설정 시 다운로드 0Byte 즉시 완료**: `ThrottleInterceptor`의 `ThrottledResponseBody.source()`가 `delegate.source().buffer()` → `ThrottledSource` → `.buffer()` **이중 버퍼 래핑**으로 okhttp 응답 body가 즉시 EOF(0Byte) 되던 버그 — 표준 단일 래핑(`ThrottledSource(delegate.source(), …).buffer()`)으로 수정. 속도제한(5MB/s·무제한) 모두에서 8KB/100MB 완전 수신 확인. 기존에는 maxDownloadBps>0면 모든 엔진 다운로드가 필연 실패했음

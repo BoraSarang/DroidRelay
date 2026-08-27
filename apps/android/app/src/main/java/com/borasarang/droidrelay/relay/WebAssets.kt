@@ -29,6 +29,9 @@ object WebAssets {
   button.ghost{background:#22335433;border:1px solid #2A3B5C;color:#9FB4D4;padding:6px 12px;font-weight:500}
   button.sm{padding:5px 10px;font-size:12px;border-radius:8px}
   .btn-dl{background:#12402F;border:1px solid #1A5C3A;color:#69E29B;padding:5px 10px;font-size:12px;border-radius:8px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;text-decoration:none}
+  .card-acts{display:flex;flex-direction:column;gap:6px;width:112px;flex-shrink:0;padding:14px}
+  .card-acts .ghost,.card-acts .btn-dl{box-sizing:border-box;width:100%;font-size:12px;padding:7px 0;justify-content:center}
+  .file-row .acts a.btn-dl,.file-row .acts .ghost{box-sizing:border-box;width:34px;padding:5px 0;justify-content:center;text-align:center}
   .card{background:#101E3A;border:1px solid #22345A;border-radius:14px;margin-top:14px;display:flex;align-items:stretch}
   .name{font-weight:600;word-break:break-all}
   .meta{color:#8FA3BF;font-size:12px;margin-top:2px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
@@ -447,8 +450,8 @@ object WebAssets {
             <div class="si">
               <div class="sl">열 제한 (°C)</div>
               <div class="sv">
-                <input type="range" id="guardThermalLimit" min="30" max="60" value="45" step="1">
-                <span id="guardThermalLabel">45°C</span>
+                <input type="range" id="guardThermalLimit" min="50" max="70" value="50" step="1">
+                <span id="guardThermalLabel">50°C</span>
               </div>
               <div class="sb">이 온도 이상이면 다운로드 일시정지</div>
             </div>
@@ -671,7 +674,7 @@ function render(jobs){
       +'<div class="name">'+esc(j.filename)+'</div>'
       +'<div class="meta"><span class="badge '+j.state+'">'+label(j.state)+'</span>'+vbadge+'<span>'+size+'</span><span>'+pct+'%</span>'+sp+eta+'</div>'
       +'<div class="bar"><div class="fill" style="width:'+pct+'%"></div></div>'+err
-      +'</div><div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end;padding:14px 14px 14px 0">'+act+pause+cancel+'</div></div>';
+      +'</div><div class="card-acts">'+act+pause+cancel+'</div></div>';
   });
   if(window.__lastJobsH!==h){window.__lastJobsH=h;el.innerHTML=h;}
   window.__jobs=jobs;
@@ -744,7 +747,7 @@ function renderTorrents(ts){
       +'<div class="name">'+esc(t.name||t.hash||'파일 불명')+'</div>'
       +'<div class="meta"><span class="badge '+badgeClass+'">'+label(st)+'</span><span>'+size+'</span><span>'+pct+'%</span>'+sp+up+eta+(seedInfo?' '+seedInfo:'')+'</div>'
       +'<div class="bar"><div class="fill" style="width:'+pct+'%"></div></div>'+filePath+err
-      +'</div><div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end;padding:14px 14px 14px 0">'+pause+del+'</div></div>';
+      +'</div><div class="card-acts">'+pause+del+'</div></div>';
   });
   if(window.__lastTorrentsH!==h){window.__lastTorrentsH=h;el.innerHTML=h;}
   var totalDown=ts.reduce(function(a,t){return a+(t.downloadSpeed||0);},0);
@@ -1341,8 +1344,8 @@ function loadSettings(){
     if(tunnelSelectedProvider)highlightTunnelProvider(tunnelSelectedProvider);
     // 가드 설정
     document.getElementById('guardEnabled').checked=gd.guardEnabled===true;
-    document.getElementById('guardThermalLimit').value=gd.guardThermalLimit||45;
-    document.getElementById('guardThermalLabel').textContent=(gd.guardThermalLimit||45)+'°C';
+    document.getElementById('guardThermalLimit').value=gd.guardThermalLimit||50;
+    document.getElementById('guardThermalLabel').textContent=(gd.guardThermalLimit||50)+'°C';
     document.getElementById('guardBatteryLimit').value=gd.guardBatteryLimit||20;
     document.getElementById('guardBatteryLabel').textContent=(gd.guardBatteryLimit||20)+'%';
     document.getElementById('guardStorageLimit').value=gd.guardStorageLimit||90;
@@ -1695,7 +1698,7 @@ function checkTunnelStatus(){
 function saveGuardSettings(){
   var body={
     guardEnabled:document.getElementById('guardEnabled').checked,
-    guardThermalLimit:parseInt(document.getElementById('guardThermalLimit').value)||45,
+    guardThermalLimit:parseInt(document.getElementById('guardThermalLimit').value)||50,
     guardBatteryLimit:parseInt(document.getElementById('guardBatteryLimit').value)||20,
     guardStorageLimit:parseInt(document.getElementById('guardStorageLimit').value)||90
   };

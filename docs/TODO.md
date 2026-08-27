@@ -172,3 +172,5 @@ T-001~T-008 전부 완료 (커밋 7574486).
 | T-850 | 빌드·설치·E2E 검증 (WakeLock 부재/저장 빈도) + CHANGELOG·세션 로그·커밋 | ✅ |
 | T-851 | ThrottleInterceptor 이중 래핑 버그 수정 — 다운로드 0Byte 즉시 완료 (한국어: 전역 속도제한 설정 시 엔진 다운로드 무조건 실패) | ✅ |
 | T-852 | DownloadEngine.fmt() MB 제수 오류 수정 — GiB 제수(1_073_741_824) 사용으로 1MiB 이상이 10.2배 작게 표기 | ✅ |
+| T-853 | 가드 온도 임계치 30~60 → 50~70°C 확장 (기본값 45→50) — SettingsRepository(기본/로드/setter)·RelayServer 검증·WebAssets 슬라이더·GuardDaemon 주석 | ✅ |
+| T-854 | 목록 우측 버튼 크기 통일 — 다운로드/토렌트 `.card-acts` 112px 픽스+버튼 100%, 보관함 `.acts` 아이콘 34px, box-sizing 통일. CDP 좌표로 받기/삭제 112px·아이콘 34px 확인 | ✅ |
