@@ -37,7 +37,7 @@ object WebAssets {
   .meta{color:#8FA3BF;font-size:12px;margin-top:2px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
   .bar{height:10px;background:#1B2B4D;border-radius:99px;margin-top:8px;overflow:hidden}
   .fill{height:100%;background:linear-gradient(90deg,#2F80ED,#8FD8FF);border-radius:99px;width:0%;transition:width .4s}
-  .badge{font-size:11px;padding:2px 8px;border-radius:99px;background:#22335A}
+  .badge{font-size:11px;padding:2px 8px;border-radius:99px;background:#22335A;display:inline-flex;align-items:center}
   .RUNNING{background:#123A63;color:#8FD8FF}.DONE{background:#12402F;color:#69E29B}.FAILED{background:#40191C;color:#FF8A93}
   .QUEUED{background:#22335A}.PAUSED{background:#3A3312;color:#FFD59E}.CANCELED{background:#333}
   .badge.video{background:#0A3A2F;color:#6FE3C4}
@@ -170,18 +170,19 @@ object WebAssets {
       <input id="url" type="url" placeholder="다운로드 URL 붙여넣기 (여러 개 가능 · 줄바꿈/공백 구분)">
       <button onclick="add()">추가</button>
     </div>
-    <div class="row" style="margin-top:8px">
-      <input id="sha256" type="text" placeholder="SHA-256 (선택 · 64자리 16진수 — 단일 URL에만 적용, 완료 후 검증)" style="font-size:12px">
+
+    <!-- 비디오 분석 섹션 -->
+    <div class="sg" id="videoSection" style="margin:14px 0 10px;padding:14px;background:#101E3A;border:1px solid #22345A;border-radius:12px">
+      <div class="sh">🎬 비디오 분석 & 다운로드</div>
+      <div class="row" style="margin-top:10px">
+        <input id="vurl" type="url" placeholder="스트림 페이지 또는 m3u8/mpd 직접 주소" style="flex:1">
+        <button class="ghost" onclick="analyzeVideo()">분석</button>
+      </div>
+      <div id="videoArea" style="margin-top:10px"></div>
     </div>
+
     <div id="list"></div>
     <div class="empty" id="empty">아직 작업이 없습니다</div>
-
-    <div style="border-top:1px dashed #E3E8EF;margin:18px 16px 14px"></div>
-    <div class="row">
-      <input id="vurl" type="url" placeholder="🎬 스트림 페이지 또는 m3u8/mpd 직접 주소">
-      <button class="ghost" onclick="analyzeVideo()">분석</button>
-    </div>
-    <div id="videoArea"></div>
   </div>
 
   <!-- 토렌트 탭 -->
@@ -667,7 +668,7 @@ function analyzeVideo(){
     return r.json();
   }).then(function(j){
     __videoState=j;
-    area.innerHTML='<div class="vcard"><div class="name">'+esc(j.title)+'</div>'
+    area.innerHTML='<div class="vcard" style="margin-top:8px"><div class="name">'+esc(j.title)+'</div>'
       +'<div class="meta">'+(j.direct?'직접 스트림 주소':'페이지에서 스트림 감지')+'</div>'
       +'<div class="meta" style="word-break:break-all;color:#8FD8FF">'+esc(j.streamUrl)+'</div>'
       +'<div style="margin-top:12px"><button onclick="createVideo(\''+v.replace(/\\/g,'\\\\').replace(/'/g,"\\'")+'\')">다운로드 (원본 그대로)</button></div></div>';
@@ -685,7 +686,8 @@ function createVideo(v){
     if(!r.ok)return r.text().then(function(t){throw new Error(t);});
     return r.json();
   }).then(function(){
-    area.innerHTML='<div class="info">다운로드 시작됨 — 위 목록에서 진행률을 확인하세요</div>';
+    area.innerHTML='<div class="info" style="color:#69E29B">✓ 다운로드 시작됨 — 위 목록에서 진행률 확인</div>';
+    setTimeout(function(){ area.innerHTML=''; }, 3000);
     refresh();
   }).catch(function(e){
     videoErr('다운로드 시작 실패: '+(e.message||e));
@@ -709,9 +711,7 @@ function render(jobs){
     }
     var err=j.errorMessage?'<div class="err">'+esc(j.errorMessage)+'</div>':'';
     var vbadge='';
-    if(j.verified)vbadge='<span class="badge DONE">✓ 검증됨</span>';
-    else if(j.hasChecksum&&j.state==='RUNNING')vbadge='<span class="badge QUEUED">해시 검증 예정</span>';
-    if(j.type==='video')vbadge+='<span class="badge video">🎬 비디오</span>';
+    if(j.type==='video')vbadge='<span class="badge video">🎬 비디오</span>';
     var act=j.state==='DONE'?'<a class="btn-dl" href="/file/'+j.id+'" download onclick="showDlToast()">📥 받기</a>':'';
     var pause='';
     if(j.type!=='video'&&j.state==='RUNNING')pause='<button class="ghost" onclick="act(\''+j.id+'\',\'pause\')">일시정지</button>';
@@ -1087,21 +1087,15 @@ function add(){
   var raw=document.getElementById('url').value.trim();if(!raw)return;
   var urls=raw.split(/[\s,]+/).filter(function(u){return /^https?:\/\//i.test(u);});
   if(!urls.length){alert('유효한 http(s) URL이 없습니다');return;}
-  var sha=document.getElementById('sha256').value.trim();
-  var shaOk=/^[0-9a-fA-F]{64}$/.test(sha)?sha:null;
-  if(sha&&!shaOk){alert('SHA-256은 64자리 16진수여야 합니다');return;}
-  if(sha&&urls.length>1){showDlToast('체크섬은 단일 URL에만 적용 — 이번엔 미적용');}
   var ok=0,fail=0,done=0;
   urls.forEach(function(u){
     var body={url:u};
-    if(shaOk&&urls.length===1)body.sha256=shaOk;
     fetch('/api/jobs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
     .then(function(r){if(r.ok)ok++;else fail++;})
     .catch(function(){fail++;})
     .then(function(){
       if(++done===urls.length){
         document.getElementById('url').value='';
-        if(urls.length===1)document.getElementById('sha256').value='';
         showDlToast(ok+'건 추가'+(fail>0?' · 실패 '+fail+'건':''));
         refresh();
       }

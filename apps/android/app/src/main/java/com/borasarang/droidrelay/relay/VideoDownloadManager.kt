@@ -5,6 +5,7 @@ import com.arthenica.ffmpegkit.FFmpegKit
 import com.arthenica.ffmpegkit.FFmpegSession
 import com.arthenica.ffmpegkit.FFmpegSessionCompleteCallback
 import com.arthenica.ffmpegkit.ReturnCode
+import com.arthenica.ffmpegkit.Statistics
 import com.arthenica.ffmpegkit.StatisticsCallback
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
@@ -87,8 +88,8 @@ class VideoDownloadManager(
             add("-y"); add("-nostdin"); add("-hide_banner")
             addAll(argv)
         }
-        val stats = StatisticsCallback {
-            updateProgress(jobId, out)
+        val stats = StatisticsCallback { statistics: Statistics ->
+            updateProgress(jobId, out, statistics)
         }
         val done = FFmpegSessionCompleteCallback { session ->
             handleComplete(jobId, session, out)
@@ -97,7 +98,7 @@ class VideoDownloadManager(
         sessions[jobId] = session
     }
 
-    private fun updateProgress(jobId: String, out: File) {
+    private fun updateProgress(jobId: String, out: File, stats: Statistics) {
         val len = runCatching { out.length() }.getOrDefault(0L)
         val now = System.currentTimeMillis()
         val t = ticks.computeIfAbsent(jobId) { Tick() }
@@ -193,7 +194,7 @@ class VideoDownloadManager(
     }
 
     companion object {
-        private const val TICK_MS = 2_000L
+        private const val TICK_MS = 1_000L
 
         /** 사용자 입력/제목 기반 안전 파일명 (확장자 포함) */
         fun safeFilename(raw: String?, ext: String): String {
