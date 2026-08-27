@@ -18,6 +18,7 @@
 - **오버레이 토글이 OFF 불가**: `/api/debug/overlay/toggle`이 항상 시작만 하고 중지는 불가능했음 — `DebugOverlayService.isRunning` 상태 기반 진짜 ON/OFF 토글로 수정
 - **토글 응답 비동기 경합**: start/stop 직후 `isRunning` 플래그가 뒤늦게 변해 응답이 뒤집히던 것(`running` 반전) — 요청 시점의 `wasRunning` 기준 결정적 응답으로 수정
 - **오버레이 권한 안내 문구 오타**: `权限이 없습니다`(중문) → `권한이 없습니다`(국문)로 교정
+- **RSS 자동 다운로드 미동작 (enclosureUrl 빈 문자열)**: enclosure 태그가 없는 항목에서 `enclosureUrl`이 빈 문자열(`""`)이라 `?:`(null 전용)가 link로 대체하지 않아 다운로드 URL이 공백이 되던 버그 — `enclosureUrl?.takeIf { it.isNotBlank() } ?: link`로 수정. 정상 공개 피드 + 로컬 테스트 피드(magnet/`.torrent`/일반 URL 3종)로 E2E 검증 완료
 
 ## [0.10.0] - 2026-08-27
 

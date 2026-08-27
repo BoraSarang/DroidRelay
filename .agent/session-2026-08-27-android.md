@@ -60,6 +60,11 @@
 ### TUNNEL_GUIDE.md
 - Tailscale/CF 시나리오·API 사용법·현재 한계(바이너리 미번들/웹 UI 섹션 없음/자동시작 없음)·트러블슈팅·로드맵
 
+### 정상 RSS 피드 자동 다운로드 E2E (버그 1건 발견·수정)
+- **검증 구성**: 맥 로컬 `http.server 8099` + `adb reverse`로 3종 항목(매그넷/우분투 .torrent/일반 URL) RSS 피드 서빙 → 기기 서버 피드 추가(autoDownload=true) → "지금 확인"
+- **발견 버그**: `item.enclosureUrl ?: item.link`에서 enclosure 없는 항목의 `enclosureUrl=""`(빈 문자열)이 `?:`(null만 대체)를 무력화 → url 공백 → 자동 다운로드 루프 미진입(다운로드=0). `enclosureUrl?.takeIf{isNotBlank()} ?: link`로 수정
+- **수정 후 검증**: magnet→`addMagnet`(토렌트 "추출 중..." FETCHING_METADATA) / .torrent→`fetchTorrentFile`(ubuntu ISO 토렌트 DOWNLOADING) / 일반 URL→`enqueue`(잡 생성) 3종 라우팅 전부 동작 확인. 테스트 후 2 토렌트(우분투 4.7GB 다운로드 시작분) + 1 잡 + 피드 삭제·adb reverse 해제로 정리
+
 ### 오버레이 토글 E2E (실기기 SM-S901N, USB)
 - **발견 버그 2개**: ① `startForegroundService()`인데 `startForeground()` 미호출 → ForegroundServiceDidNotStartInTimeException으로 **앱 프로세스 자체가 크래시** (pid 소멸 확인), ② 토글 API가 시작만 하고 OFF 불가
 - **수정 (DebugOverlayService.kt + RelayServer.kt)**: `startInForeground()` 신설(relay_status 채널·`NOTIF_ID 2002`·`FOREGROUND_SERVICE_TYPE_DATA_SYNC` 재사용), `@Volatile isRunning` 상태 기반 진짜 ON/OFF 토글, 응답은 요청 시점 `wasRunning` 기준 결정화(비동기 플래그 경합으로 응답이 뒤집히던 것 수정), JS 오타 `权限이`→`권한이`
@@ -85,8 +90,8 @@
 
 ## 남은 TODO
 - 터널 웹 UI 설정 섹션 (TUNNEL_GUIDE.md 로드맵 — 사용자 승인 필요)
-- curl은 403 처리 확인됨 — 실제 Non-Cloudflare RSS 피드로 정상 파싱/자동 다운로드 E2E (예: 정상 공개 피드)
-- 커밋 (아직 미커밋 — 사용자 확인 후)
+- RSS 정상 피드 E2E 완료 (BBC 34항목 파싱 + magnet/.torrent/일반 라우팅 검증) — 추가 리스크 없음
+- 커밋 (오버레이·RSS 버그 수정 직후 — 브랜치 feat/android-v010-debug-rss에 진행 중)
 
 ## 큐 상태
 - 없음
@@ -94,3 +99,4 @@
 ## E2E
 - 디버그 API 전체 통과 확인
 - 오버레이 토글 E2E 통과 (권한 adb 부여 → ON→OFF, 크래시 없음, 시각 확인)
+- 정상 RSS 피드 E2E 통과 — BBC 34항목 파싱, magnet/.torrent/일반 URL 3종 자동 다운로드 라우팅 (enclosureUrl 빈 문자열 버그 수정 후)
