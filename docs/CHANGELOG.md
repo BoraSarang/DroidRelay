@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.12.1] - 2026-08-28
+
+### Added [android+web+server] — yt-dlp 서버 연동으로 YouTube 분석/다운로드 재시도
+- **yt-dlp 서버 방식 도입**(`ytdlp_server.py`, FastAPI): 폰 대신 서버(`yt-dlp`)가 YouTube를 추출·직링크 생성 — 2026 PoToken/IP 평판 차단을 "좋은 IP" 서버로 우회하는 형태. `/health`, `/analyze`(제목·포맷 목록), `/download`(직링크 리스트) 구성, `--api-key` 인증
+- **설정 연동**: `SettingsRepository`에 `ytdlpEnabled/ytdlpServerUrl/ytdlpApiKey`, `POST/GET /api/settings/ytdlp`, 웹 설정에 "🎬 yt-dlp 서버"(활성화/서버 URL/API 키/저장/연결 테스트) 섹션
+- **`/proxy` 스트리밍 프록시**: 직링크(googlevideo)를 서버가 받아 폰에 중계 — 폰 NAT IP로 인한 **403 회피 목적**. Range 헤더 전달 + Content-Length/Range 유지(이어받기·진행률 대응), `?key=`/`X-API-Key` 인증, SSRF 방어(private/link-local/멀티캐스트 거부). create 시 직링크를 `/proxy?url=<enc>&key=`로 치환
+- **에러코드**: `E-AND-VID-0101`(yt-dlp 서버 필요)·`0102`(분석 실패)·`0203`(yt-dlp 서버 IP가 YouTube에 차단) 갱신 — 502 프록시 실패 감지 시 친절 안내 표시
+
+### Changed [android+web]
+- **SHA-256 검증 기능 제거**(사용자 요청): `Job.expectedSha256/verified` 필드, `JobsPersistence` 저장/복원, `DownloadEngine` 스트리밍 체크섬 검증·`sha256()` 함수, `/api/jobs`의 `sha256` 입력·`hasChecksum/verified` 응답, 웹 UI 입력·`✓ 검증됨` 배지 전부 제거 (웹훅 `X-DroidRelay-Signature` 서명 유지)
+- **토렌트 단일 파일 보관함 이동 수정**: `moveToStorage`가 `isDirectory` 가드로 단일 파일 토렌트를 스킵하던 버그 — 파일은 `copyTo+delete`, 디렉토리는 기존 복사 분기 처리
+- **비디오 진행률 실시간화**: `TICK_MS` 2000→1000 + StatisticsCallback 연결 — 0→100% 점프 없이 1초 단위 갱신 확인(HTTP 50MB, Mux HLS)
+- **웹 정보 바 토렌트 반영**: HTTP 잡이 없으면 무조건 "대기중..."으로 나오던 허위 표시 해소 — 토렌트 DOWNLOADING/SEEDING/FETCHING_METADATA 건수·속도 합산 표시, 토렌트 카드에도 FETCHING_METADATA 속도 표시
+- **RelayService 기동 실패 원인 표출**: "포트 8080 이미 사용 중" 하드코딩 문구 → 실제 예외 메시지 노출. (원인: `adb reverse tcp:8080`이 폰 8080을 점유 — reverse 제거로 해소)
+
+### Verified (E2E)
+- **HTTP 다운로드 진행률**: 50MB 파일 0→100% 1초 단위 갱신, DONE 확인, `/api/jobs`에서 `verified`/`hasChecksum` 제거 확인
+- **토렌트 실속도**: sintel(.torrent 업로드) DOWNLOADING down=104→418KB/s·up=7~18KB/s·시드/피어 실측 갱신 확인
+- **yt-dlp 서버**: `/health`(yt-dlp 2026.07.04), `/analyze` 23 formats(제목 정상), `/download` 직링크 추출, `/proxy` googlevideo **206 Partial Content(video/mp4)** — 인증 401·SSRF 403 동작 확인
+- **YouTube 다운로드**: analyze→create→RUNNING 까지는 정상 추적 but /proxy로 전달된 직링크가 **서버 IP(175.223.26.84)에 대해 googlevideo 403** 반환 지속 — 초기 2회 206 후 반복 직링크 생성으로 IP 포화차단(yt-dlp 자체 다운로드도 403). **근본 해법: yt-dlp 서버를 평판 좋은 IP(클라우드/집 고정 IP)에서 운영** → 502 감지 시 `E-AND-VID-0203` 안내 표시 확인
+
+### Notes
+- yt-dlp 서버는 터널(Tailscale) 대신 cloud 등 공인 IP 위에 둔 뒤, 폰 설정에서 서버 URL+API 키 입력으로 사용(예: `https://ytdlp.example.com`)
+- `adb reverse tcp:8081 tcp:8080` 방식은 USB 연결 개발 중에만 사용 가능 — 폰이 LTE에 있는 동안엔 yt-dlp 서버 접속 불가
+
 ## [0.12.0] - 2026-08-27
 
 ### Added [android+web] — 비디오 다운로드 (범용 스트림 : 유튜브 제외)

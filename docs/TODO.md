@@ -62,7 +62,6 @@ T-101~T-115 전부 완료 (커밋 5956cfc).
 T-001~T-008 전부 완료 (커밋 7574486).
 
 ## 후속 후보 (v0.4)
-- [ ] 체크섬 검증 (SHA-256 선택 입력)
 - [ ] 웹 대시보드 SSE 실시간 푸시
 - [ ] 다중 URL 일괄 붙여넣기
 - [ ] Content-Disposition 파일명 우선
@@ -194,6 +193,18 @@ T-001~T-008 전부 완료 (커밋 7574486).
 | T-861 | StreamDetector — 웹페이지 m3u8/mpd 스니핑 + 직접 입력 병행 | ✅ |
 | T-862 | API 2종(POST /api/video/analyze, /create) + 웹 UI(분석→다운로드) | ✅ |
 | T-863 | 앱 Compose UI (후속 v0.12.1 후보) | ⏸ |
-| T-864 | 실기기 E2E(m3u8 원본 copy) — Mux HLS 162MB DONE+ffprobe 무결성, 제거 후 회귀 스모크(분석→생성→진행→취소)·error_message_ko.json·세션 로그 | 🔄 |
+| T-864 | 실기기 E2E(m3u8 원본 copy) — Mux HLS 162MB DONE+ffprobe 무결성, 제거 후 회귀 스모크(분석→생성→진행→취소)·error_message_ko.json·세션 로그 | ✅ |
 | T-865 | 유튜브 코드 제거 — TubeEngine.kt 삭제, RelayServer analyze/create 유튜브 분기 제거, newpipe/JitPack 의존성 제거, WebAssets placeholder·에러코드 정리, PLAN/TODO/CHANGELOG 갱신 | ✅ |
 | T-866 | 307 리다이렉트 커밋 분리 완료 (`af29009`) | ✅ |
+
+### v0.12.1 (2026-08-28) — yt-dlp 서버 연동 + UX 정리
+| ID | 작업 | 상태 |
+|----|------|------|
+| T-867 | yt-dlp 서버(외부 실행) 통합 — SettingsRepository(ytdlpEnabled/ServerUrl/ApiKey), /api/settings/ytdlp GET/POST, YtDlpClient(analyze/getDownloadUrls), WebAssets 설정 UI, ytdlp_server.py(FastAPI, /health·/analyze·/download, X-API-Key) | ✅ |
+| T-868 | yt-dlp 서버 /proxy 스트리밍 프록시 — googlevideo 403(폰 NAT IP) 우회 목적. Range 전달 + Content-Length/Content-Range 전달, ?key=/X-API-Key 인증, SSRF 차단(private/link-local 거부), 생성 직링크를 /proxy URL로 치환 | ✅ |
+| T-869 | YouTube 다운로드 E2E — analyze(23 formats) 성공, /proxy googlevideo **206 Partial Content(MP4 1MB)** 확인. 다운로드 전체 흐름은 서버 IP(175.223.26.84)가 유튜브 CDN에 403 차단되어 **미완(근본 해법: 서버 IP 교체)** → 502 감지 시 E-AND-VID-0203 안내 | 🔄 |
+| T-870 | SHA-256 검증 기능 제거(사용자 요청) — Job 필드/영속/DownloadEngine 검증·sha256()/jobs API·웹 UI 입력·배지 전부 제거. 웹훅 서명(sha256=)은 유지. HTTP 50MB 다운로드 0→100% 진행 갱신 검증 | ✅ |
+| T-871 | 토렌트 단일 파일 보관함 이동 수정 — moveToStorage isDirectory 가드로 단일 파일 스킵되던 버그, 파일/디렉토리 분기 처리 | ✅ |
+| T-872 | 비디오 진행률 실시간화(TICK_MS 2000→1000 + StatisticsCallback) + 웹 정보바에 토렌트 활동 반영(대기중 허위 표시 해소, FETCHING_METADATA 속도 표시) | ✅ |
+| T-873 | RelayService 기동 실패 실제 예외 표시("포트 이미 사용 중" 하드코딩 제거) — adb reverse로 8080 점유했던 원인 규명 문서화 | ✅ |
+| T-874 | 문서 갱신 — CHANGELOG v0.12.1, TODO, PLAN_v0.12, error_message_ko.json(0101/0102/0203), 세션 로그 + 커밋 | ✅ |

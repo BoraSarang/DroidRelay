@@ -61,7 +61,7 @@
 |----|------|------|
 | T-857 | PLAN 작성 | ✅ |
 | T-858 | 의존성: NewPipe+desugar+ffmpeg 검증 · 빌드 게이트 | ✅ (ffmpeg https로 교체 포함) |
-| T-859 | ~~유튜브 추출기~~ | ❌ **취소** — 2026 유튜브 IP/기능 차단으로 제외 |
+| T-859 | ~~유튜브 추출기~~ | ❌ **취소** — 2026 유튜브 IP/기능 차단으로 제외 → **v0.12.1 yt-dlp 서버 방식으로 재도입** (T-867~869) |
 | T-860 | VideoDownloadManager: FFmpeg 실행·진행률·취소·MediaStore 게시 + Job(type) 통합 | ✅ |
 | T-861 | StreamDetector: 웹페이지 스니핑 + 직접 .m3u8/.mpd 입력 허용 | ✅ |
 | T-862 | API 2종 + 웹 UI(분석→다운로드) | ✅ |
@@ -72,7 +72,7 @@
 | 항목 | 대응 |
 |------|------|
 | DRM(Widevine/FairPlay) | 실행 실패 시 `E-AND-VID-0300` 차단 안내 (재생 불가 콘텐츠는 다운로드 불가가 정상) |
-| ~~유튜브 (PoToken·IP 평판)~~ | **기능 제외** — NewPipeExtractor 0.26.5 최신으로도 2026 유튜브 PoToken + LTE NAT IP 평판 차단(visitor_id 주입, ANDROID_VR 스푸핑까지 시도)에 실패. m3u8/mpd 직접 경로 안내. 델리게이트 폰/서버 우회는 v0.13+ 후보 |
+| ~~유튜브 (PoToken·IP 평판)~~ | **기능 제외** — NewPipeExtractor 0.26.5 최신으로도 2026 유튜브 PoToken + LTE NAT IP 평판 차단(visitor_id 주입, ANDROID_VR 스푸핑까지 시도)에 실패. m3u8/mpd 직접 경로 안내. **v0.12.1(y-t-dlp 서버) 시도 결과**: 분석/직링크 생성은 서버에서 성공(23 formats), 다운로드는 서버 IP가 googlevideo 403로 차단 — **yt-dlp 서버는 평판 좋은 IP(클라우드/고정 IP)에서 운영** 필요. `/proxy` 스트리밍 프록시 구현 완료 |
 | m3u8 토큰 만료(세션 한정) | 분석→다운로드 지연 최소화, 실패 시 재분석 유도 메시지 |
 | 스트림 페이지 Cloudflare 403 | 직접 m3u8 URL 경로로 안내 (터널 미통과는 범위外) |
 | FFmpeg 네트워크 스로틀 미적용 | 전역 속도제한은 기존 HTTP 잡에만 유효 — 비디오는 제한 없음 |
