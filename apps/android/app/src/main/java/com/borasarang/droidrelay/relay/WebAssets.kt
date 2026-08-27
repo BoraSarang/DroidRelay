@@ -765,19 +765,20 @@ function renderStorage(items){
   var el=document.getElementById('fileList');document.getElementById('fileEmpty').style.display=items.length?'none':'block';
   document.getElementById('storageListTitle').textContent='📄 폴더 내용';
   var h='';
-  items.forEach(function(f){
-    var isDir=f.type==='dir';
-    var key=curPath?curPath+'/'+f.name:f.name;
-    var cls=(selItem&&selItem.name===f.name)?'file-row selected':'file-row';
-    var dateStr=f.modified?new Date(f.modified).toLocaleDateString('ko-KR',{year:'numeric',month:'2-digit',day:'2-digit'}):'';
-    h+='<div class="'+cls+'" draggable="true" data-type="'+f.type+'" data-key="'+esc(key)+'" data-name="'+esc(f.name)+'">'
-      +'<span class="file-icon">'+fileIcon(f.name,isDir)+'</span>'
-      +'<div style="min-width:0;flex:1"><div class="name">'+esc(f.name)+'</div>'
-      +'<div class="file-meta">'+(isDir?(f.count+'개'):(fmt(f.size)+(dateStr?' · '+dateStr:'')))+'</div></div>'
-      +'<div class="acts">';
-    if(!isDir){
-      h+='<a class="btn-dl" href="/dl-file/'+encodeURIComponent(key)+'" download onclick="event.stopPropagation();showDlToast()">📥</a>';
-    }
+var dlBase='https://'+location.hostname+':8443';
+    items.forEach(function(f){
+      var isDir=f.type==='dir';
+      var key=curPath?curPath+'/'+f.name:f.name;
+      var cls=(selItem&&selItem.name===f.name)?'file-row selected':'file-row';
+      var dateStr=f.modified?new Date(f.modified).toLocaleDateString('ko-KR',{year:'numeric',month:'2-digit',day:'2-digit'}):'';
+      h+='<div class="'+cls+'" draggable="true" data-type="'+f.type+'" data-key="'+esc(key)+'" data-name="'+esc(f.name)+'">'
+        +'<span class="file-icon">'+fileIcon(f.name,isDir)+'</span>'
+        +'<div style="min-width:0;flex:1"><div class="name">'+esc(f.name)+'</div>'
+        +'<div class="file-meta">'+(isDir?(f.count+'개'):(fmt(f.size)+(dateStr?' · '+dateStr:'')))+'</div></div>'
+        +'<div class="acts">';
+      if(!isDir){
+        h+='<a class="btn-dl" href="'+dlBase+'/dl-file/'+encodeURIComponent(key)+'" download onclick="event.stopPropagation();showDlToast()">📥</a>';
+      }
     h+='<button class="ghost sm" data-act="rename">✏️</button>';
     h+='<button class="ghost sm" data-act="del">🗑</button>';
     h+='</div></div>';

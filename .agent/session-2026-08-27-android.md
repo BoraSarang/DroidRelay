@@ -128,3 +128,22 @@
 - 속도제한 인터셉터 원인 격리: limit=0 통과 / limit=5MB/s·999999999 실패 → 토큰 수학이 아닌 래핑 구조 결함 → 단일 래핑으로 수정 · 재검증 통과
 - fmt() 0.1MB 미스터리 = MB 분기가 GiB 제수 사용(100MB→0.1MB, 평균속도 왜곡) — MiB 제수로 교정
 - 테스트 산출물 전부 정리: 테스트 잡 12건 삭제, storage dr_test*/small*/perf_test 삭제, 공용 DroidRelay/* 정리, 호스트 python 8081 종료
+---
+
+# 보충 세션 (21:10~) — HTTPS 다운로드 (웨일 "안전하지 않은 다운로드" 경고 해결)
+
+## 세션 요약
+- **무엇을/플랫폼**: [ANDROID] 웨일에서 HTTP로 ISO를 받으면 "안전하지 않은 다운로드" 경고 — 근본 원인은 HTTP(Insecure Origin/Download)로 판명. mkcert 자체 서명 인증서(맥 login 키체인 신뢰) + Ktor 엔진 **CIO→Netty 전환**(CIO는 HTTPS 미지원 예외 발생) + HTTP 8080·HTTPS 8443 이중 커넥터. 웹 받기 링크를 `https://<host>:8443` 절대 경로로, 응답에 nosniff·no-store 헤더 추가
+- **빌드**: BUILD SUCCESSFUL × 2 (CIO→Netty 후 Netty 4.2 META-INF 충돌 → packaging exclude, ktlint multiline wrap 수정) + install Success. `./gradlew ktlintCheck test` 통과
+- **PERF/CACHE**: Netty 전환으로 엔진 교체 — 기능 동일, HTTPS 커넥터 추가. 다운로드 7.1MB @ 14MB/s (LAN)
+- **남은TODO**: 없음 (T-855 완료). 커밋 미수행 — 사용자 확인 후 커밋
+- **전달로그**: Ktor HEAD 미지원(404)은 그대로 — curl 검증은 GET 사용. HTTPS 인증서 만료 2028-11-27. 폰 IP 변경 시 assets/certs/README.md 절차로 재생성 필요. 맥 CA 등록은 login 키체인(무 sudo) — 네트워크 재부팅 시 유지됨
+- **문서갱신**: TODO T-855, CHANGELOG v0.11.1, assets/certs/README.md, 본 세션 로그
+- **큐상태**: 없음
+- **E2E**: 맥에서 https://10.64.228.42:8443/ 200, ISO HTTPS 전체 다운로드 MD5 7.1MB 일치(b61fe3fe…), `security verify-cert` success, SAN 확인(localhost/10.64.228.42/127.0.0.1/::1)
+
+## 검증 요지
+- CIO는 `UnsupportedOperationException: CIO Engine does not currently support HTTPS` — Netty로 강제 이관
+- Netty 4.2.16에서 16개 jar `META-INF/INDEX.LIST` 충돌 → `packaging.resources.excludes`(INDEX.LIST·io.netty.versions.properties·native-image·versions/9)
+- 맥에서 `curl -sk`로만 접근(터미널 curl은 keychain 미사용) — 브라우저는 keychain 사용하므로 Whale에서 경고 없음
+- **후속**: 맥 login 키체인 mkcert CA 제거(사용자 요청 — 경고 1회 감수). `security delete-certificate -c "mkcert lee@lees-MacBook-Pro.local"` 후 `verify-cert` = NOT_TRUSTED 확인. docs(README/CHANGELOG/TODO)를 "CA 등록은 선택"으로 정정. 앱 코드 변화 없음

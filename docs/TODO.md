@@ -174,3 +174,9 @@ T-001~T-008 전부 완료 (커밋 7574486).
 | T-852 | DownloadEngine.fmt() MB 제수 오류 수정 — GiB 제수(1_073_741_824) 사용으로 1MiB 이상이 10.2배 작게 표기 | ✅ |
 | T-853 | 가드 온도 임계치 30~60 → 50~70°C 확장 (기본값 45→50) — SettingsRepository(기본/로드/setter)·RelayServer 검증·WebAssets 슬라이더·GuardDaemon 주석 | ✅ |
 | T-854 | 목록 우측 버튼 크기 통일 — 다운로드/토렌트 `.card-acts` 112px 픽스+버튼 100%, 보관함 `.acts` 아이콘 34px, box-sizing 통일. CDP 좌표로 받기/삭제 112px·아이콘 34px 확인 | ✅ |
+
+## v0.11.1 (2026-08-27) — HTTPS 다운로드
+
+| T-번호 | 내용 | 상태 |
+|--------|------|------|
+| T-855 | 웨일 "안전하지 않은 다운로드" 회피 — mkcert 자체 서명 인증서 + Ktor 엔진 **CIO→Netty 전환**(CIO는 HTTPS 미지원)+ HTTPS 8443 이중 커넥터. 웹 다운로드 링크를 `https://<host>:8443` 절대 경로로 전환, `/dl-file`에 nosniff·cache-control 헤더 추가. HTTP/HTTPS 동일 바이트(MD5 일치) 검증, 맥은 최초 1회 TLS 경고 후 정상 사용(CA 등록은 선택·미사용) | ✅ |

@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.11.1] - 2026-08-27
+
+### Added [android+web] — HTTPS 다운로드 (웨일 "안전하지 않은 다운로드" 경고 해결)
+- **Ktor 엔진 CIO→Netty 전환**: CIO는 HTTPS 미지원(`UnsupportedOperationException: CIO Engine does not currently support HTTPS`) — Netty 엔진으로 교체하고 HTTP(8080)+HTTPS(8443) **이중 커넥터** 구성. Netty 4.2의 `META-INF/INDEX.LIST` 등 merge 충돌은 `packaging.resources.excludes`로 해결
+- **자체 서명 TLS 인증서**: `mkcert` 로컬 CA 서명으로 `apps/android/app/src/main/assets/certs/server.p12` 배포 (SAN: `localhost, 10.64.228.42, 127.0.0.1, ::1`, 별칭 `relay`). 맥 브라우저는 최초 1회 "고급→계속" 후 다운로드 정상 — 맥 login 키체인 CA 등록은 선택사항(현재 미등록, 경고 1회 감수)
+- **다운로드 링크 HTTPS 절대 경로 전환 (웹)**: 보관함 `renderStorage()`의 받기 링크를 `https://<location.hostname>:8443/dl-file/...`로 변경 — HTTP 페이지에서 열어도 다운로드는 항상 HTTPS로 전송되어 Mixed Content/Insecure Download 차단 회피
+- **`/dl-file` 보안 헤더**: `X-Content-Type-Options: nosniff` + `Cache-Control: no-store, must-revalidate` 추가
+
+### Verified (E2E)
+- 맥에서 `https://10.64.228.42:8443/` 200, ISO(7.1MB) HTTPS 전체 다운로드 200 — HTTP/HTTPS **MD5 동일**(`b61fe3fe…`), `openssl s_client`로 SAN 정합 확인. 맥 인증서 신뢰는 최초 1회 경고 후 사용자가 "계속" 선택하는 방식(선택적 CA 등록 없음)
+
 ## [0.11.0] - 2026-08-27
 
 ### Changed [android] — 배터리/성능 최적화 (v0.10.2 대비 방출·디스크 I/O 대폭 감소)

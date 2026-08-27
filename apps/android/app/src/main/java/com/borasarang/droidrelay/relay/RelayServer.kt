@@ -11,10 +11,13 @@ import io.ktor.server.application.Application
 import io.ktor.server.application.ApplicationCall
 import io.ktor.server.application.call
 import io.ktor.server.application.ApplicationCallPipeline
-import io.ktor.server.cio.CIO
-import io.ktor.server.cio.CIOApplicationEngine
+import io.ktor.server.netty.Netty
+import io.ktor.server.netty.NettyApplicationEngine
 import io.ktor.server.engine.EmbeddedServer
+import io.ktor.server.engine.applicationEnvironment
+import io.ktor.server.engine.connector
 import io.ktor.server.engine.embeddedServer
+import io.ktor.server.engine.sslConnector
 import io.ktor.server.plugins.origin
 import io.ktor.server.request.path
 import io.ktor.server.request.receiveText
@@ -37,6 +40,7 @@ import java.io.File
 import java.io.RandomAccessFile
 import java.net.InetAddress
 import java.net.NetworkInterface
+import java.security.KeyStore
 import java.util.Base64
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
@@ -148,7 +152,15 @@ class RelayServer(
     private val context: Context,
     val port: Int = 8080,
 ) {
-    @Volatile private var server: EmbeddedServer<CIOApplicationEngine, CIOApplicationEngine.Configuration>? = null
+    companion object {
+        /** HTTPS 포트 — 다운로드 경고(안전하지 않은 다운로드) 회피용 자체 서명 TLS */
+        const val HTTPS_PORT = 8443
+        private const val KEY_STORE_ASSET = "certs/server.p12"
+        private const val KEY_STORE_PASSWORD = "droidrelay01"
+        private const val KEY_ALIAS = "relay"
+    }
+
+    @Volatile private var server: EmbeddedServer<NettyApplicationEngine, NettyApplicationEngine.Configuration>? = null
     @Volatile var settings: AppSettings = AppSettings()
 
     fun updateSettings(s: AppSettings) {
@@ -158,18 +170,47 @@ class RelayServer(
 
     fun start() {
         if (server != null) return
-        val ctx = context
-        server = embeddedServer(CIO, port = port, host = "0.0.0.0") {
-            relayRoutes(ctx, this@RelayServer)
-        }
-            .start(wait = false)
-        DebugLogger.i("Server", "기동 완료 http://0.0.0.0:$port (LAN=${lanAddress() ?: "?"})")
+        server = runCatching { createServer() }
+            .onSuccess { s ->
+                s.start(wait = false)
+                DebugLogger.i("Server", "기동 완료 http://0.0.0.0:$port + https://0.0.0.0:$HTTPS_PORT (LAN=${lanAddress() ?: "?"})")
+            }
+            .onFailure { e ->
+                DebugLogger.e("Server", "서버 기동 실패 E-SRV-NET-1421 ${e.message}")
+                server = null
+            }
+            .getOrNull()
     }
 
     fun stop() {
         runCatching { server?.stop(gracePeriodMillis = 500, timeoutMillis = 1500) }
         server = null
         DebugLogger.i("Server", "서버 정지")
+    }
+
+    /** HTTP + HTTPS(TLS) 이중 커넥터 생성. 인증서는 assets/certs/server.p12 (mkcert 로컬 CA 서명) */
+    private fun createServer(): EmbeddedServer<NettyApplicationEngine, NettyApplicationEngine.Configuration> {
+        val keystore = context.assets.open(KEY_STORE_ASSET).use { stream ->
+            KeyStore.getInstance("PKCS12").also { it.load(stream, KEY_STORE_PASSWORD.toCharArray()) }
+        }
+        val httpPort = port
+        val httpsPort = if (port == HTTPS_PORT) HTTPS_PORT + 1 else HTTPS_PORT
+        val env = applicationEnvironment { }
+        return embeddedServer(
+            Netty,
+            env,
+            configure = {
+                connector {
+                    this.port = httpPort
+                    host = "0.0.0.0"
+                }
+                sslConnector(keystore, KEY_ALIAS, { KEY_STORE_PASSWORD.toCharArray() }, { KEY_STORE_PASSWORD.toCharArray() }) {
+                    this.port = httpsPort
+                    host = "0.0.0.0"
+                }
+            },
+            module = { relayRoutes(context, this@RelayServer) },
+        )
     }
 }
 
@@ -1457,6 +1498,8 @@ private fun Application.relayRoutes(context: Context, serverRef: RelayServer) {
             } else {
                 DebugLogger.i("Http", "파일 다운로드 요청 name=$name")
                 call.response.header(HttpHeaders.ContentDisposition, "attachment; filename=\"${file.name}\"")
+                call.response.header("X-Content-Type-Options", "nosniff")
+                call.response.header(HttpHeaders.CacheControl, "no-store, must-revalidate")
                 call.respondBytesWriter(contentType = ContentType.Application.OctetStream, contentLength = file.length()) {
                     file.inputStream().use { input ->
                         val buf = ByteArray(64 * 1024)

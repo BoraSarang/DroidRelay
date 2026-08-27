@@ -29,6 +29,17 @@ android {
         compose = true
         buildConfig = true
     }
+    packaging {
+        resources {
+            excludes +=
+                setOf(
+                    "META-INF/INDEX.LIST",
+                    "META-INF/io.netty.versions.properties",
+                    "META-INF/native-image/**",
+                    "META-INF/versions/9/**",
+                )
+        }
+    }
     testOptions {
         unitTests.isReturnDefaultValues = true
     }
@@ -49,7 +60,7 @@ dependencies {
 
     implementation(libs.okhttp)
     implementation(libs.ktor.server.core)
-    implementation(libs.ktor.server.cio)
+    implementation(libs.ktor.server.netty)
     implementation("io.ktor:ktor-io:3.5.2")
     implementation(libs.zxing.core)
     implementation(libs.libtorrent4j)
