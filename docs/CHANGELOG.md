@@ -1,5 +1,64 @@
 # Changelog
 
+## [0.10.2] - 2026-08-27
+
+### Added [android+web]
+- **웹 정보 바 리디자인**: 상단 요약바 좌/우 고정 레이아웃 — 좌측(가변) = 진행 건수 + 총 속도(대기 시 회색 "대기중..."), 우측(고정) = 저장공간 여유 · 온도/배터리 · 버전. 폰 온도·배터리 실시간 표시 (`/api/guard/status` 연동). 보호 영역 min-width 480px로 모바일 압축 방지
+- **가드 상태 색상 구분**: 임계치 초과 시 `⚠ 스로틀링` 배지 + 빨강 강조, 가드 비활성 시 회색 "가드 끔", 정상 시 초록
+- **RSS 자동 다운로드 확장**: 항목 URL이 `magnet:` 또는 `.torrent`면 일반 다운로드 대신 TorrentEngine(`addMagnet`/`.torrent 추가`)으로 라우팅
+- **TUNNEL_GUIDE.md**: Tailscale/Cloudflare 터널 시나리오·현재 한계점·로드맵 문서 신설
+
+### Changed [android+web]
+- **보관함↔설정 디자인 통일**: 보관함 오른쪽 콘텐츠를 설정 콘텐츠 스타일(라운드 카드 `.sg` + 섹션 헤더 `.sh`)로 재구성 — "🗂 파일 관리" 액션 카드 + "📄 폴더 내용/🗑️ 휴지통" 목록 카드, 파일 행을 리스트 그룹 스타일로 변경 (구분선+호버 배경, 단일 행엔 구분선 생략)
+- **RSS "지금 확인" 버튼 수정**: `/api/rss/0/check`가 "피드 없음"으로 무응답하던 버그 — id "0"을 전체 피드 확인의 특수값으로 허용
+- **RSS 에러 표면화 개선**: HTTP 비 2xx(403 등)/HTML(Cloudflare JS 챌린지) 응답을 구분해 의미 있는 오류 메시지로 표시 (`HTTP 403 (Cloudflare/보안 챌린지 차단 가능)` 등), 브라우저 UA 채택, 실패 시에도 `lastCheckedAt` 갱신해 UI에 확인 시각 노출
+
+### Fixed [android]
+- **디버그 오버레이 토글 크래시**: `DebugOverlayService`가 `startForegroundService()`로 기동되면서도 `startForeground()`를 호출하지 않아(ForegroundServiceDidNotStartInTimeException) 프로세스가 즉시 종료되던 버그 — `startInForeground()` 추가 (`relay_status` 채널·`NOTIF_ID 2002`, `FOREGROUND_SERVICE_TYPE_DATA_SYNC`)
+- **오버레이 토글이 OFF 불가**: `/api/debug/overlay/toggle`이 항상 시작만 하고 중지는 불가능했음 — `DebugOverlayService.isRunning` 상태 기반 진짜 ON/OFF 토글로 수정
+- **토글 응답 비동기 경합**: start/stop 직후 `isRunning` 플래그가 뒤늦게 변해 응답이 뒤집히던 것(`running` 반전) — 요청 시점의 `wasRunning` 기준 결정적 응답으로 수정
+- **오버레이 권한 안내 문구 오타**: `权限이 없습니다`(중문) → `권한이 없습니다`(국문)로 교정
+
+## [0.10.0] - 2026-08-27
+
+### Added [android+web]
+- **Debrid 클라우드 다운로드 연동 (Phase 1.3)**: Real-Debrid / AllDebrid / Premiumize 공통 클라이언트. 설정 탭 > Debrid 섹션에서 API 키 입력, 계정 확인, 제공자 선택. `POST /api/debrid/unrestrict`로 언리스트링크 변환 → 고속 다운로드. 다운로드 추가 시 자동 적용
+- **MCP 서버 내장 (Phase 2.1)**: JSON-RPC 2.0 프로토콜, `/mcp` + `/mcp/call` 엔드포인트. 도구: file_list, file_read, download_add, download_list, download_control. AI 에이전트 연동 지원
+- **MCP 권한 설정 (Phase 2.1 확장)**: 도구별 ON/OFF + 프라이버시 모드 (file_read 차단). `GET/POST /api/settings/mcp`
+- **웹훅/콜백 API (Phase 2.2)**: 다운로드 완료/실패 시 POST 콜백, HMAC-SHA256 서명, 지수 백오프 재시도(최대 3회), 데드레터 큐. `GET/POST /api/settings/webhook`
+- **터널 매니저 (Phase 2.3)**: Tailscale / Cloudflare Tunnel 상태 관리, Tailscale 앱 감지 + IP 자동 탐지. `GET/POST /api/settings/tunnel` + `GET /api/tunnel/status`
+- **가드 데몬 (Phase 2.4)**: 열/배터리/스토리지 임계치 모니터링 (30초 폴링). 임계치 초과 시 자동 다운로드 일시정지, 정상 복귀 시 재개. 설정 탭 > 가드 섹션에서 임계치 조정, 현재 상태 확인
+- **스케줄/조건부 다운로드 (Phase 3 확장)**: 크론 표현식 파서 (5필드, step/comma/range 지원) + Wi-Fi/충전/배터리 제약. `GET/POST /api/settings/schedule`. JobScheduler 기반 자동 실행
+- **외장 스토리지 자동 감지 (Phase 3 확장)**: USB OTG / SD카드 / 외장 SSD 마운트 감지, 여유 공간 표시, 권장 다운로드 경로 제안. `GET /api/storage/external`
+- **메트릭스 API (Phase 3)**: `/api/metrics` — 서버 가동시간, 다운로드/토렌트 통계, 바이트 처리량, 실시간 속도. Prometheus/Grafana 연동 준비
+- **설정 사이드바 확장**: Debrid(☁️), 가드(🛡), MCP(🤖), 스케줄(⏰), 스토리지(💾) 메뉴 추가 — 10개 섹션
+
+### Changed [android+web]
+- **다운로드 엔진 Debrid 통합**: POST /api/jobs 시 Debrid 활성화 상태면 자동 언리스트링크 → 고속 다운로드 URL로 변환 후 큐잉
+- **설정 데이터 모델 확장**: AppSettings에 debridEnabled/debridProvider/debridApiKey, guardEnabled/guardThermalLimit/guardBatteryLimit/guardStorageLimit, webhookEnabled/webhookUrl/webhookSecret, tunnelEnabled/tunnelProvider 필드 추가
+- **RelayService 가드 연동**: 가드 데몬 시작 + 상태 변경 시 다운로드 자동 일시정지/재개
+- **디버그 모드 로그 증강 (Phase 3)**: McpServer(도구 호출/실행/완료 시간), TunnelManager(설치/인터페이스/IP 감지), StorageDetector(마운트/여유공간/bestPath), GuardDaemon(센서 수치 30초 주기), DebridClient(API 요청/응답), SchedulerManager(크론 파싱/제약/JobScheduler 등록 결과), ScheduleJobService(잡 ID/제약 결과), RelayService(컴포넌트 시작/정리) 전 구성요소 상세 로그 추가
+
+### Added [android+web] (디버그 패널)
+- **웹 디버그 패널 (별도 페이지)**: `GET /debug` — 독립 창으로 실시간 로그 모니터링 (1초 폴링), 로그/API 호출 탭, 레벨·태그·텍스트 필터, 일시정지, 복사, 내보내기
+- **디버그 API 세트**: `GET /api/debug/logs`, `GET /api/debug/api-calls`, `GET /api/debug/status`, `POST /api/debug/clear`, `GET /api/debug/overlay`, `POST /api/debug/overlay/toggle`
+- **API 호출 자동 기록**: Call 파이프라인 인터셉터 — 모든 `/api/*` 요청의 method/path/status/MS 기록 (`DebugLogger.api()` 링 버퍼 300줄)
+- **설정 사이드바 "🐛 디버그" 섹션**: 디버그 패널 열기 버튼 + 실시간 상태 표시 + 오버레이 권한/토글
+
+### Added [android] (플로팅 오버레이)
+- **디버그 플로팅 오버레이**: `DebugOverlayService.kt` — `TYPE_APPLICATION_OVERLAY` 투명 오버레이. 최근 로그/API 호출 실시간 표시, 드래그 이동, 탭 시 일시정지, 1초 폴링
+- **`SYSTEM_ALERT_WINDOW` 권한 + 서비스 등록**: AndroidManifest에 추가. 설정에서 오버레이 권한 요청 + 시작/중지 제어
+
+## [0.9.0] - 2026-08-27
+
+### Added [android+web]
+- **시퀀셜 다운로드 지원**: 토렌트 설정 > 고급에 "시퀀셜 다운로드 (스트리밍 프리뷰)" 토글 추가. 활성화 시 첫 번째 조각부터 순서대로 다운로드하여 미디어 파일 재생 미리보기 지원
+- **RSS/Atom 피드 자동 다운로드**: 설정 탭에 RSS 피드 관리 카드 추가. 피드 URL 등록, 키워드/정규식 필터, 15분 주기 자동 폴링, 매칭 시 자동 다운로드. `GET/POST/DELETE /api/rss` + `POST /api/rss/{id}/check`
+- **PLAN_v0.9_android.md**: "Server Edition" 로드맵 문서 — MCP 서버, 가드 데몬, 터널링, 웹훅, RSS 피드, Debrid 연동 계획
+
+### Changed [android]
+- **TorrentEngine 시퀀셜 모드**: `TorrentFlags.SEQUENTIAL_DOWNLOAD` 플래그 적용 — magnet/torrent 파일 추가 시 설정에 따라 자동 적용, 기존 토렌트도 실시간 전환
+
 ## [0.8.0] - 2026-08-27
 
 ### Added [android+web]

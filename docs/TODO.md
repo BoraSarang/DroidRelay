@@ -100,3 +100,55 @@ T-001~T-008 전부 완료 (커밋 7574486).
 | T-708 | 맥 앱 다운로드 추가 시트 (다중 URL + SHA-256 필드) | ✅ |
 | T-709 | 웹 보관함 폴더 트리 사이드바 (/api/storage/tree + 2단 레이아웃) | ✅ |
 | T-710 | 대용량 업로드 raw 스트리밍 (/api/storage/raw-upload, 196MB 11초) + cleartext 허용 | ✅ |
+
+## v0.10 (2026-08-27) — Server Edition Phase 1.3~3
+
+| T-번호 | 내용 | 상태 |
+|--------|------|------|
+| T-801 | DebridClient 공통 인터페이스 (RealDebrid/AllDebrid/Premiumize) | ✅ |
+| T-802 | Debrid 설정 API (GET/POST /api/settings/debrid) | ✅ |
+| T-803 | Debrid 언리스트링크 API (POST /api/debrid/unrestrict) + 계정 확인 | ✅ |
+| T-804 | Debrid 설정 UI (제공자 선택, API 키 입력, 계정 확인 버튼) | ✅ |
+| T-805 | 다운로드 엔진 Debrid 통합 (POST /api/jobs 시 자동 언리스트링크) | ✅ |
+| T-806 | MCP 서버 내장 (JSON-RPC 2.0, /mcp + /mcp/call, 5개 도구) | ✅ |
+| T-807 | 웹훅 매니저 (HMAC-SHA256, 지수 백오프, 데드레터 큐) | ✅ |
+| T-808 | 터널 매니저 (Tailscale/CF Tunnel 상태 관리) | ✅ |
+| T-809 | 가드 데몬 (열/배터리/스토리지 30초 폴링, 자동 일시정지/재개) | ✅ |
+| T-810 | 가드 설정 UI (임계치 슬라이더, 상태 확인) | ✅ |
+| T-811 | 메트릭스 API (/api/metrics — 가동시간/통계/속도) | ✅ |
+| T-812 | 설정 데이터 모델 확장 (Debrid/Guard/Webhook/Tunnel 필드) | ✅ |
+| T-813 | CHANGELOG + 세션 로그 갱신 | ✅ |
+| T-814 | MCP 권한 설정 (도구별 ON/OFF + 프라이버시 모드) | ✅ |
+| T-815 | 크론 파서 (5필드, step/comma/range) | ✅ |
+| T-816 | 스케줄러 매니저 (JobScheduler + Wi-Fi/충전/배터리 제약) | ✅ |
+| T-817 | 외장 스토리지 감지 (USB OTG/SSD 마운트 → 경로 제안) | ✅ |
+| T-818 | 터널 상태 강화 (Tailscale 앱 감지 + IP 자동 탐지) | ✅ |
+| T-819 | 설정 UI 3개 섹션 추가 (MCP/스케줄/스토리지) | ✅ |
+| T-820 | API 4개 신규 (mcp/schedule/tunnel-status/storage-external) | ✅ |
+
+## v0.10.1 (2026-08-27) — 디버그 시스템 부트스트랩
+
+| T-번호 | 내용 | 상태 |
+|--------|------|------|
+| T-821 | DebugLogger 확장 — 링 버퍼 300줄 + api()/apiLines()/apiDump()/apiCount() | ✅ |
+| T-822 | 디버그 API 세트 — logs/api-calls/status/clear | ✅ |
+| T-823 | 웹 디버그 패널 (/debug 별도 페이지 + 1초 폴링 + 탭/필터/복사/일시정지) | ✅ |
+| T-824 | API 호출 자동 기록 (Call 파이프라인 인터셉터, proceed() 후 status 캡처) | ✅ |
+| T-825 | 설정 사이드바 "🐛 디버그" 섹션 (패널 열기 + 오버레이 권한/토글) | ✅ |
+| T-826 | Android 플로팅 오버레이 서비스 (TYPE_APPLICATION_OVERLAY, 드래그/일시정지) | ✅ |
+| T-827 | SYSTEM_ALERT_WINDOW 권한 + DebugOverlayService 인증 등록 | ✅ |
+| T-828 | 디버그 로그 증강 — MCP/Tunnel/Storage/Guard/Debrid/Scheduler/ScheduleJob/Service 8개 컴포넌트 | ✅ |
+| T-829 | 빌드 + 설치 + 전체 디버그 API 검증 + 문서 갱신 | ✅ |
+
+## v0.10.2 (2026-08-27) — 정보 바 + RSS 진단 + 디자인 통일
+
+| T-번호 | 내용 | 상태 |
+|--------|------|------|
+| T-830 | 웹 정보 바 리디자인 — 좌(진행 건수/총 속도 or 대기중) 우(저장공간/온도·배터리/버전) 고정 레이아웃, .wrap min-width 480px | ✅ |
+| T-831 | 가드 상태 표시 — temp-ok/temp-warn(+⚠ 스로틀링)/temp-off(가드 끔) 색상 구분 | ✅ |
+| T-832 | RSS "지금 확인" 버튼 버그 수정 — /api/rss/0/check 전체 피드 확인 허용 (기존 "피드 없음" 무응답) | ✅ |
+| T-833 | RSS 에러 표면화 — HTTP status/HTML(Cloudflare 챌린지) 감지 세분화, 오류 시에도 lastCheckedAt 갱신 | ✅ |
+| T-834 | RSS 자동 다운로드 확장 — magnet:/ .torrent URL을 TorrentEngine으로 라우팅 | ✅ |
+| T-835 | 보관함↔설정 콘텐츠 디자인 통일 — .sg/.sh 카드 구조 + 파일 리스트 그룹 스타일 | ✅ |
+| T-836 | TUNNEL_GUIDE.md 작성 (Tailscale/CF 시나리오·한계점·로드맵) | ✅ |
+| T-837 | 오버레이 토글 E2E — 크래시 수정(누락된 startForeground) + 진짜 ON/OFF 토글 + 응답 결정화, 실기기에서 권한→ON→OFF 시각 검증 | ✅ |
