@@ -227,6 +227,7 @@ object WebAssets {
         <div class="settings-nav-item" onclick="switchSettingsSection('torrent')">🌊 토렌트</div>
         <div class="settings-nav-item" onclick="switchSettingsSection('rss')">📡 RSS 피드</div>
         <div class="settings-nav-item" onclick="switchSettingsSection('debrid')">☁️ Debrid</div>
+        <div class="settings-nav-item" onclick="switchSettingsSection('tunnel')">🔗 터널</div>
         <div class="settings-nav-item" onclick="switchSettingsSection('guard')">🛡 가드</div>
         <div class="settings-nav-item" onclick="switchSettingsSection('mcp')">🤖 MCP</div>
         <div class="settings-nav-item" onclick="switchSettingsSection('schedule')">⏰ 스케줄</div>
@@ -408,6 +409,28 @@ object WebAssets {
             <button class="ghost sm" onclick="checkDebridAccount()">🔍 계정 확인</button>
           </div>
           <div id="debridStatus" class="sb" style="margin-top:8px"></div>
+        </div>
+      </div>
+
+      <div class="settings-content" id="settings-tunnel">
+        <div class="sg">
+          <div class="sh">🔗 터널 (외부 접속)</div>
+          <div class="ck">
+            <input type="checkbox" id="tunnelEnabled">
+            <label for="tunnelEnabled">터널 사용</label>
+          </div>
+          <div class="sb">Tailscale/Cloudflare Tunnel로 기기를 외부 네트워크에서 접속 가능하게 합니다</div>
+          <div class="ti">제공자</div>
+          <div class="rb">
+            <button class="ghost" id="tunnelTailscale" onclick="highlightTunnelProvider('TAILSCALE')">Tailscale</button>
+            <button class="ghost" id="tunnelCloudflare" onclick="highlightTunnelProvider('CLOUDFLARE')">Cloudflare</button>
+          </div>
+          <div class="sb">Tailscale: 100.x.y.z IP 자동 감지 · Cloudflare: cloudflared 바이너리와 빠른 접속 설정 필요</div>
+          <div class="rb" style="margin-top:12px">
+            <button class="ghost sm" onclick="saveTunnelSettings()">저장</button>
+            <button class="ghost sm" onclick="checkTunnelStatus()">🔍 현재 상태</button>
+          </div>
+          <div id="tunnelStatus" class="sb" style="margin-top:8px"></div>
         </div>
       </div>
 
@@ -610,7 +633,7 @@ function switchTab(t){
 }
 function switchSettingsSection(s){
   document.querySelectorAll('.settings-nav-item').forEach(function(el,i){
-    el.classList.toggle('active',(['global','download','torrent','rss','debrid','guard','mcp','schedule','storage','debug','reset'])[i]===s);
+    el.classList.toggle('active',(['global','download','torrent','rss','debrid','tunnel','guard','mcp','schedule','storage','debug','reset'])[i]===s);
   });
   document.querySelectorAll('.settings-content').forEach(function(el){
     el.classList.remove('active');
@@ -1255,7 +1278,7 @@ function switchTab(t){
 // ── 설정 사이드바 전환 ──
 function switchSettingsSection(s){
   document.querySelectorAll('.settings-nav-item').forEach(function(el,i){
-    el.classList.toggle('active',(['global','download','torrent','rss','debrid','guard','mcp','schedule','storage','debug','reset'])[i]===s);
+    el.classList.toggle('active',(['global','download','torrent','rss','debrid','tunnel','guard','mcp','schedule','storage','debug','reset'])[i]===s);
   });
   document.querySelectorAll('.settings-content').forEach(function(el){
     el.classList.remove('active');
@@ -1271,11 +1294,12 @@ function loadSettings(){
     fetch('/api/settings/download').then(function(r){return r.json();}),
     fetch('/api/settings/torrent').then(function(r){return r.json();}),
     fetch('/api/settings/debrid').then(function(r){return r.json();}),
+    fetch('/api/settings/tunnel').then(function(r){return r.json();}),
     fetch('/api/settings/guard').then(function(r){return r.json();}),
     fetch('/api/settings/mcp').then(function(r){return r.json();}),
     fetch('/api/settings/schedule').then(function(r){return r.json();})
   ]).then(function(res){
-    var sl=res[0], dl=res[1], tr=res[2], db=res[3], gd=res[4], mc=res[5], sc=res[6];
+    var sl=res[0], dl=res[1], tr=res[2], db=res[3], tn=res[4], gd=res[5], mc=res[6], sch=res[7];
     // 전역 속도 제한
     document.getElementById('dlSpeedEnabled').checked=sl.maxDownloadBps>0;
     document.getElementById('maxDownloadMbps').disabled=sl.maxDownloadBps<=0;
@@ -1311,6 +1335,10 @@ function loadSettings(){
     document.getElementById('debridEnabled').checked=db.debridEnabled===true;
     document.getElementById('debridApiKey').value=db.debridApiKey||'';
     highlightDebridProvider(db.debridProvider||'');
+    // 터널 설정
+    document.getElementById('tunnelEnabled').checked=tn.tunnelEnabled===true;
+    tunnelSelectedProvider=tn.tunnelProvider||'';
+    if(tunnelSelectedProvider)highlightTunnelProvider(tunnelSelectedProvider);
     // 가드 설정
     document.getElementById('guardEnabled').checked=gd.guardEnabled===true;
     document.getElementById('guardThermalLimit').value=gd.guardThermalLimit||45;
@@ -1326,16 +1354,16 @@ function loadSettings(){
       document.getElementById('mcpTool_'+t).checked=disabled.indexOf(t)===-1;
     });
     // 스케줄 설정
-    document.getElementById('scheduleEnabled').checked=sc.scheduleEnabled===true;
-    document.getElementById('scheduleCron').value=sc.scheduleCron||'';
-    document.getElementById('scheduleWifiOnly').checked=sc.scheduleWifiOnly!==false;
-    document.getElementById('scheduleChargingOnly').checked=sc.scheduleChargingOnly===true;
-    document.getElementById('scheduleBatteryMin').value=sc.scheduleBatteryMin||30;
-    document.getElementById('scheduleBatteryLabel').textContent=(sc.scheduleBatteryMin||30)+'%';
-    if(sc.scheduleCron){
+    document.getElementById('scheduleEnabled').checked=sch.scheduleEnabled===true;
+    document.getElementById('scheduleCron').value=sch.scheduleCron||'';
+    document.getElementById('scheduleWifiOnly').checked=sch.scheduleWifiOnly!==false;
+    document.getElementById('scheduleChargingOnly').checked=sch.scheduleChargingOnly===true;
+    document.getElementById('scheduleBatteryMin').value=sch.scheduleBatteryMin||30;
+    document.getElementById('scheduleBatteryLabel').textContent=(sch.scheduleBatteryMin||30)+'%';
+    if(sch.scheduleCron){
       var el=document.getElementById('scheduleStatus');
-      el.textContent='크론: "'+sc.scheduleCron+'"'+(sc.cronValid?' ✓':' ✗');
-      el.style.color=sc.cronValid?'#69E29B':'#FF8A93';
+      el.textContent='크론: "'+sch.scheduleCron+'"'+(sch.cronValid?' ✓':' ✗');
+      el.style.color=sch.cronValid?'#69E29B':'#FF8A93';
     }
     loadRssFeeds();
     // 디버그 상태
@@ -1624,6 +1652,40 @@ function checkDebridAccount(){
         el.innerHTML='<span style="color:#69E29B">✓ 연결됨</span> — '+(d.username||d.email||'알 수 없음')+(d.premium?' <span class="badge DONE">프리미엄</span>':'');
       }else{
         el.innerHTML='<span style="color:#FF8A93">✗ '+esc(d.error||'확인 실패')+'</span>';
+      }
+    })
+    .catch(function(e){el.innerHTML='<span style="color:#FF8A93">✗ 오류: '+esc(e.message)+'</span>';});
+}
+
+// ── 터널 설정 ──
+var tunnelSelectedProvider='';
+function highlightTunnelProvider(provider){
+  tunnelSelectedProvider=provider;
+  ['TAILSCALE','CLOUDFLARE'].forEach(function(p){
+    var el=document.getElementById('tunnel'+p.charAt(0)+p.slice(1).toLowerCase());
+    if(el){el.style.borderColor=p===provider?'#2F80ED':'#2A3B5C';el.style.background=p===provider?'#122A4D':'transparent';}
+  });
+}
+function saveTunnelSettings(){
+  var body={
+    tunnelEnabled:document.getElementById('tunnelEnabled').checked,
+    tunnelProvider:tunnelSelectedProvider
+  };
+  fetch('/api/settings/tunnel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
+    .then(function(r){return r.json();})
+    .then(function(d){if(d.ok){showDlToast('터널 설정 저장됨');checkTunnelStatus();}else alert('저장 실패: '+(d.error||''));})
+    .catch(function(e){alert('저장 실패: '+e);});
+}
+function checkTunnelStatus(){
+  var el=document.getElementById('tunnelStatus');
+  el.textContent='상태 확인 중...';el.style.color='#8FD8FF';
+  fetch('/api/tunnel/status')
+    .then(function(r){return r.json();})
+    .then(function(d){
+      if(d.connected){
+        el.innerHTML='<span style="color:#69E29B">✓ 연결됨</span> — IP <b>'+esc(d.ip)+'</b> · 접속 주소 <a href="'+esc(d.url)+'" target="_blank">'+esc(d.url)+'</a>';
+      }else{
+        el.innerHTML='<span style="color:#FF8A93">✗ '+esc(d.reason||'연결 안 됨')+'</span>';
       }
     })
     .catch(function(e){el.innerHTML='<span style="color:#FF8A93">✗ 오류: '+esc(e.message)+'</span>';});

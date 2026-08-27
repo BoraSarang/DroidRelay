@@ -60,6 +60,13 @@
 ### TUNNEL_GUIDE.md
 - Tailscale/CF 시나리오·API 사용법·현재 한계(바이너리 미번들/웹 UI 섹션 없음/자동시작 없음)·트러블슈팅·로드맵
 
+### 터널 웹 UI 설정 섹션 (🔗 터널)
+- 설정 사이드바 "☁️ Debrid" 뒤에 "🔗 터널" 메뉴 + `settings-tunnel` 섹션 추가 — `.sg` 카드: 터널 사용 토글 / 제공자 선택(Tailscale·Cloudflare 하이라이트 버튼) / 저장 / "🔍 현재 상태" / 상태 표시
+- `loadSettings()`에 `/api/settings/tunnel`(res[4] → 이후 인덱스 당겨짐: schedule `sc`→`sch`로 이름 변경) 연동, `switchSettingsSection()` 배열에 'tunnel' 삽입(중복 정의 2곳 모두)
+- 신규 JS: `tunnelSelectedProvider` 전역 + `highlightTunnelProvider()` / `saveTunnelSettings()` / `checkTunnelStatus()`
+- **E2E (실기기, chrome-devtools로 기기 대시보드 접근)**: 사이드바 🔗 터널 표시 → 섹션 열면 "터널 사용" checked(API 값 반영) + Tailscale 버튼 하이라이트(#2F80ED/#122A4D) → "🔍 현재 상태" → "✗ Tailscale 미연결 또는 미설치" → 체크 해제+저장 → API `tunnelEnabled:false` + "터널 비활성화" → 원복. API로 CF 전환 시 "cloudflared 바이너리 필요" 구분 확인
+- 산출물: `docs/screenshots/android/v0.10.1_tunnel_settings.png` + TUNNEL_GUIDE 한계점/로드맵 갱신
+
 ### 정상 RSS 피드 자동 다운로드 E2E (버그 1건 발견·수정)
 - **검증 구성**: 맥 로컬 `http.server 8099` + `adb reverse`로 3종 항목(매그넷/우분투 .torrent/일반 URL) RSS 피드 서빙 → 기기 서버 피드 추가(autoDownload=true) → "지금 확인"
 - **발견 버그**: `item.enclosureUrl ?: item.link`에서 enclosure 없는 항목의 `enclosureUrl=""`(빈 문자열)이 `?:`(null만 대체)를 무력화 → url 공백 → 자동 다운로드 루프 미진입(다운로드=0). `enclosureUrl?.takeIf{isNotBlank()} ?: link`로 수정
@@ -89,9 +96,8 @@
 - **신규**: TUNNEL_GUIDE.md, docs/screenshots/android/v0.10.1_*.png+a11y dump
 
 ## 남은 TODO
-- 터널 웹 UI 설정 섹션 (TUNNEL_GUIDE.md 로드맵 — 사용자 승인 필요)
-- RSS 정상 피드 E2E 완료 (BBC 34항목 파싱 + magnet/.torrent/일반 라우팅 검증) — 추가 리스크 없음
-- 커밋 (오버레이·RSS 버그 수정 직후 — 브랜치 feat/android-v010-debug-rss에 진행 중)
+- 터널 웹 UI 설정 섹션 완료 (🔗 터널, E2E 검증) — 다음 후보: 터널 자동 시작(RelayService), 바이너리 번들
+- 커밋 (터널 UI 변경분 — feat/android-v010-debug-rss 브랜치에서 진행)
 
 ## 큐 상태
 - 없음
@@ -100,3 +106,4 @@
 - 디버그 API 전체 통과 확인
 - 오버레이 토글 E2E 통과 (권한 adb 부여 → ON→OFF, 크래시 없음, 시각 확인)
 - 정상 RSS 피드 E2E 통과 — BBC 34항목 파싱, magnet/.torrent/일반 URL 3종 자동 다운로드 라우팅 (enclosureUrl 빈 문자열 버그 수정 후)
+- 터널 웹 UI E2E 통과 — 사이드바/섹션 렌더링, loadSettings 반영(체크+하이라이트), 상태 확인, 저장(ON/OFF) 반영

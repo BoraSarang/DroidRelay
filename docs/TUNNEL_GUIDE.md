@@ -29,7 +29,7 @@ DroidRelay의 웹 대시보드는 기본적으로 **같은 네트워크(랜)** �
   ```
 - 디버그 로그: `GET /api/debug/logs` 필터 `Tunnel`
 
-> 웹 대시보드 설정 사이드바에는 터널 UI 섹션이 아직 없다
+> 웹 대시보드 설정 사이드바에서 터널 토글/제공자/상태를 관리한다 (v0.10.2+, 🔗 터널 섹션)
 > (전역/다운로드/토렌트/RSS/Debrid/가드/MCP/스케줄/스토리지/디버그만 존재).
 > 따라서 지금은 REST API로만 설정·조회한다.
 
@@ -82,10 +82,9 @@ curl http://{폰 IP}:8080/api/tunnel/status
 1. **터널 바이너리 미번들**: `cloudflared`/`tailscale` 실행 파일이 앱에 들어있지
    않음 (소스 주석: "ARM64 번들 (추후 구현)"). `filesDir`에 수동으로 넣어야 실제
    연결이 가능
-2. **웹 UI 설정 섹션 없음**: 설정 사이드바에 터널 토글이 없어 API로만 조작
-3. **자동 시작 없음**: RelayService가 TunnelManager를 생성만 하고 `start()`를
+2. **자동 시작 없음**: RelayService가 TunnelManager를 생성만 하고 `start()`를
    호출하지 않음 — 앱 부팅 시 터널이 자동으로 켜지지 않음
-4. **Tailscale 상태 감지는 조회 시점 기준**: 폰이 Tailscale에 연결돼 있고 100.x
+3. **Tailscale 상태 감지는 조회 시점 기준**: 폰이 Tailscale에 연결돼 있고 100.x
    IP가 있으면 connected로 표시됨 (폰 Tailscale 앱에서 연결 토글 필요)
 
 ## 6. 문제 해결 (Troubleshooting)
@@ -102,6 +101,6 @@ curl http://{폰 IP}:8080/api/tunnel/status
 ## 7. 로드맵 제안
 
 - [ ] `cloudflared`/`tailscale` ARM64 바이너리 앱 번들
-- [ ] 웹 설정 사이드바에 "🌐 터널" 섹션 추가 (토글 + 상태 + URL 표시)
+- [x] 웹 설정 사이드바에 "🔗 터널" 섹션 추가 (토글 + 상태 + URL 표시) — v0.10.2
 - [ ] RelayService에서 시작 시 자동 `TunnelManager.start(settings)` 호출
 - [ ] 외부 URL로 대시보드 접속 시 서버 CORS/인증 보강

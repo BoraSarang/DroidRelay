@@ -6,6 +6,7 @@
 - **웹 정보 바 리디자인**: 상단 요약바 좌/우 고정 레이아웃 — 좌측(가변) = 진행 건수 + 총 속도(대기 시 회색 "대기중..."), 우측(고정) = 저장공간 여유 · 온도/배터리 · 버전. 폰 온도·배터리 실시간 표시 (`/api/guard/status` 연동). 보호 영역 min-width 480px로 모바일 압축 방지
 - **가드 상태 색상 구분**: 임계치 초과 시 `⚠ 스로틀링` 배지 + 빨강 강조, 가드 비활성 시 회색 "가드 끔", 정상 시 초록
 - **RSS 자동 다운로드 확장**: 항목 URL이 `magnet:` 또는 `.torrent`면 일반 다운로드 대신 TorrentEngine(`addMagnet`/`.torrent 추가`)으로 라우팅
+- **터널 웹 UI 설정 섹션 (🔗 터널)**: 설정 사이드바에 터널 메뉴/패널 추가 — 터널 사용 토글, 제공자 선택(Tailscale/Cloudflare, 하이라이트), 저장 시 `POST /api/settings/tunnel`, "🔍 현재 상태"로 `GET /api/tunnel/status` 연동(연결 시 IP·접속 URL 표시, 미연결 시 이유 포함). `loadSettings()/switchSettingsSection()`에 터널 연동. 실기기 E2E — ON/OFF·제공자 전환·비활성 상태 표기·Tailscale 미설치/cloudflared 필요 구분 모두 검증
 - **TUNNEL_GUIDE.md**: Tailscale/Cloudflare 터널 시나리오·현재 한계점·로드맵 문서 신설
 
 ### Changed [android+web]
