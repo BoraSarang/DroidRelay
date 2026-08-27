@@ -154,3 +154,21 @@ T-001~T-008 전부 완료 (커밋 7574486).
 | T-837 | 오버레이 토글 E2E — 크래시 수정(누락된 startForeground) + 진짜 ON/OFF 토글 + 응답 결정화, 실기기에서 권한→ON→OFF 시각 검증 | ✅ |
 | T-838 | 정상 RSS 피드 자동 다운로드 E2E — magnet/.torrent/일반 URL 3종 라우팅 검증 중 enclosureUrl 빈 문자열이 `?:`를 무력화해 URL이 공백이 되던 버그 발견·수정 | ✅ |
 | T-839 | 터널 웹 UI 설정 섹션 — 🔗 터널 사이드바 메뉴 + 토글/제공자/저장/상태 UI, E2E 저장·상태·프로바이더 전환 검증 + TUNNEL_GUIDE 갱신 | ✅ |
+
+## v0.11 (2026-08-27) — 배터리/성능 최적화
+
+| T-번호 | 내용 | 상태 |
+|--------|------|------|
+| T-840 | PLAN_v0.11_perf_android.md 작성 (핫스팟 조사: WakeLock/jobs 디스크 쓰기/폴링/방출) | ✅ |
+| T-841 | WakeLock 완전 제거 (Foreground Service 유지) | ✅ |
+| T-842 | jobs.json 저장 실질 디바운스 10초 (무디바운스 은닉 버그 수정) | ✅ |
+| T-843 | 알림 갱신 700ms→2000ms | ✅ |
+| T-844 | 다운로드 진행 틱 400ms→2000ms | ✅ |
+| T-845 | 토렌트 상태 폴링 1초→5초 + 저장 실변경 가드 | ✅ |
+| T-846 | Repository 동일값 스킵 (before==after 시 refresh 생략) | ✅ |
+| T-847 | RssFeedManager 누수 수정 (필드 보관 + onDestroy stop) | ✅ |
+| T-848 | 가드 데몬 30초→120초 + settings 5분 캐시 (WorkManager 미도입) | ✅ |
+| T-849 | DebugOverlay 이중 startInForeground 제거 + 폴링 3초 | ✅ |
+| T-850 | 빌드·설치·E2E 검증 (WakeLock 부재/저장 빈도) + CHANGELOG·세션 로그·커밋 | 🔄 |
+| T-851 | ThrottleInterceptor 이중 래핑 버그 수정 — 다운로드 0Byte 즉시 완료 (한국어: 전역 속도제한 설정 시 엔진 다운로드 무조건 실패) | ✅ |
+| T-852 | DownloadEngine.fmt() MB 제수 오류 수정 — GiB 제수(1_073_741_824) 사용으로 1MiB 이상이 10.2배 작게 표기 | ✅ |

@@ -26,6 +26,9 @@ class GuardDaemon(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     @Volatile private var isRunning = false
     @Volatile private var pollingJob: kotlinx.coroutines.Job? = null
+    @Volatile private var cachedSettings: AppSettings? = null
+    private var cachedAt = 0L
+    private val cacheTtlMs = 5 * 60 * 1000L
 
     /** 현재 가드 상태 */
     @Volatile var isThrottled = false
@@ -38,10 +41,10 @@ class GuardDaemon(
         if (isRunning) return
         isRunning = true
         pollingJob = scope.launch {
-            DebugLogger.i(TAG, "가드 데몬 시작 (30초 폴링)")
+            DebugLogger.i(TAG, "가드 데몬 시작 (120초 폴링)")
             while (isRunning) {
                 checkGuard()
-                delay(30_000) // 30초
+                delay(120_000) // 2분
             }
         }
     }
@@ -67,7 +70,7 @@ class GuardDaemon(
         val thermal = readThermal()
         val battery = readBattery()
         val storage = readStorage()
-        val s = settings.firstBlocking()
+        val s = settingsNow()
 
         val throttled = s.guardEnabled && (
             (s.guardThermalLimit > 0 && thermal > s.guardThermalLimit) ||
@@ -97,7 +100,7 @@ class GuardDaemon(
     }
 
     private suspend fun checkGuard() {
-        val s = settings.firstBlocking()
+        val s = settingsNow()
         if (!s.guardEnabled) {
             if (isThrottled) {
                 isThrottled = false
@@ -128,6 +131,20 @@ class GuardDaemon(
             isThrottled = false
             onThrottleChange?.invoke(false, "정상 복귀")
             DebugLogger.i(TAG, "가드 스로틀링 해제 — 정상 복귀")
+        }
+    }
+
+    /**
+     * 설정 조회 — 5분간 캐시, 주기 폴링의 DataStore I/O 절감 (T-848)
+     */
+    private fun settingsNow(): AppSettings {
+        val now = System.currentTimeMillis()
+        cachedSettings?.let {
+            if (now - cachedAt < cacheTtlMs) return it
+        }
+        return settings.firstBlocking().also {
+            cachedSettings = it
+            cachedAt = now
         }
     }
 

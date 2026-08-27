@@ -51,15 +51,17 @@ object JobsRepository {
     }
 
     fun update(id: String, transform: (Job) -> Job) {
+        var changed = false
         map.computeIfPresent(id) { _, before ->
             val after = transform(before)
-            if (before.state != after.state) {
+            changed = after != before
+            if (changed && before.state != after.state) {
                 DebugLogger.i(
                     TAG,
                     "상태전이 id=$id '${before.filename}' ${before.state} → ${after.state}" +
                         " (${fmt(after.downloadedBytes)}/${if (after.totalBytes > 0) fmt(after.totalBytes) else "?"})",
                 )
-            } else if (after.downloadedBytes != before.downloadedBytes &&
+            } else if (changed && after.downloadedBytes != before.downloadedBytes &&
                 after.state == JobState.RUNNING &&
                 crossedMilestone(before.downloadedBytes, after.downloadedBytes, after.totalBytes)
             ) {
@@ -70,7 +72,7 @@ object JobsRepository {
             }
             after
         }
-        refresh()
+        if (changed) refresh()
     }
 
     fun remove(id: String): Boolean {        val removed = map.remove(id)

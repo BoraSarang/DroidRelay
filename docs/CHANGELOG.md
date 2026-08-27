@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.11.0] - 2026-08-27
+
+### Changed [android] — 배터리/성능 최적화 (v0.10.2 대비 방출·디스크 I/O 대폭 감소)
+- **WakeLock 완전 제거**: 24시간 강제 대기 유지(`PARTIAL_WAKE_LOCK`) 제거 — Foreground Service(`DATA_SYNC`)만으로 실행 유지. `dumpsys power`로 WakeLock 0건 확인
+- **jobs.json 저장 실질 디바운스 구현**: 기존에는 주석("디바운스")과 달리 매 방출마다 전체 JSON을 디스크에 쓰던 은닉 버그 — 10초 디바운스 + 상태 전이 시 즉시 저장으로 수정. 다운로드 중 저장 빈도: 틱당(400ms) → ~10초 간격(13초 전송 중 3회: 전이 2 + 주기 1). **디스크 쓰기 약 90% 감소 (PERF: CACHE)**
+- **다운로드 진행 틱 400ms→2000ms**: 진행률 StateFlow 방출 5배 감소. E2E로 ~2초 간격 진행 갱신 확인
+- **토렌트 상태 폴링 1초→5초** + `persistNow/persistDebounced` 실변경 가드(저장 간격 10초) — 폴링/저장 부담 5배 감소
+- **Repository 동일값 스킵**: `update()`에서 `after == before`면 `refresh()`(StateFlow 방출) 생략 — 불필요 방출 제거
+- **가드 데몬 30초→120초 폴링** + `settingsNow()` 5분 캐시 TTL (WorkManager 미도입, in-process 확대 방식 결정) — "가드 데몬 시작 (120초 폴링)" 확인
+- **RSS 매니저 누수 수정**: onCreate의 지역 변수 생성으로 서비스 종료 후에도 폴링이 지속되던 것 → 필드 보관 + onDestroy stop
+- **알림 700ms→2000ms 스로틀**: 알림 갱신 동기화 부하 감소
+- **DebugOverlay**: 이중 `startInForeground()` 제거 + 상태 폴링 1초→3초
+
+### Fixed [android]
+- **전역 속도제한 설정 시 다운로드 0Byte 즉시 완료**: `ThrottleInterceptor`의 `ThrottledResponseBody.source()`가 `delegate.source().buffer()` → `ThrottledSource` → `.buffer()` **이중 버퍼 래핑**으로 okhttp 응답 body가 즉시 EOF(0Byte) 되던 버그 — 표준 단일 래핑(`ThrottledSource(delegate.source(), …).buffer()`)으로 수정. 속도제한(5MB/s·무제한) 모두에서 8KB/100MB 완전 수신 확인. 기존에는 maxDownloadBps>0면 모든 엔진 다운로드가 필연 실패했음
+- **다운로드 로그 용량 표기 오류**: `DownloadEngine.fmt()`의 MB 분기가 **GiB 제수(1,073,741,824)**를 사용 — 1MiB 초과 파일이 실제의 약 10분의 1로 표기(100MB→「0.1MB」, 평균 속도도 왜곡)되던 것 → MiB 제수(1,048,576)로 교정
+
+### Verified (E2E)
+- WakeLock 부재(`dumpsys power` 0건), 다운로드 100MB 전체 수신 + 저장 빈도 감소, 2초 틱, 토렌트 초기 저장 후 스킵, 가드 120초 폴링
+
 ## [0.10.2] - 2026-08-27
 
 ### Added [android+web]

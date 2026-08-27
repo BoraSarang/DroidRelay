@@ -107,3 +107,22 @@
 - 오버레이 토글 E2E 통과 (권한 adb 부여 → ON→OFF, 크래시 없음, 시각 확인)
 - 정상 RSS 피드 E2E 통과 — BBC 34항목 파싱, magnet/.torrent/일반 URL 3종 자동 다운로드 라우팅 (enclosureUrl 빈 문자열 버그 수정 후)
 - 터널 웹 UI E2E 통과 — 사이드바/섹션 렌더링, loadSettings 반영(체크+하이라이트), 상태 확인, 저장(ON/OFF) 반영
+
+---
+
+# 보충 세션 (20:20~) — v0.11 배터리/성능 최적화 + ThrottleInterceptor/FMT 버그 수정
+
+## 세션 요약
+- **무엇을/플랫폼**: [ANDROID] 배터리 드레인 1순위 개선 — WakeLock 24h 제거, jobs.json 무디바운스 은닉 버그(매 틱 전체 JSON 디스크 쓰기) → 10초 디바운스, 폴링 대폭 축소(토렌트 5s·가드 120s·오버레이 3s·알림 2s·틱 2s), Repository 동일값 스킵, RSS 매니저 누수 수정. E2E 중 ThrottleInterceptor 0Byte 다운로드 버그 + fmt() MB 제수 오류 발견·수정
+- **빌드**: BUILD SUCCESSFUL(ktlint 포함, 2회) + install Success × 3. `./build_and_run.sh debug`
+- **PERF/CACHE**: 다운로드 중 저장 400ms→10초(디스크 쓰기 ~90%↓), 진행 방출 5배↓, 토렌트 폴링 5배↓, 가드 폴링 4배↓. WakeLock `dumpsys power` 0건 확인
+- **남은TODO**: T-850(커밋)만 남음 — 커밋 미수행
+- **전달로그**: Ktor 서버 HEAD는 미지원(404), curl GET은 정상 — 확인 위해 HEAD 대신 GET 사용
+- **문서갱신**: PLAN_v0.11_perf_android.md 작성, TODO T-840~T-852, CHANGELOG v0.11.0, 본 세션 로그
+- **큐상태**: 없음
+- **E2E**: 100MB 전체 수신, 2초 틱, 전이+주기 저장(13s 전송에 3회), 8KB/8192 즉시 확인, 퍼블리시 정상
+
+## 검증 요지
+- 속도제한 인터셉터 원인 격리: limit=0 통과 / limit=5MB/s·999999999 실패 → 토큰 수학이 아닌 래핑 구조 결함 → 단일 래핑으로 수정 · 재검증 통과
+- fmt() 0.1MB 미스터리 = MB 분기가 GiB 제수 사용(100MB→0.1MB, 평균속도 왜곡) — MiB 제수로 교정
+- 테스트 산출물 전부 정리: 테스트 잡 12건 삭제, storage dr_test*/small*/perf_test 삭제, 공용 DroidRelay/* 정리, 호스트 python 8081 종료

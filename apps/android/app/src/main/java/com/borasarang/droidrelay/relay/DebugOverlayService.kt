@@ -39,7 +39,6 @@ class DebugOverlayService : Service() {
         wm = getSystemService(WINDOW_SERVICE) as WindowManager
         DebugLogger.i("DebugOverlay", "오버레이 서비스 시작")
         startInForeground()
-        startInForeground()
 
         val tv = TextView(this).apply {
             setBackgroundColor(0xE60A1428.toInt())
@@ -121,7 +120,7 @@ class DebugOverlayService : Service() {
                         }
                     }
                 }
-                delay(1000)
+                delay(3000)
             }
         }
     }

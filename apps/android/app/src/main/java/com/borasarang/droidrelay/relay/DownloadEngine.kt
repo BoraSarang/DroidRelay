@@ -427,13 +427,13 @@ class DownloadEngine(
 
     private fun fmt(n: Long): String = when {
         n < 1_048_576 -> "${n / 1024}KB"
-        n < 1_073_741_824 -> String.format("%.1fMB", n / 1_073_741_824.0)
+        n < 1_073_741_824 -> String.format("%.1fMB", n / 1_048_576.0)
         else -> String.format("%.2fGB", n / 1_073_741_824.0)
     }
 
     companion object {
         private const val BUFFER_SIZE = 64 * 1024
-        private const val TICK_MS = 400L
+        private const val TICK_MS = 2_000L
         private const val MAX_RETRY = 3
     }
 }

@@ -37,14 +37,19 @@ class TorrentEngine(
     @Volatile private var latestDownloadKbps: Long = 0L
     @Volatile private var latestSequentialDownload: Boolean = false
     private var lastPersistAt = 0L
+    private var lastSavedSnapshot: List<TorrentJob>? = null
     private fun persistNow() {
         try { persistence.save(TorrentRepository.all()) } catch (_: Exception) {}
+        lastSavedSnapshot = TorrentRepository.all()
     }
     private fun persistDebounced() {
         val now = System.currentTimeMillis()
         if (now - lastPersistAt > 10_000) { // 10초 간격
-            lastPersistAt = now
-            persistNow()
+            // 내용이 마지막 저장본과 달라졌을 때만 저장 (T-845)
+            if (lastSavedSnapshot != TorrentRepository.all()) {
+                lastPersistAt = now
+                persistNow()
+            }
         }
     }
 
@@ -506,7 +511,7 @@ class TorrentEngine(
     private fun startStatusPolling() {
         statusPollingJob = scope.launch {
             while (true) {
-                delay(1000L)
+                delay(5_000L)
                 try {
                     // handle 미매핑 torrent 자동 매핑 시도
                     val unmapped = TorrentRepository.all().filter { it.infoHash.isNotEmpty() && !handleMap.containsKey(it.id) }

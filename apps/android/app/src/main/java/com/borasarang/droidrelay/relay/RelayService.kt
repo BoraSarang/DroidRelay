@@ -9,7 +9,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
-import android.os.PowerManager
 import com.borasarang.droidrelay.R
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -26,12 +25,12 @@ class RelayService : Service() {
 
     private val TAG = "Service"
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    private var wakeLock: PowerManager.WakeLock? = null
     private var server: RelayServer? = null
     private var currentPort: Int = -1
     private var notificationsOn = true
     private var networkMonitor: NetworkMonitor? = null
     private var torrentEngine: TorrentEngine? = null
+    private var rssManager: RssFeedManager? = null
     private var guardDaemon: GuardDaemon? = null
     private var webhookManager: WebhookManager? = null
     private var tunnelManager: TunnelManager? = null
@@ -42,7 +41,6 @@ class RelayService : Service() {
         DebugLogger.i(TAG, "서비스 생성 시작")
         createChannel()
         startInForeground()
-        acquireWakeLock()
 
         val settingsRepo = SettingsRepository.get(applicationContext)
         val engine = RelayApp.get(applicationContext)
@@ -57,6 +55,7 @@ class RelayService : Service() {
 
         // RSS 피드 매니저 시작
         val rssManager = RssFeedManager(applicationContext)
+        this.rssManager = rssManager
         rssManager.start()
         DebugLogger.i(TAG, "RSS 피드 매니저 시작 완료")
 
@@ -134,12 +133,17 @@ class RelayService : Service() {
         // ② 작업 상태 → 완료/실패 알림 + 진행바 갱신 (T-105)
         scope.launch {
             var lastNotifUpdate = 0L
+            var lastSaveAt = 0L
             var last: Map<String, JobState> = emptyMap()
             JobsRepository.jobs.collectLatest { jobs ->
-                // 영구 저장 디바운스 (T-107)
-                persistence.save(jobs)
-
+                // 영구 저장 디바운스 10초 (T-842) — 상태 전이 시 즉시, 진행률 갱신은 10초 간격
+                val now = System.currentTimeMillis()
                 val current = jobs.associate { it.id to it.state }
+                if (current.any { (id, st) -> last[id] != st } || now - lastSaveAt >= SAVE_DEBOUNCE_MS) {
+                    lastSaveAt = now
+                    persistence.save(jobs)
+                }
+
                 if (notificationsOn) {
                     jobs.forEach { j ->
                         if (last[j.id] == JobState.RUNNING && j.state == JobState.DONE) {
@@ -170,9 +174,8 @@ class RelayService : Service() {
                 }
                 last = current
 
-                // 진행바 실시간 갱신 (0.7s 스로틀)
-                val now = System.currentTimeMillis()
-                if (now - lastNotifUpdate >= 700) {
+                // 진행바 실시간 갱신 (2초 스로틀)
+                if (now - lastNotifUpdate >= NOTIF_THROTTLE_MS) {
                     lastNotifUpdate = now
                     updateProgressNotification(jobs)
                 }
@@ -239,6 +242,8 @@ class RelayService : Service() {
         networkMonitor?.unregister()
         torrentEngine?.stop()
         torrentEngine = null
+        rssManager?.stop()
+        rssManager = null
         guardDaemon?.stop()
         guardDaemon = null
         schedulerManager?.stop()
@@ -251,7 +256,6 @@ class RelayService : Service() {
         JobsPersistence(applicationContext).save(jobs)
         // Torrent 상태 저장
         TorrentRepository.all().let { TorrentPersistence(applicationContext).save(it) }
-        wakeLock?.takeIf { it.isHeld }?.release()
         scope.cancel()
         super.onDestroy()
     }
@@ -266,15 +270,6 @@ class RelayService : Service() {
     }
 
     override fun onBind(intent: Intent?) = null
-
-    private fun acquireWakeLock() {
-        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
-        wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "DroidRelay::download").apply {
-            setReferenceCounted(false)
-            acquire(WAKE_TIMEOUT_MS)
-        }
-        DebugLogger.d(TAG, "WakeLock 획득")
-    }
 
     private fun startInForeground() {
         val notif = runningNotification(lanAddress())
@@ -412,9 +407,10 @@ class RelayService : Service() {
         private const val CHANNEL_TORRENT_ID = "relay_torrent"
         private const val NOTIF_ID = 1001
         private const val TORRENT_NOTIF_PREFIX = 30000
-        private const val WAKE_TIMEOUT_MS = 24L * 60 * 60 * 1000
         private const val GATE_TIMEOUT_MS = 60_000L
         private const val GATE_NOTIF_PREFIX = 20000
+        private const val SAVE_DEBOUNCE_MS = 10_000L
+        private const val NOTIF_THROTTLE_MS = 2_000L
         const val ACTION_ALLOW = "com.borasarang.droidrelay.ALLOW"
         const val ACTION_DENY = "com.borasarang.droidrelay.DENY"
         const val EXTRA_IP = "ip"

@@ -102,8 +102,7 @@ class ThrottleInterceptor(
 
         @Suppress("DEPRECATION")
         override fun source(): BufferedSource {
-            val bufferedSource = delegate.source().buffer()
-            val throttledSource = ThrottledSource(bufferedSource, bucket, limit)
+            val throttledSource = ThrottledSource(delegate.source(), bucket, limit)
             return throttledSource.buffer()
         }
 
@@ -116,13 +115,13 @@ class ThrottleInterceptor(
      * 읽기 시 토큰 버킷에서 토큰 소모, 부족하면 스레드 대기
      */
     private class ThrottledSource(
-        delegate: BufferedSource,
+        delegate: Source,
         private val bucket: TokenBucket,
         private val limit: AtomicLong,
     ) : ForwardingSource(delegate) {
 
         override fun read(sink: Buffer, byteCount: Long): Long {
-            val n = delegate.read(sink, byteCount)
+            val n = super.read(sink, byteCount)
             if (n == -1L) return -1L
             val currentLimit = limit.get()
             if (currentLimit > 0) {
