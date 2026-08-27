@@ -147,3 +147,23 @@
 - Netty 4.2.16에서 16개 jar `META-INF/INDEX.LIST` 충돌 → `packaging.resources.excludes`(INDEX.LIST·io.netty.versions.properties·native-image·versions/9)
 - 맥에서 `curl -sk`로만 접근(터미널 curl은 keychain 미사용) — 브라우저는 keychain 사용하므로 Whale에서 경고 없음
 - **후속**: 맥 login 키체인 mkcert CA 제거(사용자 요청 — 경고 1회 감수). `security delete-certificate -c "mkcert lee@lees-MacBook-Pro.local"` 후 `verify-cert` = NOT_TRUSTED 확인. docs(README/CHANGELOG/TODO)를 "CA 등록은 선택"으로 정정. 앱 코드 변화 없음
+- **후속2**: HTTP→HTTPS 리다이렉트(307) 추가 — LAN 요청은 https://…:8443으로 이동, loopback(127.0.0.1/localhost/자기 IP) 예외로 터널·자체 점검 보호. `call.request.local.scheme`+`isLocalHost(remoteHost)` 기준. 맥: http root/ISO → 307 Location 확인 + -skL follow 200/7112896B. 기기: loopback 200. T-856/TODO/CHANGELOG 갱신
+
+---
+
+# 보충 세션 (23:00~) — v0.12 비디오 다운로드 (범용 스트림 · 유튜브 제외 결정)
+
+## 세션 요약
+- **무엇을/플랫폼**: [ANDROID+WEB] 비디오 다운로드 v0.12 — StreamDetector(웹페이지 m3u8/mpd 스니핑 + 직접 입력) + VideoDownloadManager(FFmpegKit 내장, 진행률/취소/MediaStore 게시) + API 2종 + 웹 UI 구현. **유튜브는 최종 제외**: NewPipeExtractor 0.26.5(최신 확인)로 시작했으나 2026 유튜브 PoToken 강제 + LTE NAT IP 평판 차단에 visitor_id 주입·ANDROID_VR 스푸핑 우회까지 시도 후 실패(재생 시그니처 401→visitor→ANDROID_VR→player 200 도달 → 마지막이 `LOGIN_REQUIRED "Sign in to confirm you're not a bot"`, WAN IP 2종 모두) → 제거
+- **빌드**: BUILD SUCCESSFUL × n(ktlint 포함, ffmpeg 하위 종속 88개 해소). `JAVA_HOME=/Applications/Android Studio.app/Contents/jbr/Contents/Home`, gradlew는 apps/android. ffmpeg-kit-full **TLS 미포함 확인**(`https or dtls protocol not found`) → `ffmpeg-kit-https`로 교체 재빌드
+- **PERF/CACHE**: m3u8 다운로드 RUNNING에서 진행·속도 리포트 정상(갱신 1초 통합 페이로드, 162.37MB). 유튜브 제거로 newpipe(+94개 전이적)·JitPack 동시 제거 — APK/빌드 가벼워짐
+- **남은TODO**: T-864/세션 로그/커밋 — 커밋 미수행(사용자 확인 필요). 307 리다이렉트는 분리 커밋 완료 `af29009`
+- **전달로그**: 유튜브 재시도 시 TubeEngine.kt가 git 기록에 있음(visitor_id 주입은 `{"responseContext":{"visitorData":…}}` 형태 필수, 평면 객체는 ParsingException). 델리게이트 폰/서버 우회는 v0.13+ 후보(WAN IP 우회). Apple devstreaming m3u8은 S3 AccessDenied(테스트 소스 부적합) — Mux test-streams 사용
+- **문서갱신**: PLAN_v0.12(유튜브 제외 반영), TODO T-857~T-866, CHANGELOG v0.12.0, 본 세션 로그, error_message_ko.json(0102·0203 삭제, 0101 문구 스트림 전용)
+- **큐상태**: 없음
+- **E2E**: m3u8 Mux HLS — analyze(kind:stream)→create(잡 mtbvvjq622)→RUNNING 162.37MB→DONE→`Download/DroidRelay/mux_hls_test.mp4`→ffprobe(mov,mp4, 634.6s, 170,260,672B) 무결성. 유튜브 제거 후 회귀 스모크: 재설치→analyze→create(RUNNING 22MB)→DELETE 취소→REMOVED_OK. WebAssets 잔여 참조 없음
+
+## 검증 요지
+- 유튜브 우회 경로 확정: ① `onFetchPage` 순서 문제 — android fetch(성공) 후 `getJsonPostResponse(NEXT)`가 WEB 클라이언트로 visitorData 요구 → ② visitor_id POST 가로채 응답의 `responseContext.visitorData` 주입(홈 HTML에서 길이 520 추출), ③ 그래도 reel_item_watch 401 → ④ ANDROID→ANDROID_VR(clientVersion 1.56.0, VR UA) 스푸핑 → **player 200 도달**, 마지막 장벽 = IP 평판(구조 아님). Kotlin 함정: `replaceFirst(regex){lambda}` 미존재 → `.replace(versionRegex){…}`
+- m3u8은 전혀 다른 파이프라인 — 세그먼트 파싱 없이 FFmpeg가 원본 copy(파일 퍼블리시 후 MediaStore 게시는 기존 DownloadEngine 경로)
+- 307 커밋 선별 스테이징(hunk 1 respond import + hunk 7 redirect 블록) 후 `af29009` 단일 파일 커밋, 이후 유튜브 제거까지 미커밋 상태로 진행

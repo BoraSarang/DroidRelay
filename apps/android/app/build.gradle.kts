@@ -24,6 +24,7 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+        isCoreLibraryDesugaringEnabled = true
     }
     buildFeatures {
         compose = true
@@ -65,6 +66,10 @@ dependencies {
     implementation(libs.zxing.core)
     implementation(libs.libtorrent4j)
     implementation(libs.libtorrent4j.android.arm64)
+    implementation(libs.ffmpeg.kit.https)
+    implementation(libs.smart.exception.java)
+
+    coreLibraryDesugaring(libs.desugar.jdk.libs.nio)
 
     testImplementation(libs.junit)
 }

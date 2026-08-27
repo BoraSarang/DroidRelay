@@ -23,6 +23,7 @@ data class Job(
     val order: Int = 0,
     val expectedSha256: String? = null,
     val verified: Boolean = false,
+    val type: String = "http",
 )
 
 object JobsRepository {
@@ -34,7 +35,7 @@ object JobsRepository {
     fun all(): List<Job> = _jobs.value
     fun get(id: String): Job? = map[id]
 
-    fun add(url: String, filename: String, expectedSha256: String? = null): Job {
+    fun add(url: String, filename: String, expectedSha256: String? = null, type: String = "http"): Job {
         map.values.none { it.url == url && it.state == JobState.RUNNING }
             .also { dup ->
                 if (!dup) DebugLogger.w(TAG, "중복 URL 재추가 감지: $url")
@@ -42,11 +43,11 @@ object JobsRepository {
         val nextOrder = (map.values.maxOfOrNull { it.order } ?: 0) + 1
         val job = Job(
             id = newId(), url = url, filename = uniqueName(filename),
-            order = nextOrder, expectedSha256 = expectedSha256?.lowercase(),
+            order = nextOrder, expectedSha256 = expectedSha256?.lowercase(), type = type,
         )
         map[job.id] = job
         refresh()
-        DebugLogger.i(TAG, "작업 추가 id=${job.id} file='${job.filename}' state=QUEUED order=$nextOrder sha256=${if (expectedSha256 != null) "지정" else "없음"}")
+        DebugLogger.i(TAG, "작업 추가 id=${job.id} file='${job.filename}' state=QUEUED type=$type order=$nextOrder sha256=${if (expectedSha256 != null) "지정" else "없음"}")
         return job
     }
 

@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.12.0] - 2026-08-27
+
+### Added [android+web] — 비디오 다운로드 (범용 스트림 : 유튜브 제외)
+- **비디오 API 2종**: `POST /api/video/analyze`(URL → 스트림 URL·제목), `POST /api/video/create`(`{url, streamUrl?, filename?}` → Job). 웹 UI 다운로드 탭에 "🎬 비디오" 섹션(URL 입력 → 분석 → 원본 그대로 다운로드 + 파일명 설정)
+- **StreamDetector**: 웹페이지 HTML에서 `.m3u8`/`.mpd` 주소 정규식 스니핑(상대경로 절대화, 브라우저 UA) + 직접 스트림 URL 입력 병행 — 403/Cloudflare 차단 시 직접 입력 안내 (E-AND-VID-0200)
+- **VideoDownloadManager**: FFmpegKit `executeAsync`로 스트림을 `-c copy -movflags +faststart` 원본 회차 다운로드. 진행률(`-progress` Statistics→downloadedBytes/speedBps) · 취소(`FFmpegKit.cancel`) · 완료 시 기존 DownloadEngine 방식대로 보관함(MediaStore) 게시. Job에 `type: VIDEO` 도입(하위호환) + `🎬` 배지
+- **비디오 엔진 의존성**: `dev.ffmpegkit-maintained:ffmpeg-kit-https:8.1.7` — `full` 변형은 TLS 미포함(`https or dtls protocol not found`) 확인 후 **`https` 변형 채택**
+- **에러코드** `E-AND-VID-0100/0101/0200/0201/0202/0300/0400/0401` → `error_message_ko.json`
+
+### Removed [android+web]
+- **유튜브 지원 제거**: NewPipeExtractor 0.26.5(최신) + visitor_id 주입 + ANDROID_VR 클라이언트·UA 스푸핑 우회를 모두 시도했으나, 2026 유튜브 PoToken 강제 + 통신사 LTE NAT IP 평판 차단(`Sign in to confirm you're not a bot`, WAN IP 2종에서 동일)으로 비로그인 추출이 불가 — **기능 제외**. `TubeEngine.kt` 삭제, analyze/create 유튜브 분기 제거, `newpipe-extractor`·JitPack 의존성 제거, 웹 UI 유튜브 안내·스타일 정리, 유튜브 전용 에러코드(0102) 정리
+
+### Verified (E2E)
+- **m3u8 스트림 다운로드**: Mux HLS `url_0/193039199_mp4_h264_aac_hd_7.m3u8`로 analyze(kind:stream) → create(잡 `mtbvvjq622`) → RUNNING 진행·속도 리포트(162.37MB) → DONE → `Download/DroidRelay/mux_hls_test.mp4` 게시 → `ffprobe` 무결성(mov,mp4, duration 634.6s, 170,260,672B)
+- **유튜브 제거 후 회귀 스모크**: 재설치 후 analyze→create(RUNNING 22MB 진행)→DELETE 취소(REMOVED_OK) 정상. ktlint + assembleDebug 통과
+
+### Notes
+- APK 크기 네이티브(FFmpeg) 포함 증가 — 개인 배포(GitHub) 대상이라 영향 없음
+- 유튜브 대체: m3u8/mpd 직접 주소 또는 스트리밍 페이지 경로. 델리게이트 폰/서버 기반 유튜브는 v0.13+ 후보로 문서화 (PLAN_v0.12 위험 절)
+
 ## [0.11.1] - 2026-08-27
 
 ### Added [android+web] — HTTPS 다운로드 (웨일 "안전하지 않은 다운로드" 경고 해결)
@@ -7,9 +27,11 @@
 - **자체 서명 TLS 인증서**: `mkcert` 로컬 CA 서명으로 `apps/android/app/src/main/assets/certs/server.p12` 배포 (SAN: `localhost, 10.64.228.42, 127.0.0.1, ::1`, 별칭 `relay`). 맥 브라우저는 최초 1회 "고급→계속" 후 다운로드 정상 — 맥 login 키체인 CA 등록은 선택사항(현재 미등록, 경고 1회 감수)
 - **다운로드 링크 HTTPS 절대 경로 전환 (웹)**: 보관함 `renderStorage()`의 받기 링크를 `https://<location.hostname>:8443/dl-file/...`로 변경 — HTTP 페이지에서 열어도 다운로드는 항상 HTTPS로 전송되어 Mixed Content/Insecure Download 차단 회피
 - **`/dl-file` 보안 헤더**: `X-Content-Type-Options: nosniff` + `Cache-Control: no-store, must-revalidate` 추가
+- **HTTP→HTTPS 자동 리다이렉트 (307)**: LAN 클라이언트가 `http://…:8080`으로 접속하면 `https://…:8443`으로 이동시켜 페이지·다운로드 모두 안전 채널 유지. 단 **loopback(localhost/127.0.0.1/자기 LAN IP)은 예외** — 터널(tailscaled)·앱 자체 점검은 자체 서명 인증서를 신뢰하지 않으므로 HTTP 그대로 (보안 파이프라인 최상단 intercept, `RequestConnectionPoint.scheme` 기준)
 
 ### Verified (E2E)
 - 맥에서 `https://10.64.228.42:8443/` 200, ISO(7.1MB) HTTPS 전체 다운로드 200 — HTTP/HTTPS **MD5 동일**(`b61fe3fe…`), `openssl s_client`로 SAN 정합 확인. 맥 인증서 신뢰는 최초 1회 경고 후 사용자가 "계속" 선택하는 방식(선택적 CA 등록 없음)
+- `http://10.64.228.42:8080/` 접속 → **307 Location `https://10.64.228.42:8443/`**, follow 시 200 — `/dl-file`도 동일 리다이렉트 후 ISO 전체 수신(7112896B). 기기 내부 `curl http://127.0.0.1:8080/`는 200(리다이렉트 예외) 확인
 
 ## [0.11.0] - 2026-08-27
 

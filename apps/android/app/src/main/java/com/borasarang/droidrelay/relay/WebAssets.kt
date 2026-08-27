@@ -40,6 +40,8 @@ object WebAssets {
   .badge{font-size:11px;padding:2px 8px;border-radius:99px;background:#22335A}
   .RUNNING{background:#123A63;color:#8FD8FF}.DONE{background:#12402F;color:#69E29B}.FAILED{background:#40191C;color:#FF8A93}
   .QUEUED{background:#22335A}.PAUSED{background:#3A3312;color:#FFD59E}.CANCELED{background:#333}
+  .badge.video{background:#0A3A2F;color:#6FE3C4}
+  .vcard{background:#101E3A;border:1px solid #22345A;border-radius:12px;padding:12px;margin-top:10px}
   .err{color:#FF8A93;font-size:12px;margin-top:4px}
   .empty{color:#55688C;text-align:center;padding:26px 0}
   .speed{color:#8FD8FF;font-weight:600}
@@ -173,6 +175,13 @@ object WebAssets {
     </div>
     <div id="list"></div>
     <div class="empty" id="empty">아직 작업이 없습니다</div>
+
+    <div style="border-top:1px dashed #E3E8EF;margin:18px 16px 14px"></div>
+    <div class="row">
+      <input id="vurl" type="url" placeholder="🎬 스트림 페이지 또는 m3u8/mpd 직접 주소">
+      <button class="ghost" onclick="analyzeVideo()">분석</button>
+    </div>
+    <div id="videoArea"></div>
   </div>
 
   <!-- 토렌트 탭 -->
@@ -644,6 +653,44 @@ function switchSettingsSection(s){
   var target=document.getElementById('settings-'+s);
   if(target)target.classList.add('active');
 }
+var __videoState=null;
+function videoErr(msg){
+  document.getElementById('videoArea').innerHTML='<div class="err">'+esc(msg||'오류')+'</div>';
+}
+function analyzeVideo(){
+  var v=document.getElementById('vurl').value.trim();
+  if(!v){videoErr('스트림 URL(HLS/DASH)을 입력해 주세요');return;}
+  var area=document.getElementById('videoArea');
+  area.innerHTML='<div class="info">스트림 주소 확인 중… (페이지 스니핑)</div>';
+  fetch('/api/video/analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:v})}).then(function(r){
+    if(!r.ok)return r.text().then(function(t){throw new Error(t);});
+    return r.json();
+  }).then(function(j){
+    __videoState=j;
+    area.innerHTML='<div class="vcard"><div class="name">'+esc(j.title)+'</div>'
+      +'<div class="meta">'+(j.direct?'직접 스트림 주소':'페이지에서 스트림 감지')+'</div>'
+      +'<div class="meta" style="word-break:break-all;color:#8FD8FF">'+esc(j.streamUrl)+'</div>'
+      +'<div style="margin-top:12px"><button onclick="createVideo(\''+v.replace(/\\/g,'\\\\').replace(/'/g,"\\'")+'\')">다운로드 (원본 그대로)</button></div></div>';
+    refresh();
+  }).catch(function(e){
+    videoErr('분석 실패: '+(e.message||e));
+  });
+}
+function createVideo(v){
+  var j=__videoState||{};
+  var body={url:v,streamUrl:(j.streamUrl||'')};
+  var area=document.getElementById('videoArea');
+  area.innerHTML='<div class="info">다운로드 시작 중…</div>';
+  fetch('/api/video/create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(function(r){
+    if(!r.ok)return r.text().then(function(t){throw new Error(t);});
+    return r.json();
+  }).then(function(){
+    area.innerHTML='<div class="info">다운로드 시작됨 — 위 목록에서 진행률을 확인하세요</div>';
+    refresh();
+  }).catch(function(e){
+    videoErr('다운로드 시작 실패: '+(e.message||e));
+  });
+}
 function render(jobs){
   if(dragActive())return;
   var el=document.getElementById('list');document.getElementById('empty').style.display=jobs.length?'none':'block';
@@ -664,10 +711,12 @@ function render(jobs){
     var vbadge='';
     if(j.verified)vbadge='<span class="badge DONE">✓ 검증됨</span>';
     else if(j.hasChecksum&&j.state==='RUNNING')vbadge='<span class="badge QUEUED">해시 검증 예정</span>';
+    if(j.type==='video')vbadge+='<span class="badge video">🎬 비디오</span>';
     var act=j.state==='DONE'?'<a class="btn-dl" href="/file/'+j.id+'" download onclick="showDlToast()">📥 받기</a>':'';
     var pause='';
-    if(j.state==='RUNNING')pause='<button class="ghost" onclick="act(\''+j.id+'\',\'pause\')">일시정지</button>';
-    if(j.state==='PAUSED'||j.state==='FAILED')pause='<button class="ghost" onclick="act(\''+j.id+'\',\'resume\')">재개</button>';
+    if(j.type!=='video'&&j.state==='RUNNING')pause='<button class="ghost" onclick="act(\''+j.id+'\',\'pause\')">일시정지</button>';
+    if(j.type==='video'&&j.state==='RUNNING')pause='<span class="eta" style="align-self:center">FFmpeg → 삭제로 취소</span>';
+    if(j.type!=='video'&&(j.state==='PAUSED'||j.state==='FAILED'))pause='<button class="ghost" onclick="act(\''+j.id+'\',\'resume\')">재개</button>';
     var cancel='<button class="ghost" onclick="if(confirm(\'이 항목을 삭제하시겠습니까?\'))delJob(\''+j.id+'\')">삭제</button>';
     h+='<div class="card" draggable="true" data-id="'+j.id+'">'
       +'<div style="flex:1;min-width:0;padding:14px">'

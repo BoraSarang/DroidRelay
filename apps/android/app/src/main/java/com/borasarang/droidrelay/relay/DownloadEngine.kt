@@ -87,6 +87,10 @@ class DownloadEngine(
         val restored = persistence.load()
         restored.forEach { job ->
             mapPut(job)
+            if (job.type != "http") {
+                DebugLogger.d(TAG, "복원 스킵(비담당) id=${job.id} type=${job.type}")
+                return@forEach
+            }
             if (job.state == JobState.QUEUED) {
                 DebugLogger.i(TAG, "복원 → 재개 큐 진입 id=${job.id} '${job.filename}'")
                 pending.add(job.id)
@@ -389,7 +393,7 @@ class DownloadEngine(
 
     private fun rafLength(f: File): Long = f.length()
 
-    private fun publishToDownloads(file: File, jobId: String) {
+    internal fun publishToDownloads(file: File, jobId: String) {
         try {
             val values = ContentValues().apply {
                 put(MediaStore.Downloads.DISPLAY_NAME, file.name)

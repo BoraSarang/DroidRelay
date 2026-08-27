@@ -37,6 +37,8 @@ import io.ktor.utils.io.readAvailable
 import io.ktor.utils.io.writeStringUtf8
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.RandomAccessFile
 import java.net.InetAddress
@@ -63,6 +65,7 @@ object RelayApp {
     private const val TAG = "App"
     @Volatile var engine: DownloadEngine? = null
     @Volatile var torrentEngine: TorrentEngine? = null
+    @Volatile var video: VideoDownloadManager? = null
     val startTime: Long = System.currentTimeMillis()
 
     fun get(ctx: Context): DownloadEngine =
@@ -85,6 +88,14 @@ object RelayApp {
                 SettingsRepository.get(appCtx),
                 TorrentPersistence(appCtx),
             ).also { torrentEngine = it }
+        }
+
+    /** 비디오(범용 스트림) 다운로드 매니저 — 최초 생성 시 FFmpeg 스모크 + 스테일 잡 정리 */
+    fun getVideo(ctx: Context): VideoDownloadManager =
+        video ?: synchronized(this) {
+            DebugLogger.i(TAG, "VideoDownloadManager 최초 생성")
+            val appCtx = ctx.applicationContext
+            video ?: VideoDownloadManager(appCtx).also { it.init(); video = it }
         }
 
     /** 전역 속도 제한 즉시 적용 (BPS 단위) */
@@ -171,6 +182,7 @@ class RelayServer(
 
     fun start() {
         if (server != null) return
+        RelayApp.getVideo(context) // FFmpeg 스모크 + 재시작 스테일 비디오 잡 정리
         server = runCatching { createServer() }
             .onSuccess { s ->
                 s.start(wait = false)
@@ -184,6 +196,7 @@ class RelayServer(
     }
 
     fun stop() {
+        RelayApp.video?.stopAll()
         runCatching { server?.stop(gracePeriodMillis = 500, timeoutMillis = 1500) }
         server = null
         DebugLogger.i("Server", "서버 정지")
@@ -954,6 +967,7 @@ private fun Application.relayRoutes(context: Context, serverRef: RelayServer) {
                     put("errorMessage", j.errorMessage ?: JSONObject.NULL)
                     put("hasChecksum", j.expectedSha256 != null)
                     put("verified", j.verified)
+                    put("type", j.type)
                 })
             }
             call.respondText(arr.toString(), ContentType.Application.Json)
@@ -1011,7 +1025,13 @@ private fun Application.relayRoutes(context: Context, serverRef: RelayServer) {
             val action = call.parameters["action"]
             val engine = RelayApp.get(context)
             when (action) {
-                "pause" -> { engine.pause(id); call.respondText("ok") }
+                "pause" -> {
+                    if (JobsRepository.get(id)?.type == "video") {
+                        call.respondText("비디오 다운로드는 일시정지 미지원 (삭제로 취소)", ContentType.Text.Plain, HttpStatusCode.BadRequest)
+                    } else {
+                        engine.pause(id); call.respondText("ok")
+                    }
+                }
                 "resume" -> { engine.resume(id); call.respondText("ok") }
                 else -> call.respondText("지원 없는 동작", ContentType.Text.Plain, HttpStatusCode.BadRequest)
             }
@@ -1023,11 +1043,66 @@ private fun Application.relayRoutes(context: Context, serverRef: RelayServer) {
                 null -> call.respondText("없음", ContentType.Text.Plain, HttpStatusCode.NotFound)
                 else -> {
                     DebugLogger.i("Http", "DELETE id=$id")
-                    RelayApp.get(context).cancel(id)
+                    val type = JobsRepository.get(id)?.type
+                    if (type == "video") RelayApp.getVideo(context).cancel(id) else RelayApp.get(context).cancel(id)
                     JobsRepository.remove(id)
                     call.respondText("ok")
                 }
             }
+        }
+
+        // ── 비디오 API (범용 스트림) ──
+
+        /**
+         * POST /api/video/analyze — URL 분석 (유튜브 제외 · 범용 스트림만)
+         * 스트림: 직접 m3u8/mpd 또는 페이지 스니핑 결과 URL 반환
+         */
+        post("/api/video/analyze") {
+            val body = call.receiveText()
+            val json = try { JSONObject(body) } catch (_: Exception) { null }
+            val url = json?.optString("url", "")?.trim().orEmpty()
+            if (!url.startsWith("http://") && !url.startsWith("https://")) {
+                call.respondText("E-AND-VID-0101: 유효한 http(s) URL이 아닙니다", ContentType.Text.Plain, HttpStatusCode.UnprocessableEntity)
+                return@post
+            }
+            withContext(Dispatchers.IO) {
+                val d = StreamDetector.analyze(url)
+                call.respondText(
+                    JSONObject().apply {
+                        put("kind", "stream"); put("title", d.title)
+                        put("streamUrl", d.url); put("direct", d.isDirect)
+                    }.toString(),
+                    ContentType.Application.Json,
+                )
+            }
+        }
+
+        /**
+         * POST /api/video/create — 비디오 잡 생성 + FFmpeg 시작
+         * {url, streamUrl(선택), filename(선택)} — 원본 copy
+         */
+        post("/api/video/create") {
+            val body = call.receiveText()
+            val json = try { JSONObject(body) } catch (_: Exception) { null }
+            val url = json?.optString("url", "")?.trim().orEmpty()
+            val wantName = json?.optString("filename", "")?.trim().orEmpty()
+            val job = withContext(Dispatchers.IO) {
+                val videoManager = RelayApp.getVideo(context)
+                val streamUrl = json?.optString("streamUrl", "")?.trim().orEmpty()
+                    .ifEmpty { StreamDetector.analyze(url).url }
+                val outName = VideoDownloadManager.safeFilename(
+                    wantName.ifBlank { StreamDetector.analyze(url).title }, "mp4")
+                val argv = listOf(
+                    "-i", streamUrl, "-c", "copy", "-movflags", "+faststart",
+                    File(videoManager.workDir, outName).absolutePath,
+                )
+                videoManager.createAndStart(url, outName, argv)
+            }
+            call.respondText(
+                JSONObject().put("id", job.id).toString(),
+                ContentType.Application.Json,
+                HttpStatusCode.Created,
+            )
         }
 
         post("/api/jobs/reorder") {

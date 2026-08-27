@@ -180,3 +180,20 @@ T-001~T-008 전부 완료 (커밋 7574486).
 | T-번호 | 내용 | 상태 |
 |--------|------|------|
 | T-855 | 웨일 "안전하지 않은 다운로드" 회피 — mkcert 자체 서명 인증서 + Ktor 엔진 **CIO→Netty 전환**(CIO는 HTTPS 미지원)+ HTTPS 8443 이중 커넥터. 웹 다운로드 링크를 `https://<host>:8443` 절대 경로로 전환, `/dl-file`에 nosniff·cache-control 헤더 추가. HTTP/HTTPS 동일 바이트(MD5 일치) 검증, 맥은 최초 1회 TLS 경고 후 정상 사용(CA 등록은 선택·미사용) | ✅ |
+| T-856 | HTTP→HTTPS 리다이렉트(307) — LAN 클라이언트의 `http://…:8080` 접속을 `https://…:8443`로 이동. loopback(localhost/127.0.0.1/자기 IP)은 예외(터널 tailscaled·앱 자체 점검 보호). 맥에서 307→HTTPS follow 200 + ISO 전체 수신, 기기 loopback 200 확인 | ✅ |
+
+## v0.12 (2026-08-27) — 비디오 다운로드 (범용 스트림 · 유튜브 제외 결정)
+> 유튜브: NewPipeExtractor 최신(0.26.5)+visitor_id 주입+ANDROID_VR 스푸핑까지 시도했으나 PoToken+통신사 LTE NAT IP 평판 차단으로 실사용 불가 → **기능 제외**, m3u8/mpd 직접 경로만 제공.
+
+| T-번호 | 내용 | 상태 |
+|--------|------|------|
+| T-857 | PLAN_v0.12_video_download.md 작성 (사용자 확정: 파워 m3u8 + FFmpeg 내장 + Play 미배포) | ✅ |
+| T-858 | 의존성 — NewPipeExtractor 0.26.5 + desugar_nio + ffmpeg-kit https:8.1.7(full은 TLS 미포함 확인→https로 교체) · 빌드 게이트 + FFmpeg 스모크 | ✅ |
+| T-859 | ~~YouTube 추출기~~ — 취소 (2026 유튜브 PoToken/IP 차단, 우회 시도 후 제외) | ❌ |
+| T-860 | VideoDownloadManager — FFmpeg 실행·진행률·취소·MediaStore 게시 + Job(type) 통합 | ✅ |
+| T-861 | StreamDetector — 웹페이지 m3u8/mpd 스니핑 + 직접 입력 병행 | ✅ |
+| T-862 | API 2종(POST /api/video/analyze, /create) + 웹 UI(분석→다운로드) | ✅ |
+| T-863 | 앱 Compose UI (후속 v0.12.1 후보) | ⏸ |
+| T-864 | 실기기 E2E(m3u8 원본 copy) — Mux HLS 162MB DONE+ffprobe 무결성, 제거 후 회귀 스모크(분석→생성→진행→취소)·error_message_ko.json·세션 로그 | 🔄 |
+| T-865 | 유튜브 코드 제거 — TubeEngine.kt 삭제, RelayServer analyze/create 유튜브 분기 제거, newpipe/JitPack 의존성 제거, WebAssets placeholder·에러코드 정리, PLAN/TODO/CHANGELOG 갱신 | ✅ |
+| T-866 | 307 리다이렉트 커밋 분리 완료 (`af29009`) | ✅ |

@@ -39,6 +39,7 @@ class JobsPersistence(
                     if (j.finishedAt > 0) put("finishedAt", j.finishedAt)
                     if (j.expectedSha256 != null) put("expectedSha256", j.expectedSha256)
                     if (j.verified) put("verified", true)
+                    if (j.type != "http") put("type", j.type)
                 })
             }
             val tmp = File(file.parentFile, file.name + ".tmp")
@@ -72,6 +73,7 @@ class JobsPersistence(
                     finishedAt = o.optLong("finishedAt", 0L),
                     expectedSha256 = if (o.has("expectedSha256")) o.getString("expectedSha256") else null,
                     verified = o.optBoolean("verified", false),
+                    type = o.optString("type", "http"),
                 )
                 when (job.state) {
                     JobState.RUNNING, JobState.QUEUED ->
