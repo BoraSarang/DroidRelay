@@ -24,6 +24,7 @@ import io.ktor.server.request.receiveText
 import io.ktor.server.request.receiveMultipart
 import io.ktor.http.content.PartData
 import io.ktor.server.response.header
+import io.ktor.server.response.respond
 import io.ktor.server.response.respondBytesWriter
 import io.ktor.server.response.respondText
 import io.ktor.server.routing.delete
@@ -248,9 +249,27 @@ private fun sameSubnetAsLocal(host: String): Boolean {
 }
 
 private fun Application.relayRoutes(context: Context, serverRef: RelayServer) {
-    // 보안 파이프라인: IP 게이트 → Basic Auth
+    // 보안 파이프라인: HTTP→HTTPS → IP 게이트 → Basic Auth
     intercept(ApplicationCallPipeline.Plugins) {
         val s = serverRef.settings
+
+        // HTTP(8080)로 들어온 LAN 요청은 HTTPS(8443)로 이동 — 다운로드/페이지 모두 안전 채널
+        // loopback(localhost/127.0.0.1/자기 IP)은 예외 — 터널(tailscaled)과 앱 자체 점검이 https 인증서를 신뢰하지 않으므로
+        runCatching {
+            val remoteHost = call.request.origin.remoteHost
+            if (call.request.local.scheme != "https" && !isLocalHost(remoteHost)) {
+                val targetHost = call.request.local.localHost.ifEmpty { lanAddress() ?: "" }
+                if (targetHost.isNotEmpty()) {
+                    val target = "https://$targetHost:${RelayServer.HTTPS_PORT}${call.request.local.uri}"
+                    DebugLogger.d("Security", "HTTP→HTTPS 리다이렉트 $remoteHost → $target")
+                    call.response.header(HttpHeaders.Location, target)
+                    call.respond(HttpStatusCode.TemporaryRedirect)
+                    finish()
+                    return@intercept
+                }
+            }
+        }.onFailure { DebugLogger.e("Security", "리다이렉트 판단 실패 ${it.message}") }
+
         val host = runCatching { call.request.origin.remoteHost }.getOrDefault("?")
 
         // accessScope에 따른 클라이언트 접속 범위 제어
