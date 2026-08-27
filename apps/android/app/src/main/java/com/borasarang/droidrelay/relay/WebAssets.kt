@@ -758,12 +758,18 @@ function render(jobs){
 }
 function updateInfoBar(){
   var jobs=window.__jobs||[];
+  var torrents=window.__torrents||[];
   var running=jobs.filter(function(j){return j.state==='RUNNING'});
+  var tActive=torrents.filter(function(t){return t.state==='DOWNLOADING'||t.state==='SEEDING'||t.state==='FETCHING_METADATA';});
   var totalSpeed=running.reduce(function(a,j){return a+(j.speedBps||0);},0);
+  var tDown=tActive.reduce(function(a,t){return a+(t.downloadSpeed||0);},0);
+  var tUp=tActive.reduce(function(a,t){return a+(t.uploadSpeed||0);},0);
   var left='<div class="info-left">'
     +'<span class="info-item">진행 <b>'+running.length+'</b>건</span>';
-  if(running.length>0){
-    left+='<span class="info-item speed">총 속도 <b>'+spd(totalSpeed)+'</b></span>';
+  if(running.length>0||tActive.length>0){
+    left+='<span class="info-item speed">총 속도 <b>'+spd(totalSpeed+tDown)+'</b></span>';
+    if(tUp>0)left+='<span class="info-item speed" style="color:#f96">▲ '+spd(tUp)+'</span>';
+    if(tActive.length>0)left+='<span class="info-item">토렌트 <b>'+tActive.length+'</b>건</span>';
   }else{
     left+='<span class="info-item idle">대기중...</span>';
   }
@@ -787,13 +793,14 @@ function updateInfoBar(){
 }
 function renderTorrents(ts){
   if(dragActive())return;
+  window.__torrents=ts;
   var el=document.getElementById('torrentList');document.getElementById('torrentEmpty').style.display=ts.length?'none':'block';
   var h='';
   var now=Date.now();
   ts.forEach(function(t){
     var pct=Math.min(100,Math.max(0,t.progress!=null?Math.round(t.progress*100):0));
     var size=t.totalSize>0?(fmt(t.downloadedSize)+' / '+fmt(t.totalSize)):(t.downloadedSize>0?fmt(t.downloadedSize):'');
-    var sp=t.state==='DOWNLOADING'||t.state==='SEEDING'?'<span class="speed">'+spd(t.downloadSpeed||0)+'</span>':'';
+    var sp=(t.state==='DOWNLOADING'||t.state==='SEEDING'||t.state==='FETCHING_METADATA')?'<span class="speed">'+spd(t.downloadSpeed||0)+'</span>':'';
     var up='';
     if(t.uploadSpeed>0)up='<span style="color:#f96;font-size:12px;margin-left:6px">▲'+spd(t.uploadSpeed)+'</span>';
     var eta='';
@@ -835,6 +842,7 @@ function renderTorrents(ts){
     +'<span style="margin-left:12px">· 진행 '+active+'건</span>'
     +'<span style="margin-left:12px">· 시드 <b style="color:#6a8">'+ts.reduce(function(a,t){return a+(t.seeds||0);},0)+'</b>'
     +' 피어 <b style="color:#f86">'+ts.reduce(function(a,t){return a+(t.peers||0);},0)+'</b></span>';
+  updateInfoBar();
 }
 function renderStorage(items){
   if(dragActive())return;
