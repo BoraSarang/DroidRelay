@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -37,6 +38,8 @@ data class AppSettings(
     val webUser: String = "droidrelay",
     val webPassword: String = "",
     val speedLimitKbps: Int = 0,
+    val maxDownloadBps: Long = 0L,
+    val maxUploadBps: Long = 0L,
     val allowedIps: Set<String> = emptySet(),
     val accessScope: AccessScope = AccessScope.SUBNET_ONLY,
     val torrentSavePath: String = "",
@@ -73,6 +76,8 @@ class SettingsRepository(private val context: Context) {
         val WEB_USER = stringPreferencesKey("web_user")
         val WEB_PASS = stringPreferencesKey("web_password")
         val SPEED_LIMIT = intPreferencesKey("speed_limit_kbps")
+        val MAX_DOWNLOAD_BPS = longPreferencesKey("max_download_bps")
+        val MAX_UPLOAD_BPS = longPreferencesKey("max_upload_bps")
         val ALLOWED_IPS = stringSetPreferencesKey("allowed_ips")
         val ACCESS_SCOPE = stringPreferencesKey("access_scope")
         val TORRENT_SAVE_PATH = stringPreferencesKey("torrent_save_path")
@@ -98,6 +103,8 @@ class SettingsRepository(private val context: Context) {
             webUser = p[Keys.WEB_USER] ?: "droidrelay",
             webPassword = p[Keys.WEB_PASS] ?: "",
             speedLimitKbps = (p[Keys.SPEED_LIMIT] ?: 0).coerceAtLeast(0),
+            maxDownloadBps = (p[Keys.MAX_DOWNLOAD_BPS] ?: 0L).coerceAtLeast(0),
+            maxUploadBps = (p[Keys.MAX_UPLOAD_BPS] ?: 0L).coerceAtLeast(0),
             allowedIps = p[Keys.ALLOWED_IPS] ?: emptySet(),
             accessScope = runCatching { AccessScope.valueOf(p[Keys.ACCESS_SCOPE] ?: AccessScope.SUBNET_ONLY.name) }
                 .getOrDefault(AccessScope.SUBNET_ONLY),
@@ -142,6 +149,12 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun setSpeedLimit(kbps: Int) =
         context.settingsDataStore.edit { it[Keys.SPEED_LIMIT] = kbps.coerceAtLeast(0) }
+
+    suspend fun setMaxDownloadBps(bps: Long) =
+        context.settingsDataStore.edit { it[Keys.MAX_DOWNLOAD_BPS] = bps.coerceAtLeast(0) }
+
+    suspend fun setMaxUploadBps(bps: Long) =
+        context.settingsDataStore.edit { it[Keys.MAX_UPLOAD_BPS] = bps.coerceAtLeast(0) }
 
     suspend fun addAllowedIp(ip: String) =
         context.settingsDataStore.edit { it[Keys.ALLOWED_IPS] = (it[Keys.ALLOWED_IPS] ?: emptySet()) + ip }

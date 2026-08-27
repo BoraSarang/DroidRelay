@@ -98,6 +98,28 @@ object WebAssets {
   .tree-item.active{background:#2F80ED;color:#fff;font-weight:600}
   .tree-children{padding-left:12px;border-left:1px solid #1B2B4D;margin-left:8px}
   .tree-empty{color:#55688C;font-size:12px;padding:4px 8px}
+  /* ── 설정 탭 전용 ── */
+  .sg{background:#101E3A;border:1px solid #22345A;border-radius:14px;padding:16px}
+  .sh{font-size:14px;font-weight:700;color:#8FD8FF;padding-left:10px;border-left:3px solid #2F80ED;margin-bottom:14px}
+  .sr{display:flex;flex-wrap:wrap;gap:16px}
+  .si{flex:1;min-width:220px}
+  .sl{display:block;margin-bottom:5px;font-size:12px;color:#8FA3BF;font-weight:500}
+  .sv{display:flex;align-items:center;gap:8px}
+  .sv span:last-child{min-width:60px;text-align:right;font-weight:600;font-size:13px}
+  .sv input[type=range]{flex:1;accent-color:#2F80ED}
+  .ck{display:flex;align-items:center;gap:8px}
+  .ck input[type=checkbox]{width:18px;height:18px;accent-color:#2F80ED}
+  .ck label{font-size:13px;color:#E6EEF8;cursor:pointer}
+  .sb{font-size:11px;color:#55688C;margin-top:3px;line-height:1.4}
+  .ti{font-weight:600;font-size:13px;color:#E6EEF8;margin:12px 0 6px}
+  .ti:first-child{margin-top:0}
+  .ss{font-size:12px;padding:8px 10px;border-radius:8px;background:#12203D;color:#55688C;margin-top:8px;line-height:1.5}
+  .ft{display:flex;align-items:center;gap:8px}
+  .ft input[type=number]{width:90px;padding:7px 10px;border-radius:8px;border:1px solid #2A3B5C;background:#12203D;color:#fff;font-size:13px}
+  .fp{display:flex;gap:8px}
+  .fp input[type=text]{flex:1;padding:8px 12px;border-radius:8px;border:1px solid #2A3B5C;background:#12203D;color:#fff;font-size:13px}
+  .rb{display:flex;gap:8px;flex-wrap:wrap}
+  .rb button{flex-shrink:0}
 </style></head><body>
 <div class="wrap">
   <h1>📡 DroidRelay</h1>
@@ -108,6 +130,7 @@ object WebAssets {
     <div class="tab active" onclick="switchTab('dl')">다운로드</div>
     <div class="tab" onclick="switchTab('torrent')">토렌트</div>
     <div class="tab" onclick="switchTab('storage')">보관함</div>
+    <div class="tab" onclick="switchTab('settings')">설정</div>
   </div>
 
     <!-- 다운로드 탭 -->
@@ -158,6 +181,123 @@ object WebAssets {
         </div>
         <div id="fileList"></div>
         <div class="empty" id="fileEmpty">비어 있습니다</div>
+      </div>
+    </div>
+  </div>
+
+    <!-- 설정 탭 -->
+  <div class="panel" id="panel-settings">
+    <div class="sg" style="margin-bottom:16px">
+      <div class="sh">⚡ 전역 속도 제한</div>
+      <div class="sr">
+        <div class="si">
+          <div class="sl">다운로드 제한</div>
+          <div class="sv">
+            <input type="checkbox" id="dlSpeedEnabled" onchange="toggleSpeedLimit('dl')">
+            <input type="range" id="maxDownloadMbps" min="1" max="10" value="3" step="1" disabled>
+            <span id="maxDownloadLabel">3 Mbps</span>
+          </div>
+        </div>
+        <div class="si">
+          <div class="sl">업로드 제한</div>
+          <div class="sv">
+            <input type="checkbox" id="ulSpeedEnabled" onchange="toggleSpeedLimit('ul')">
+            <input type="range" id="maxUploadMbps" min="1" max="10" value="3" step="1" disabled>
+            <span id="maxUploadLabel" style="color:#f96">3 Mbps</span>
+          </div>
+        </div>
+      </div>
+      <div id="speedLimitStatus" class="ss"></div>
+    </div>
+
+    <div class="sg" style="margin-bottom:16px">
+      <div class="sh">⬇ 다운로드 설정</div>
+      <div class="sr">
+        <div class="si">
+          <div class="sl">동시 다운로드 수</div>
+          <div class="sv">
+            <input type="range" id="concurrency" min="1" max="4" value="2" step="1">
+            <span id="concurrencyLabel">2</span>
+          </div>
+        </div>
+        <div class="si">
+          <div class="sl">앱 레벨 속도 제한</div>
+          <div class="sv">
+            <input type="range" id="speedLimitKbps" min="0" max="2048" value="0" step="128">
+            <span id="speedLimitLabel">무제한</span>
+          </div>
+          <div class="sb">KB/s 단위 · 0 = 무제한 · 전역 제한과 별도 작동</div>
+        </div>
+      </div>
+      <div class="ck" style="margin-top:12px">
+        <input type="checkbox" id="notifications" checked>
+        <label for="notifications">다운로드 알림 표시 (앱에서만 적용)</label>
+      </div>
+    </div>
+
+    <div class="sg" style="margin-bottom:16px">
+      <div class="sh">🌊 토렌트 설정</div>
+      <div class="ti">속도</div>
+      <div class="sr">
+        <div class="si">
+          <div class="sl">업로드 속도</div>
+          <div class="sv">
+            <input type="range" id="torrentUploadLimit" min="0" max="1024" value="512" step="64">
+            <span id="torrentUploadLabel" style="color:#f96">512 KB/s</span>
+          </div>
+          <div class="sb">KB/s 단위 · 0 = 업로드 안 함 (피어 평판 저하 유의)</div>
+        </div>
+        <div class="si">
+          <div class="sl">다운로드 속도</div>
+          <div class="sv">
+            <input type="range" id="torrentDownloadLimit" min="0" max="20480" value="0" step="1024">
+            <span id="torrentDownloadLabel">무제한</span>
+          </div>
+          <div class="sb">KB/s 단위 · 0 = 무제한 · 전역 제한과 별도 작동</div>
+        </div>
+      </div>
+      <div class="ti">연결</div>
+      <div class="sr">
+        <div class="si">
+          <div class="sl">최대 활성 토렌트 수</div>
+          <div class="sv">
+            <input type="range" id="torrentMaxActive" min="1" max="10" value="3" step="1">
+            <span id="torrentMaxActiveLabel">3</span>
+          </div>
+        </div>
+        <div class="si">
+          <div class="sl">최대 시드 비율</div>
+          <div class="sv">
+            <input type="range" id="torrentSeedRatio" min="0" max="10" value="2" step="0.1">
+            <span id="torrentSeedRatioLabel">2.0</span>
+          </div>
+        </div>
+      </div>
+      <div class="ti">고급</div>
+      <div class="ck" style="gap:20px">
+        <div class="ck"><input type="checkbox" id="torrentDhtEnabled" checked><label for="torrentDhtEnabled">DHT (분산 해시 테이블)</label></div>
+        <div class="ck"><input type="checkbox" id="torrentPexEnabled" checked><label for="torrentPexEnabled">PEX (피어 교환)</label></div>
+      </div>
+      <div class="ti">리슨 포트</div>
+      <div class="ft">
+        <input type="number" id="torrentListenPort" min="1024" max="65535" value="6881">
+        <button class="ghost sm" onclick="randomizePort()">🎲 랜덤</button>
+      </div>
+      <div class="sb" style="margin-top:4px">변경 시 토렌트 엔진 재시작 필요</div>
+      <div class="ti">저장 경로</div>
+      <div class="fp">
+        <input type="text" id="torrentSavePath" value="/sdcard/Download/DroidRelay">
+        <button class="ghost sm" onclick="testPath()">테스트</button>
+      </div>
+      <div id="pathTestResult" class="sb"></div>
+    </div>
+
+    <div class="sg">
+      <div class="sh">↩ 기본값 복원</div>
+      <div class="rb">
+        <button class="ghost" onclick="resetSettings('download')">↩ 다운로드 기본값</button>
+        <button class="ghost" onclick="resetSettings('torrent')">↩ 토렌트 기본값</button>
+        <button class="ghost" onclick="resetSettings('all')" style="margin-left:auto;color:#FF8A93;border-color:#40191C">🔄 전체 초기화</button>
       </div>
     </div>
   </div>
@@ -802,5 +942,227 @@ document.addEventListener('click',function(e){
 document.addEventListener('click',function(e){
   if(e.target.classList.contains('modal-overlay'))closeTorrentModal();
 });
+
+function switchTab(t){
+  curTab=t;
+  if(trashMode&&t!=='storage')toggleTrash();
+  document.querySelectorAll('.tab').forEach(function(el,i){
+    el.classList.toggle('active',(['dl','torrent','storage','settings'])[i]===t);
+  });
+  document.getElementById('panel-dl').classList.toggle('active',t==='dl');
+  document.getElementById('panel-torrent').classList.toggle('active',t==='torrent');
+  document.getElementById('panel-storage').classList.toggle('active',t==='storage');
+  document.getElementById('panel-settings').classList.toggle('active',t==='settings');
+  if(t==='storage')refreshStorage();
+  if(t==='settings')loadSettings();
+}
+
+// ── 설정 로드/저장 ──
+function loadSettings(){
+  Promise.all([
+    fetch('/api/settings/speed-limit').then(function(r){return r.json();}),
+    fetch('/api/settings/download').then(function(r){return r.json();}),
+    fetch('/api/settings/torrent').then(function(r){return r.json();})
+  ]).then(function(res){
+    var sl=res[0], dl=res[1], tr=res[2];
+    // 전역 속도 제한
+    document.getElementById('dlSpeedEnabled').checked=sl.maxDownloadBps>0;
+    document.getElementById('maxDownloadMbps').disabled=sl.maxDownloadBps<=0;
+    document.getElementById('maxDownloadMbps').value=Math.round(sl.maxDownloadBps/1048576)||3;
+    document.getElementById('maxDownloadLabel').textContent=(Math.round(sl.maxDownloadBps/1048576)||3)+' Mbps';
+    document.getElementById('ulSpeedEnabled').checked=sl.maxUploadBps>0;
+    document.getElementById('maxUploadMbps').disabled=sl.maxUploadBps<=0;
+    document.getElementById('maxUploadMbps').value=Math.round(sl.maxUploadBps/1048576)||3;
+    document.getElementById('maxUploadLabel').textContent=(Math.round(sl.maxUploadBps/1048576)||3)+' Mbps';
+    updateSpeedLimitStatus(sl);
+    // 다운로드 설정
+    document.getElementById('concurrency').value=dl.concurrency||2;
+    document.getElementById('concurrencyLabel').textContent=dl.concurrency||2;
+    document.getElementById('speedLimitKbps').value=dl.speedLimitKbps||0;
+    document.getElementById('speedLimitLabel').textContent=(dl.speedLimitKbps||0)>0?dl.speedLimitKbps+' KB/s':'무제한';
+    document.getElementById('notifications').checked=dl.notifications!==false;
+    // 토렌트 설정
+    document.getElementById('torrentUploadLimit').value=tr.torrentUploadLimit||512;
+    document.getElementById('torrentUploadLabel').textContent=(tr.torrentUploadLimit||512)+' KB/s';
+    document.getElementById('torrentDownloadLimit').value=tr.torrentDownloadLimit||0;
+    document.getElementById('torrentDownloadLabel').textContent=(tr.torrentDownloadLimit||0)>0?tr.torrentDownloadLimit+' KB/s':'무제한';
+    document.getElementById('torrentMaxActive').value=tr.torrentMaxActive||3;
+    document.getElementById('torrentMaxActiveLabel').textContent=tr.torrentMaxActive||3;
+    document.getElementById('torrentSeedRatio').value=tr.torrentSeedRatio||2.0;
+    document.getElementById('torrentSeedRatioLabel').textContent=(tr.torrentSeedRatio||2.0).toFixed(1);
+    document.getElementById('torrentDhtEnabled').checked=tr.torrentDhtEnabled!==false;
+    document.getElementById('torrentPexEnabled').checked=tr.torrentPexEnabled!==false;
+    document.getElementById('torrentListenPort').value=tr.torrentListenPort||6881;
+    document.getElementById('torrentSavePath').value=tr.torrentSavePath||'/sdcard/Download/DroidRelay';
+    document.getElementById('pathTestResult').textContent='';
+  }).catch(function(e){
+    console.error('설정 로드 실패',e);
+  });
+}
+
+function updateSpeedLimitStatus(sl){
+  var el=document.getElementById('speedLimitStatus');
+  if(!el)return;
+  if(sl.maxDownloadBps<=0&&sl.maxUploadBps<=0){
+    el.innerHTML='<span style="color:#55688C">전역 속도 제한: 비활성화 (무제한)</span>';
+  }else{
+    var parts=[];
+    if(sl.maxDownloadBps>0)parts.push('다운로드 '+fmt(sl.maxDownloadBps)+'/s');
+    if(sl.maxUploadBps>0)parts.push('업로드 '+fmt(sl.maxUploadBps)+'/s');
+    el.innerHTML='<span style="color:#69E29B">전역 속도 제한 적용 중: '+parts.join(' · ')+'</span>';
+  }
+}
+
+function toggleSpeedLimit(type){
+  var enabled, input, label;
+  if(type==='dl'){
+    enabled=document.getElementById('dlSpeedEnabled').checked;
+    input=document.getElementById('maxDownloadMbps');
+    label=document.getElementById('maxDownloadLabel');
+  }else{
+    enabled=document.getElementById('ulSpeedEnabled').checked;
+    input=document.getElementById('maxUploadMbps');
+    label=document.getElementById('maxUploadLabel');
+  }
+  input.disabled=!enabled;
+  if(enabled){
+    var mbps=parseInt(input.value)||3;
+    var bps=mbps*1048576;
+    saveSpeedLimit(type==='dl'?bps:0, type==='ul'?bps:0);
+  }else{
+    saveSpeedLimit(type==='dl'?0:undefined, type==='ul'?0:undefined);
+  }
+}
+
+function onSpeedLimitChange(type){
+  var input, label, mbps, bps;
+  if(type==='dl'){
+    input=document.getElementById('maxDownloadMbps');
+    label=document.getElementById('maxDownloadLabel');
+  }else{
+    input=document.getElementById('maxUploadMbps');
+    label=document.getElementById('maxUploadLabel');
+  }
+  mbps=parseInt(input.value)||3;
+  bps=mbps*1048576;
+  label.textContent=mbps+' Mbps';
+  saveSpeedLimit(type==='dl'?bps:undefined, type==='ul'?bps:undefined);
+}
+
+function saveSpeedLimit(dl, ul){
+  var body={};
+  if(dl!==undefined)body.maxDownloadBps=dl;
+  if(ul!==undefined)body.maxUploadBps=ul;
+  fetch('/api/settings/speed-limit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
+    .then(function(r){return r.json();})
+    .then(function(d){if(d.ok)loadSettings();else alert('저장 실패');})
+    .catch(function(e){alert('저장 실패: '+e);});
+}
+
+function saveDownloadSettings(){
+  var body={
+    concurrency:parseInt(document.getElementById('concurrency').value)||2,
+    speedLimitKbps:parseInt(document.getElementById('speedLimitKbps').value)||0,
+    notifications:document.getElementById('notifications').checked
+  };
+  document.getElementById('concurrencyLabel').textContent=body.concurrency;
+  document.getElementById('speedLimitLabel').textContent=body.speedLimitKbps>0?body.speedLimitKbps+' KB/s':'무제한';
+  fetch('/api/settings/download',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
+    .then(function(r){return r.json();})
+    .then(function(d){if(!d.ok)alert('저장 실패');})
+    .catch(function(e){alert('저장 실패: '+e);});
+}
+
+function saveTorrentSettings(){
+  var body={
+    torrentUploadLimit:parseInt(document.getElementById('torrentUploadLimit').value)||512,
+    torrentDownloadLimit:parseInt(document.getElementById('torrentDownloadLimit').value)||0,
+    torrentMaxActive:parseInt(document.getElementById('torrentMaxActive').value)||3,
+    torrentSeedRatio:parseFloat(document.getElementById('torrentSeedRatio').value)||2.0,
+    torrentDhtEnabled:document.getElementById('torrentDhtEnabled').checked,
+    torrentPexEnabled:document.getElementById('torrentPexEnabled').checked,
+    torrentListenPort:parseInt(document.getElementById('torrentListenPort').value)||6881,
+    torrentSavePath:document.getElementById('torrentSavePath').value.trim()
+  };
+  document.getElementById('torrentUploadLabel').textContent=body.torrentUploadLimit+' KB/s';
+  document.getElementById('torrentDownloadLabel').textContent=body.torrentDownloadLimit>0?body.torrentDownloadLimit+' KB/s':'무제한';
+  document.getElementById('torrentMaxActiveLabel').textContent=body.torrentMaxActive;
+  document.getElementById('torrentSeedRatioLabel').textContent=body.torrentSeedRatio.toFixed(1);
+  fetch('/api/settings/torrent',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
+    .then(function(r){return r.json();})
+    .then(function(d){if(d.ok){showDlToast('토렌트 설정 저장됨');}else alert('저장 실패: '+(d.error||''));})
+    .catch(function(e){alert('저장 실패: '+e);});
+}
+
+function randomizePort(){
+  var port=49152+Math.floor(Math.random()*16384);
+  document.getElementById('torrentListenPort').value=port;
+  saveTorrentSettings();
+}
+
+function testPath(){
+  var path=document.getElementById('torrentSavePath').value.trim();
+  if(!path){alert('경로를 입력하세요');return;}
+  var el=document.getElementById('pathTestResult');
+  el.textContent='테스트 중...';el.style.color='#8FD8FF';
+  fetch('/api/storage/test-path',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:path})})
+    .then(function(r){return r.json();})
+    .then(function(d){
+      if(d.ok){
+        el.textContent='✓ 쓰기 가능';el.style.color='#69E29B';
+      }else{
+        el.textContent='✗ 쓰기 불가: '+(d.error||'알 수 없는 오류');el.style.color='#FF8A93';
+      }
+    })
+    .catch(function(e){el.textContent='✗ 테스트 실패: '+e;el.style.color='#FF8A93';});
+}
+
+function resetSettings(category){
+  if(!confirm((category==='all'?'전체 설정을':'\''+category+'\''+' 설정을')+' 기본값으로 초기화하시겠습니까?\n(전역 속도 제한은 초기화되지 않습니다)'))return;
+  fetch('/api/settings/reset',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({category:category})})
+    .then(function(r){return r.json();})
+    .then(function(d){
+      if(d.ok){
+        showDlToast('기본값 복원됨');
+        loadSettings();
+      }else alert('실패');
+    })
+    .catch(function(e){alert('실패: '+e);});
+}
+
+// 슬라이더 변경 이벤트 바인딩 (초기화 시 한 번만)
+(function(){
+  var s=document.getElementById('concurrency');
+  if(s)s.addEventListener('input',function(){document.getElementById('concurrencyLabel').textContent=this.value;});
+  s=document.getElementById('speedLimitKbps');
+  if(s)s.addEventListener('input',function(){document.getElementById('speedLimitLabel').textContent=this.value>0?this.value+' KB/s':'무제한';});
+  s=document.getElementById('torrentUploadLimit');
+  if(s)s.addEventListener('input',function(){document.getElementById('torrentUploadLabel').textContent=this.value+' KB/s';});
+  s=document.getElementById('torrentDownloadLimit');
+  if(s)s.addEventListener('input',function(){document.getElementById('torrentDownloadLabel').textContent=this.value>0?this.value+' KB/s':'무제한';});
+  s=document.getElementById('torrentMaxActive');
+  if(s)s.addEventListener('input',function(){document.getElementById('torrentMaxActiveLabel').textContent=this.value;});
+  s=document.getElementById('torrentSeedRatio');
+  if(s)s.addEventListener('input',function(){document.getElementById('torrentSeedRatioLabel').textContent=parseFloat(this.value).toFixed(1);});
+  // 저장 버튼이 없으므로 입력 시 자동 저장 (디바운스)
+  var debounceTimers={};
+  function autoSave(key,fn){
+    return function(){
+      clearTimeout(debounceTimers[key]);
+      debounceTimers[key]=setTimeout(fn,500);
+    };
+  }
+  document.getElementById('concurrency')?.addEventListener('change',autoSave('dl',saveDownloadSettings));
+  document.getElementById('speedLimitKbps')?.addEventListener('change',autoSave('dl',saveDownloadSettings));
+  document.getElementById('notifications')?.addEventListener('change',autoSave('dl',saveDownloadSettings));
+  document.getElementById('torrentUploadLimit')?.addEventListener('change',autoSave('tr',saveTorrentSettings));
+  document.getElementById('torrentDownloadLimit')?.addEventListener('change',autoSave('tr',saveTorrentSettings));
+  document.getElementById('torrentMaxActive')?.addEventListener('change',autoSave('tr',saveTorrentSettings));
+  document.getElementById('torrentSeedRatio')?.addEventListener('change',autoSave('tr',saveTorrentSettings));
+  document.getElementById('torrentDhtEnabled')?.addEventListener('change',autoSave('tr',saveTorrentSettings));
+  document.getElementById('torrentPexEnabled')?.addEventListener('change',autoSave('tr',saveTorrentSettings));
+  document.getElementById('torrentListenPort')?.addEventListener('change',autoSave('tr',saveTorrentSettings));
+  document.getElementById('torrentSavePath')?.addEventListener('change',autoSave('tr',saveTorrentSettings));
+})();
 </script></body></html>"""
 }

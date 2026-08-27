@@ -77,6 +77,18 @@ object RelayApp {
                 TorrentPersistence(appCtx),
             ).also { torrentEngine = it }
         }
+
+    /** 전역 속도 제한 즉시 적용 (BPS 단위) */
+    fun applySpeedLimit(downloadBps: Long, uploadBps: Long) {
+        engine?.applySpeedLimit(downloadBps, uploadBps)
+        torrentEngine?.applySpeedLimit(downloadBps, uploadBps)
+    }
+
+    /** 전체 설정 동적 적용 (재시작 불필요) */
+    fun applySettings(s: AppSettings) {
+        engine?.applySettings(s)
+        torrentEngine?.applySettings(s)
+    }
 }
 
 fun lanAddress(): String? {
@@ -134,7 +146,6 @@ class RelayServer(
 ) {
     @Volatile private var server: EmbeddedServer<CIOApplicationEngine, CIOApplicationEngine.Configuration>? = null
     @Volatile var settings: AppSettings = AppSettings()
-        private set
 
     fun updateSettings(s: AppSettings) {
         settings = s
@@ -261,6 +272,174 @@ private fun Application.relayRoutes(context: Context, serverRef: RelayServer) {
             call.respondText(info.toString(), ContentType.Application.Json)
         }
 
+        // ── 전역 속도 제한 설정 ──
+        get("/api/settings/speed-limit") {
+            val s = serverRef.settings
+            call.respondText(
+                JSONObject().apply {
+                    put("maxDownloadBps", s.maxDownloadBps)
+                    put("maxUploadBps", s.maxUploadBps)
+                }.toString(),
+                ContentType.Application.Json
+            )
+        }
+
+        post("/api/settings/speed-limit") {
+            val body = call.receiveText()
+            val json = try { JSONObject(body) } catch (_: Exception) { null }
+            val repo = SettingsRepository.get(context)
+            if (json?.has("maxDownloadBps") == true) {
+                val dl = json?.optLong("maxDownloadBps", 0) ?: 0L
+                repo.setMaxDownloadBps(dl)
+            }
+            if (json?.has("maxUploadBps") == true) {
+                val ul = json?.optLong("maxUploadBps", 0) ?: 0L
+                repo.setMaxUploadBps(ul)
+            }
+            // 엔진에 즉시 반영
+            val s = repo.firstBlocking()
+            RelayApp.get(context).applySpeedLimit(s.maxDownloadBps, s.maxUploadBps)
+            RelayApp.getTorrent(context).applySpeedLimit(s.maxDownloadBps, s.maxUploadBps)
+            serverRef.settings = s
+            call.respondText("""{"ok":true}""", ContentType.Application.Json)
+        }
+
+        // ── 다운로드 설정 ──
+        get("/api/settings/download") {
+            val s = serverRef.settings
+            call.respondText(
+                JSONObject().apply {
+                    put("concurrency", s.concurrency)
+                    put("speedLimitKbps", s.speedLimitKbps)
+                    put("notifications", s.notifications)
+                }.toString(),
+                ContentType.Application.Json
+            )
+        }
+
+        post("/api/settings/download") {
+            val body = call.receiveText()
+            val json = try { JSONObject(body) } catch (_: Exception) { null }
+            val repo = SettingsRepository.get(context)
+            json?.optInt("concurrency", -1)?.let { if (it >= 1) repo.setConcurrency(it) }
+            json?.optInt("speedLimitKbps", -1)?.let { if (it >= 0) repo.setSpeedLimit(it) }
+            if (json?.has("notifications") == true) json?.optBoolean("notifications")?.let { repo.setNotifications(it) }
+            // 엔진에 즉시 반영
+            RelayApp.get(context).applySettings(repo.firstBlocking())
+            serverRef.settings = repo.firstBlocking()
+            call.respondText("""{"ok":true}""", ContentType.Application.Json)
+        }
+
+        // ── 토렌트 설정 ──
+        get("/api/settings/torrent") {
+            val s = serverRef.settings
+            call.respondText(
+                JSONObject().apply {
+                    put("torrentUploadLimit", s.torrentUploadLimit)
+                    put("torrentDownloadLimit", s.torrentDownloadLimit)
+                    put("torrentMaxActive", s.torrentMaxActive)
+                    put("torrentSeedRatio", s.torrentSeedRatio)
+                    put("torrentDhtEnabled", s.torrentDhtEnabled)
+                    put("torrentPexEnabled", s.torrentPexEnabled)
+                    put("torrentListenPort", s.torrentListenPort)
+                    put("torrentSavePath", s.torrentSavePath)
+                }.toString(),
+                ContentType.Application.Json
+            )
+        }
+
+        post("/api/settings/torrent") {
+            val body = call.receiveText()
+            val json = try { JSONObject(body) } catch (_: Exception) { null }
+            val repo = SettingsRepository.get(context)
+            json?.optLong("torrentUploadLimit", -1)?.let { if (it >= 0) repo.setTorrentUploadLimit(it.toInt()) }
+            json?.optLong("torrentDownloadLimit", -1)?.let { if (it >= 0) repo.setTorrentDownloadLimit(it.toInt()) }
+            json?.optInt("torrentMaxActive", -1)?.let { if (it >= 1) repo.setTorrentMaxActive(it) }
+            json?.optDouble("torrentSeedRatio", -1.0)?.let { if (it >= 0) repo.setTorrentSeedRatio(it.toFloat()) }
+            if (json?.has("torrentDhtEnabled") == true) json?.optBoolean("torrentDhtEnabled")?.let { repo.setTorrentDhtEnabled(it) }
+            if (json?.has("torrentPexEnabled") == true) json?.optBoolean("torrentPexEnabled")?.let { repo.setTorrentPexEnabled(it) }
+            json?.optInt("torrentListenPort", -1)?.let { if (it >= 1024) repo.setTorrentListenPort(it) }
+            json?.optString("torrentSavePath", "")?.let { if (it.isNotBlank()) repo.setTorrentSavePath(it) }
+            // 엔진에 즉시 반영
+            RelayApp.getTorrent(context).applySettings(repo.firstBlocking())
+            serverRef.settings = repo.firstBlocking()
+            call.respondText("""{"ok":true}""", ContentType.Application.Json)
+        }
+
+        // ── 설정 리셋 (기본값 복원) ──
+        post("/api/settings/reset") {
+            val body = call.receiveText()
+            val json = try { JSONObject(body) } catch (_: Exception) { JSONObject() }
+            val category = json.optString("category", "all")
+            val repo = SettingsRepository.get(context)
+            val ctx = context
+            when (category) {
+                "download" -> {
+                    repo.setConcurrency(2)
+                    repo.setSpeedLimit(0)
+                    repo.setNotifications(true)
+                    RelayApp.get(ctx).applySettings(repo.firstBlocking())
+                }
+                "torrent" -> {
+                    repo.setTorrentUploadLimit(512)
+                    repo.setTorrentDownloadLimit(0)
+                    repo.setTorrentMaxActive(3)
+                    repo.setTorrentSeedRatio(2.0f)
+                    repo.setTorrentDhtEnabled(true)
+                    repo.setTorrentPexEnabled(true)
+                    val randomPort = (49152 + (Math.random() * 16384).toInt()).coerceIn(49152, 65535)
+                    repo.setTorrentListenPort(randomPort)
+                    repo.setTorrentSavePath("/sdcard/Download/DroidRelay")
+                    RelayApp.getTorrent(ctx).applySettings(repo.firstBlocking())
+                }
+                else -> {
+                    repo.setConcurrency(2)
+                    repo.setSpeedLimit(0)
+                    repo.setNotifications(true)
+                    repo.setTorrentUploadLimit(512)
+                    repo.setTorrentDownloadLimit(0)
+                    repo.setTorrentMaxActive(3)
+                    repo.setTorrentSeedRatio(2.0f)
+                    repo.setTorrentDhtEnabled(true)
+                    repo.setTorrentPexEnabled(true)
+                    val randomPort = (49152 + (Math.random() * 16384).toInt()).coerceIn(49152, 65535)
+                    repo.setTorrentListenPort(randomPort)
+                    repo.setTorrentSavePath("/sdcard/Download/DroidRelay")
+                    RelayApp.get(ctx).applySettings(repo.firstBlocking())
+                    RelayApp.getTorrent(ctx).applySettings(repo.firstBlocking())
+                }
+            }
+            serverRef.settings = repo.firstBlocking()
+            call.respondText("""{"ok":true}""", ContentType.Application.Json)
+        }
+
+        // ── 경로 테스트 (쓰기 권한 확인) ──
+        post("/api/storage/test-path") {
+            val body = call.receiveText()
+            val json = try { JSONObject(body) } catch (_: Exception) { null }
+            val path = json?.optString("path", "") ?: ""
+            if (path.isBlank()) {
+                call.respondText("""{"ok":false,"error":"경로 없음"}""", ContentType.Application.Json)
+                return@post
+            }
+            val testDir = java.io.File(path)
+            try {
+                testDir.mkdirs()
+                val testFile = java.io.File(testDir, ".droidrelay_test_${System.currentTimeMillis()}")
+                testFile.writeText("test")
+                val ok = testFile.exists() && testFile.delete()
+                call.respondText(
+                    JSONObject().apply { put("ok", ok) }.toString(),
+                    ContentType.Application.Json
+                )
+            } catch (e: Exception) {
+                call.respondText(
+                    JSONObject().apply { put("ok", false); put("error", e.message ?: "알 수 없는 오류") }.toString(),
+                    ContentType.Application.Json
+                )
+            }
+        }
+
         get("/api/jobs") {
             val arr = JSONArray()
             JobsRepository.all().forEach { j ->
@@ -348,8 +527,10 @@ private fun Application.relayRoutes(context: Context, serverRef: RelayServer) {
         // ── Torrent API ──
 
         get("/api/torrents") {
+            val engine = RelayApp.getTorrent(context)
             val arr = JSONArray()
             TorrentRepository.all().forEach { t ->
+                val (piecesDone, piecesTotal) = engine.pieceInfo(t.id)
                 arr.put(JSONObject().apply {
                     put("id", t.id)
                     put("name", t.name)
@@ -363,6 +544,8 @@ private fun Application.relayRoutes(context: Context, serverRef: RelayServer) {
                     put("order", t.order)
                     put("seeds", t.seeds)
                     put("peers", t.peers)
+                    put("piecesDone", piecesDone)
+                    put("piecesTotal", piecesTotal)
                     put("files", JSONArray().apply {
                         t.files.forEach { f ->
                             put(JSONObject().apply {

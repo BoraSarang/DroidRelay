@@ -10,12 +10,14 @@ import java.net.URLDecoder
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import okhttp3.Request
 
@@ -25,9 +27,13 @@ class DownloadEngine(
     private val persistence: JobsPersistence,
 ) {
     private val TAG = "Engine"
+    private val maxDownloadBps = AtomicLong(0L)
+    private val maxUploadBps = AtomicLong(0L)
+    private val throttleInterceptor = ThrottleInterceptor(maxDownloadBps, maxUploadBps)
     private val client = OkHttpClient.Builder()
         .connectTimeout(java.time.Duration.ofSeconds(30))
         .readTimeout(java.time.Duration.ofSeconds(90))
+        .addNetworkInterceptor(throttleInterceptor)
         .build()
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -50,11 +56,30 @@ class DownloadEngine(
             settings.settings.collect { s ->
                 concurrencyTarget = s.concurrency
                 limitKbps = s.speedLimitKbps
-                DebugLogger.d(TAG, "설정 반영 동시성=${s.concurrency} 스로틀=${s.speedLimitKbps}KB/s")
+                maxDownloadBps.set(s.maxDownloadBps)
+                maxUploadBps.set(s.maxUploadBps)
+                DebugLogger.d(TAG, "설정 반영 동시성=${s.concurrency} 스로틀=${s.speedLimitKbps}KB/s 전역DL=${s.maxDownloadBps}B/s 전역UL=${s.maxUploadBps}B/s")
                 tryStart()
             }
         }
         restore()
+    }
+
+    /** 전역 속도 제한 즉시 적용 (BPS 단위) */
+    fun applySpeedLimit(downloadBps: Long, uploadBps: Long) {
+        maxDownloadBps.set(downloadBps)
+        maxUploadBps.set(uploadBps)
+        DebugLogger.i(TAG, "전역 속도 제한 적용 DL=${if (downloadBps <= 0) "무제한" else "${downloadBps}B/s"} UL=${if (uploadBps <= 0) "무제한" else "${uploadBps}B/s"}")
+    }
+
+    /** 전체 설정 동적 적용 (재시작 불필요) */
+    fun applySettings(s: AppSettings) {
+        concurrencyTarget = s.concurrency
+        limitKbps = s.speedLimitKbps
+        maxDownloadBps.set(s.maxDownloadBps)
+        maxUploadBps.set(s.maxUploadBps)
+        DebugLogger.i(TAG, "다운로드 설정 적용 동시성=${s.concurrency} 스로틀=${s.speedLimitKbps}KB/s 전역DL=${s.maxDownloadBps}B/s 전역UL=${s.maxUploadBps}B/s")
+        tryStart()
     }
 
     /** 앱 시작 시 jobs.json 복원 → 대기 항목 자동 재개 */

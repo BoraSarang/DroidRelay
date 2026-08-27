@@ -1,6 +1,7 @@
 package com.borasarang.droidrelay.relay
 
 import android.content.Context
+import com.borasarang.droidrelay.relay.DebugLogger
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CoroutineScope
@@ -94,11 +95,11 @@ class TorrentEngine(
             session = SessionManager().apply {
                 start()
                 val sp = settings()
-                    .listenInterfaces("0.0.0.0:6881")
-                    .activeDownloads(4)
+                    .listenInterfaces("0.0.0.0:${settings.firstBlocking().torrentListenPort}")
+                    .activeDownloads(3)
                     .connectionsLimit(200)
                     .maxPeerlistSize(5000)
-                    .uploadRateLimit(1024)  // 기본 업로드 1KB/s
+                    .uploadRateLimit(1024)  // 기본 업로드 1KB/s (0=사용안함 → 1KB/s로 완화)
                     .downloadRateLimit(0) // 기본 다운로드 무제한
                 applySettings(sp)
                 startDht()
@@ -203,26 +204,29 @@ class TorrentEngine(
                 DebugLogger.d(TAG, "torrent 파일 download 호출 완료 id=$id hash=$expectedHash name='${ti.name()}'")
                 tempFile.delete()
 
-                // torrent 파일은 ADD_TORRENT alert가 안 올 수 있으므로 직접 매핑 시도
-                delay(300)
-                if (!handleMap.containsKey(id)) {
-                    try {
-                        val th = session?.find(Sha1Hash.parseHex(expectedHash))
-                        if (th != null && !hashToId.containsKey(expectedHash)) {
-                            handleMap[id] = th
-                            hashToId[expectedHash] = id
-                            DebugLogger.d(TAG, "파일 torrent 수동 매핑 id=$id hash=$expectedHash")
-                        }
-                    } catch (e: Exception) {
-                        DebugLogger.w(TAG, "파일 torrent 수동 매핑 실패 id=$id: ${e.message}")
+                // torrent 파일은 ADD_TORRENT alert가 안 올 수 있으므로 직접 매핑 시도 (재시도 루프)
+                var mapped = handleMap.containsKey(id)
+                if (!mapped) {
+                    repeat(25) { // 최대 5초
+                        delay(200)
+                        try {
+                            val th = session?.find(Sha1Hash.parseHex(expectedHash))
+                            if (th != null && !hashToId.containsKey(expectedHash)) {
+                                handleMap[id] = th
+                                hashToId[expectedHash] = id
+                                DebugLogger.d(TAG, "파일 torrent 수동 매핑 id=$id hash=$expectedHash")
+                            }
+                        } catch (_: Exception) {}
+                        if (handleMap.containsKey(id)) { mapped = true; return@repeat }
                     }
                 }
 
-                // 메타데이터가 이미 있으므로 DOWNLOADING으로 전환
-                if (handleMap.containsKey(id)) {
+                // 메타데이터가 이미 있으므로 DOWNLOADING으로 전환 + 트래커 발표 강제
+                if (mapped) {
                     TorrentRepository.update(id) {
                         it.copy(state = TorrentState.DOWNLOADING)
                     }
+                    handleMap[id]?.let { announceKick(it, id) }
                     persistNow()
                 }
             } catch (e: Exception) {
@@ -338,6 +342,52 @@ class TorrentEngine(
         }
     }
 
+    /** 전역 속도 제한 (웹/앱에서 즉시 적용) — BPS 단위 */
+    fun applySpeedLimit(downloadBps: Long, uploadBps: Long) {
+        val session = session ?: return
+        val upBps = if (uploadBps <= 0) 1024 else uploadBps.toInt().coerceAtLeast(1)
+        val downBps = if (downloadBps <= 0) 0 else downloadBps.toInt()
+        try {
+            session.uploadRateLimit(upBps)
+            session.downloadRateLimit(downBps)
+            val upLabel = if (uploadBps <= 0) "끔" else fmtBps(upBps)
+            val downLabel = if (downloadBps <= 0) "무제한" else fmtBps(downBps)
+            DebugLogger.i(TAG, "전역 속도 제한 적용 업로드=$upLabel 다운로드=$downLabel")
+        } catch (e: Exception) {
+            DebugLogger.e(TAG, "전역 속도 제한 적용 실패", e)
+        }
+    }
+
+    private fun fmtBps(bps: Int): String = when {
+        bps < 1024 -> "${bps}B/s"
+        bps < 1_048_576 -> "${bps / 1024}KB/s"
+        else -> "${bps / 1_048_576}MB/s"
+    }
+
+    /** 전체 설정 동적 적용 (재시작 불필요) */
+    fun applySettings(s: AppSettings) {
+        val session = session ?: return
+        val sp = session.settings()
+            .activeDownloads(s.torrentMaxActive)
+            .connectionsLimit(200)
+            .maxPeerlistSize(5000)
+        session.applySettings(sp)
+
+        // 리슨 포트 변경은 재시작 필요 — 로그만 남김
+        if (s.torrentListenPort != 6881) {
+            DebugLogger.w(TAG, "listenPort(${s.torrentListenPort}) 변경은 서버 재시작 후 반영됩니다")
+        }
+
+        // 속도 제한도 함께 적용
+        val upBps = if (s.torrentUploadLimit <= 0) 1024 else (s.torrentUploadLimit * 1024).toInt().coerceAtLeast(1)
+        val downBps = if (s.torrentDownloadLimit <= 0) 0 else (s.torrentDownloadLimit * 1024).toInt()
+        try {
+            session.uploadRateLimit(upBps)
+            session.downloadRateLimit(downBps)
+        } catch (e: Exception) { DebugLogger.e(TAG, "토렌트 속도 제한 적용 실패", e) }
+        DebugLogger.i(TAG, "토렌트 설정 적용 maxActive=${s.torrentMaxActive} up=${if(s.torrentUploadLimit<=0) "끔" else "${s.torrentUploadLimit}KB/s"} down=${if(s.torrentDownloadLimit<=0) "무제한" else "${s.torrentDownloadLimit}KB/s"}")
+    }
+
     private fun handleAlert(alert: Alert<*>) {
         when (alert.type()) {
             AlertType.ADD_TORRENT -> {
@@ -436,6 +486,8 @@ class TorrentEngine(
                                 handleMap[job.id] = th
                                 hashToId[job.infoHash] = job.id
                                 DebugLogger.d(TAG, "폴링 자동 매핑 id=${job.id} hash=${job.infoHash}")
+                                // 새로 매핑된 즉시 트래커/DHT 발표 (시드·피어 수집 지연 방지)
+                                announceKick(th, job.id)
                             }
                         } catch (_: Exception) {}
                     }
@@ -480,6 +532,28 @@ class TorrentEngine(
                 } catch (_: Exception) {}
                 persistDebounced()
             }
+        }
+    }
+
+    /** 트래커 재발표 + DHT 발표 강제 (추가 직후 시드·피어 0 지연 해소) */
+    private fun announceKick(th: TorrentHandle, id: String) {
+        try { th.forceReannounce() } catch (_: Exception) {}
+        try { th.forceDHTAnnounce() } catch (_: Exception) {}
+        DebugLogger.i(TAG, "발표 강제 id=$id (tracker+DHT)")
+    }
+
+    /** 조각 정보: (보유 조각 수, 전체 조각 수) */
+    fun pieceInfo(id: String): Pair<Int, Int> {
+        val th = handleMap[id] ?: return 0 to 0
+        return try {
+            val status = th.status()
+            val tf = try { th.torrentFile() } catch (_: Exception) { null }
+            val total = tf?.numPieces() ?: 0
+            val pieceLen = tf?.pieceLength()?.toLong() ?: 0L
+            val done = if (pieceLen > 0) (((status.totalDone() + pieceLen - 1) / pieceLen).toInt()) else 0
+            done.coerceAtMost(total) to total
+        } catch (_: Exception) {
+            0 to 0
         }
     }
 
