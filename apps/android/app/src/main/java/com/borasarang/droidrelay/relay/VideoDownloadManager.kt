@@ -5,15 +5,21 @@ import com.arthenica.ffmpegkit.FFmpegKit
 import com.arthenica.ffmpegkit.FFmpegSession
 import com.arthenica.ffmpegkit.FFmpegSessionCompleteCallback
 import com.arthenica.ffmpegkit.ReturnCode
-import com.arthenica.ffmpegkit.Statistics
-import com.arthenica.ffmpegkit.StatisticsCallback
+import com.arthenica.ffmpegkit.SessionState
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 /**
  * 비디오 다운로드 — FFmpegKit 통합 파이프라인.
  * - yt/스트림 모두 FFmpeg 단일 실행 (`-c copy` 머지/패스스루)
- * - 진행: 출력 파일 크기 2초 폴링 → Job.downloadedBytes/speedBps
+ * - 진행: 출력 파일 크기 1초 폴링 → Job.downloadedBytes/speedBps
+ *   (StatisticsCallback은 `-c copy` 리먹스에서 이벤트를 내지 않아 폴링 방식 사용)
  * - 완료: DownloadEngine 공용 보관함(MediaStore) 게시 재사용
  * - 재시작 복원: RUNNING/QUEUED 비디오 잡은 FAILED 처리 (재개 미지원, 재분석 안내)
  */
@@ -24,10 +30,11 @@ class VideoDownloadManager(
 
     private val sessions = ConcurrentHashMap<String, FFmpegSession>()
     private val cancelRequested = ConcurrentHashMap.newKeySet<String>()
-    private val ticks = ConcurrentHashMap<String, Tick>()
     @Volatile private var inited = false
+    @Volatile private var scope: CoroutineScope? = null
 
-    private data class Tick(var lastSize: Long = 0L, var lastTime: Long = 0L)
+    private fun ensureScope(): CoroutineScope =
+        scope ?: CoroutineScope(SupervisorJob() + Dispatchers.IO).also { scope = it }
 
     val workDir: File
         get() = File(context.getExternalFilesDir(null), "downloads").apply { mkdirs() }
@@ -88,32 +95,39 @@ class VideoDownloadManager(
             add("-y"); add("-nostdin"); add("-hide_banner")
             addAll(argv)
         }
-        val stats = StatisticsCallback { statistics: Statistics ->
-            updateProgress(jobId, out, statistics)
-        }
         val done = FFmpegSessionCompleteCallback { session ->
             handleComplete(jobId, session, out)
         }
-        val session = FFmpegKit.executeWithArgumentsAsync(full.toTypedArray(), done, null, stats)
+        val session = FFmpegKit.executeWithArgumentsAsync(full.toTypedArray(), done, null, null)
         sessions[jobId] = session
+        pollProgress(jobId, session, out)
     }
 
-    private fun updateProgress(jobId: String, out: File, stats: Statistics) {
-        val len = runCatching { out.length() }.getOrDefault(0L)
-        val now = System.currentTimeMillis()
-        val t = ticks.computeIfAbsent(jobId) { Tick() }
-        synchronized(t) {
-            if (now - t.lastTime < TICK_MS) return
-            val speed = if (t.lastTime > 0) ((len - t.lastSize) * 1000 / (now - t.lastTime)).coerceAtLeast(0) else 0L
-            t.lastSize = len
-            t.lastTime = now
-            JobsRepository.update(jobId) { it.copy(downloadedBytes = len, speedBps = speed) }
+    /** 출력 파일 크기 1초 폴링 — `-c copy` 리먹스는 Statistics 이벤트가 없어 파일 크기로 진행률 계산 */
+    private fun pollProgress(jobId: String, session: FFmpegSession, out: File) {
+        ensureScope().launch {
+            var lastSize = 0L
+            var lastTime = 0L
+            while (true) {
+                val state = session.state
+                if (state == SessionState.COMPLETED || state == SessionState.FAILED || !sessions.containsKey(jobId)) break
+                val len = runCatching { out.length() }.getOrDefault(0L)
+                val now = System.currentTimeMillis()
+                val speed = if (lastTime > 0L && now - lastTime > 0L) {
+                    ((len - lastSize) * 1000 / (now - lastTime)).coerceAtLeast(0)
+                } else {
+                    0L
+                }
+                lastSize = len
+                lastTime = now
+                JobsRepository.update(jobId) { it.copy(downloadedBytes = len, speedBps = speed) }
+                delay(1_000L)
+            }
         }
     }
 
     private fun handleComplete(jobId: String, session: FFmpegSession, out: File) {
         sessions.remove(jobId)
-        ticks.remove(jobId)
         val now = System.currentTimeMillis()
         val canceled = cancelRequested.remove(jobId) || ReturnCode.isCancel(session.returnCode)
         val size = runCatching { out.length() }.getOrDefault(0L)
@@ -190,11 +204,11 @@ class VideoDownloadManager(
         sessions.forEach { (_, s) -> s.cancel() }
         sessions.clear()
         cancelRequested.clear()
+        scope?.cancel()
+        scope = null
     }
 
     companion object {
-        private const val TICK_MS = 1_000L
-
         /** 사용자 입력/제목 기반 안전 파일명 (확장자 포함) */
         fun safeFilename(raw: String?, ext: String): String {
             val base = (raw ?: "")

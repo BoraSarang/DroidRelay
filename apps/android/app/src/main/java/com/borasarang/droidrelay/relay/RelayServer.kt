@@ -1083,32 +1083,15 @@ private fun Application.relayRoutes(context: Context, serverRef: RelayServer) {
                 return@post
             }
             val settings = serverRef.settings
-            val isYouTube = url.contains("youtube.com") || url.contains("youtu.be")
-            if (isYouTube) {
-                if (!settings.ytdlpEnabled || settings.ytdlpServerUrl.isBlank()) {
-                    call.respondText("E-AND-VID-0101: YouTube는 yt-dlp 서버가 필요합니다. 설정에서 서버를 구성해 주세요.", ContentType.Text.Plain, HttpStatusCode.UnprocessableEntity)
-                    return@post
-                }
-                withContext(Dispatchers.IO) {
-                    try {
-                        val result = YtDlpClient.analyze(settings.ytdlpServerUrl, settings.ytdlpApiKey, url)
-                        call.respondText(result.toString(), ContentType.Application.Json)
-                    } catch (e: Exception) {
-                        DebugLogger.e("YtDlp", "분석 실패: ${e.message}")
-                        call.respondText("E-AND-VID-0102: YouTube 분석 실패: ${e.message}", ContentType.Text.Plain, HttpStatusCode.InternalServerError)
-                    }
-                }
-            } else {
-                withContext(Dispatchers.IO) {
-                    val d = StreamDetector.analyze(url)
-                    call.respondText(
-                        JSONObject().apply {
-                            put("kind", "stream"); put("title", d.title)
-                            put("streamUrl", d.url); put("direct", d.isDirect)
-                        }.toString(),
-                        ContentType.Application.Json,
-                    )
-                }
+            try {
+                val result = VideoApi.analyze(settings, url)
+                call.respondText(result.toString(), ContentType.Application.Json)
+            } catch (e: VideoException) {
+                DebugLogger.e("VideoApi", "분석 실패 ${e.code}: ${e.message}")
+                call.respondText("${e.code}: ${e.message}", ContentType.Text.Plain, HttpStatusCode.UnprocessableEntity)
+            } catch (e: Exception) {
+                DebugLogger.e("VideoApi", "분석 오류: ${e.message}")
+                call.respondText("E-AND-VID-0100: 분석 오류: ${e.message}", ContentType.Text.Plain, HttpStatusCode.InternalServerError)
             }
         }
 
@@ -1121,37 +1104,21 @@ private fun Application.relayRoutes(context: Context, serverRef: RelayServer) {
             val body = call.receiveText()
             val json = try { JSONObject(body) } catch (_: Exception) { null }
             val url = json?.optString("url", "")?.trim().orEmpty()
+            val streamUrl = json?.optString("streamUrl", "")?.trim().orEmpty()
+            val formatId = json?.optString("format", "")?.trim().orEmpty()
             val wantName = json?.optString("filename", "")?.trim().orEmpty()
             val settings = serverRef.settings
-            val isYouTube = url.contains("youtube.com") || url.contains("youtu.be")
-            val job = withContext(Dispatchers.IO) {
-                val videoManager = RelayApp.getVideo(context)
-                if (isYouTube) {
-                    if (!settings.ytdlpEnabled || settings.ytdlpServerUrl.isBlank()) {
-                        throw VideoException("E-AND-VID-0101", "YouTube는 yt-dlp 서버가 필요합니다. 설정에서 서버를 구성해 주세요.")
-                    }
-                    val formatId = json?.optString("format", "") ?: "bestvideo+bestaudio/best"
-                    val downloadUrls = YtDlpClient.getDownloadUrls(settings.ytdlpServerUrl, settings.ytdlpApiKey, url, formatId)
-                    .map { YtDlpClient.proxyUrl(settings.ytdlpServerUrl, settings.ytdlpApiKey, it) }
-                    val outName = VideoDownloadManager.safeFilename(wantName.ifBlank { "youtube_${System.currentTimeMillis()}" }, "mp4")
-                    val argv = buildList {
-                        add("-y"); add("-nostdin"); add("-hide_banner")
-                        downloadUrls.forEach { add("-i"); add(it) }
-                        add("-c"); add("copy"); add("-movflags"); add("+faststart")
-                        add(File(videoManager.workDir, outName).absolutePath)
-                    }
-                    videoManager.createAndStart(url, outName, argv)
-                } else {
-                    val streamUrl = json?.optString("streamUrl", "")?.trim().orEmpty()
-                        .ifEmpty { StreamDetector.analyze(url).url }
-                    val outName = VideoDownloadManager.safeFilename(
-                        wantName.ifBlank { StreamDetector.analyze(url).title }, "mp4")
-                    val argv = listOf(
-                        "-i", streamUrl, "-c", "copy", "-movflags", "+faststart",
-                        File(videoManager.workDir, outName).absolutePath,
-                    )
-                    videoManager.createAndStart(url, outName, argv)
-                }
+            val job = try {
+                VideoApi.create(
+                    context, settings, url,
+                    streamUrl.ifBlank { null },
+                    formatId.ifBlank { null },
+                    wantName.ifBlank { null },
+                )
+            } catch (e: VideoException) {
+                DebugLogger.e("VideoApi", "생성 실패 ${e.code}: ${e.message}")
+                call.respondText("${e.code}: ${e.message}", ContentType.Text.Plain, HttpStatusCode.UnprocessableEntity)
+                return@post
             }
             call.respondText(
                 JSONObject().put("id", job.id).toString(),
