@@ -14,6 +14,9 @@
 - **공용 `VideoApi` 오케스트레이션**: RelayServer의 /api/video/analyze·create 인라인 로직을 별도 모듈로 추출 — 웹·앱이 동일 경로(에러코드 일치) 사용, 실패 응답 `{code}: {msg}`(422)로 통일
 - **VideoDownloadManager 진행 폴링 전환(버그 수정)**: `StatisticsCallback`은 `-c copy` 리먹스에서 이벤트를 내지 않아 진행률이 0에 머물던 문제 — 출력 파일 크기 **1초 폴링**(`SessionState` 종료 감지)으로 교체. 50MB급 스트림에서 0→206MB 진행·254KB/s 실측 갱신
 
+### Added [web]
+- **웹 UI 유튜브 포맷/해상도 선택**: `analyzeVideo` 결과에 `formats` 목록이 있으면 "포맷/해상도 선택"으로 렌더 — 🟢 자동(비디오+오디오 병합)·🎬 원본(best)·각 포맷(해상도 · 확장자 · 대략 크기) 행. 선택 시 `createVideo(v, format)`로 `format` 파라미터 전달(기존 "원본 그대로" 버튼은 스트림에만 유지). 앱 포맷 바텀시트와 동일 데이터
+
 ### Fixed [android]
 - **실패 알림 반복 재발송 + 무의미 재시도 루프 차단**: `E-AND-VID-0203`(yt-dlp 서버 IP 차단) 등으로 FAILED로 고정된 잡이 진행률성 갱신을 받을 때마다 `실패 알림`이 **2초 간격으로 무한 반복**(소리·노티 폭주)되던 문제 — 실패 알림을 **상태 전이 시에만**(이전 상태가 FAILED가 아닐 때) + **동일 원인(에러코드+메시지) 재발신 금지** 가드로 1회만 발송. `retryFailed()`는 `type=="video"` 잡 제외(FFmpeg/VideoDownloadManager 소관) → 502/403 반복 재다운로드 루프 원천 차단. 실기기 검증: 2초 무한 반복 → 삭제 후 소멸, HTTP 404 잡 실패 시 알림 **1회만** 확인
 

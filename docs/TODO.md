@@ -213,3 +213,4 @@ T-001~T-008 전부 완료 (커밋 7574486).
 | T-877 | 공용 VideoApi 추출 + RelayServer analyze/create 핸들러 리팩터(422+코드/메시지 응답 통일) + **진행 폴링 전환**(StatisticsCallback이 `-c copy`에서 무감응 → 파일 크기 1초 폴링, SessionState 종료 감지) — 실기기 스트림 0→206MB 진행·254KB/s 실측 | ✅ |
 | T-878 | 실기기 검증(스트림 분석→다운로드→진행률, 유튜브 분석 23포맷·포맷 시트 데이터) + CHANGELOG/TODO/세션 로그 + 커밋 | 🔄 |
 | T-879 | **실패 알림 반복+무의미 재시도 루프 차단** — RelayService 실패 알림을 상태 전이 시 1회로 + 동일 원인(에러코드+메시지) 재발신 금지, DownloadEngine.retryFailed에서 `type=="video"` 제외. 실기기 2초 무한 알림 소멸 확인 + HTTP 404 FAILED 알림 **1회만**(커밋 `df41ba6`) | ✅ |
+| T-880 | **웹 UI 유튜브 포맷/해상도 선택** — analyzeVideo formats 렌더(자동 병합/원본 best + 해상도·확장자·크기), createVideo(v, format)로 format 전달. node --check + 실기기 33 formats 렌더·"자동 병합" 클릭 → 잡 생성 → 0203 실패 알림 1회/반복 없음 검증 | ✅ |
