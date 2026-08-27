@@ -135,7 +135,7 @@ class VideoDownloadManager(
                 JobsRepository.update(jobId) {
                     it.copy(
                         state = JobState.DONE, progress = 1f, downloadedBytes = size,
-                        totalBytes = size, speedBps = 0L, verified = false, finishedAt = now,
+                        totalBytes = size, speedBps = 0L, finishedAt = now,
                     )
                 }
                 DebugLogger.perf(TAG, "비디오 완료 id=$jobId '${out.name}' ${size / 1024}KB") {}

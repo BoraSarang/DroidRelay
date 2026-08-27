@@ -104,9 +104,9 @@ class DownloadEngine(
         if (JobsRepository.get(job.id) == null) JobsRepository.restore(job)
     }
 
-    fun enqueue(url: String, expectedSha256: String? = null): Job {
+    fun enqueue(url: String): Job {
         val name = JobsRepository.filenameFromUrl(url)
-        val job = JobsRepository.add(url, URLDecoder.decode(name, "UTF-8"), expectedSha256)
+        val job = JobsRepository.add(url, URLDecoder.decode(name, "UTF-8"))
         DebugLogger.i(TAG, "큐 진입 id=${job.id} url=$url")
         pending.add(job.id)
         tryStart()
@@ -330,25 +330,6 @@ class DownloadEngine(
                     partial.copyTo(done, overwrite = true); partial.delete()
                 }
 
-                // 체크섬 검증 (T-704) — 지정 시 스트리밍 SHA-256 비교
-                val expected = JobsRepository.get(id)?.expectedSha256
-                if (expected != null) {
-                    val actual = sha256(done)
-                    if (!actual.equals(expected, ignoreCase = true)) {
-                        done.delete()
-                        DebugLogger.e(TAG, "체크섬 불일치 id=$id expected=$expected actual=$actual (E-AND-DOWN-1005)")
-                        JobsRepository.update(id) { j ->
-                            j.copy(
-                                state = JobState.FAILED, errorCode = "E-AND-DOWN-1005",
-                                errorMessage = "체크섬 불일치 — 파일이 손상되었을 수 있습니다 (E-AND-DOWN-1005)",
-                                speedBps = 0L,
-                            )
-                        }
-                        return@withContext Outcome.COMPLETED
-                    }
-                    DebugLogger.i(TAG, "체크섬 검증 통과 sha256=${actual.take(16)}… id=$id")
-                }
-
                 publishToDownloads(done, id)
                 // 보관함(MediaStore)에 게시했으므로 앱 전용 원본 삭제
                 try {
@@ -358,8 +339,7 @@ class DownloadEngine(
                 JobsRepository.update(id) { j ->
                     j.copy(
                         state = JobState.DONE, progress = 1f, downloadedBytes = finalSize,
-                        totalBytes = finalSize, speedBps = 0L,
-                        verified = expected != null, finishedAt = System.currentTimeMillis(),
+                        totalBytes = finalSize, speedBps = 0L, finishedAt = System.currentTimeMillis(),
                     )
                 }
                 DebugLogger.perf(TAG, "다운로드 id=$id '${done.name}' ${fmt(finalSize)} 평균=${fmt(finalSize * 1000 / elapsed)}/s") {}
@@ -416,17 +396,6 @@ class DownloadEngine(
         } catch (e: Exception) {
             DebugLogger.e(TAG, "게시 실패(원본 유지) id=$jobId", e)
         }
-    }
-
-    /** 스트리밍 SHA-256 (T-704) — 대용량 파일 메모리 안전 */
-    private fun sha256(file: File): String {
-        val md = java.security.MessageDigest.getInstance("SHA-256")
-        file.inputStream().use { input ->
-            val buf = ByteArray(BUFFER_SIZE)
-            var n: Int
-            while (input.read(buf).also { n = it } != -1) md.update(buf, 0, n)
-        }
-        return md.digest().joinToString("") { "%02x".format(it) }
     }
 
     private fun fmt(n: Long): String = when {

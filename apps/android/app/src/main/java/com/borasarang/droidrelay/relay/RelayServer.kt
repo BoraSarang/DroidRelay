@@ -989,8 +989,6 @@ private fun Application.relayRoutes(context: Context, serverRef: RelayServer) {
                     put("startedAt", j.startedAt)
                     put("order", j.order)
                     put("errorMessage", j.errorMessage ?: JSONObject.NULL)
-                    put("hasChecksum", j.expectedSha256 != null)
-                    put("verified", j.verified)
                     put("type", j.type)
                 })
             }
@@ -1010,10 +1008,6 @@ private fun Application.relayRoutes(context: Context, serverRef: RelayServer) {
                 )
                 return@post
             }
-            // 선택 체크섬 (T-704): 64자리 16진수만 허용
-            val rawSha = json?.optString("sha256", "") ?: ""
-            val sha256 = if (Regex("^[0-9a-fA-F]{64}$").matches(rawSha)) rawSha.lowercase() else null
-
             // Debrid 연동: 활성화된 경우 언리스트링크 시도
             val s = serverRef.settings
             val finalUrl = if (s.debridEnabled && s.debridApiKey.isNotBlank()) {
@@ -1035,7 +1029,7 @@ private fun Application.relayRoutes(context: Context, serverRef: RelayServer) {
                 url.trim()
             }
 
-            val job = RelayApp.get(context).enqueue(finalUrl, sha256)
+            val job = RelayApp.get(context).enqueue(finalUrl)
             DebugLogger.i("Http", "POST 수락 id=${job.id} file='${job.filename}' debrid=${s.debridEnabled}")
             call.respondText(
                 JSONObject().put("id", job.id).toString(),

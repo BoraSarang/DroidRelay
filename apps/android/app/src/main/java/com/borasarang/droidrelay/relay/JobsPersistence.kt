@@ -37,8 +37,6 @@ class JobsPersistence(
                     put("order", j.order)
                     if (j.startedAt > 0) put("startedAt", j.startedAt)
                     if (j.finishedAt > 0) put("finishedAt", j.finishedAt)
-                    if (j.expectedSha256 != null) put("expectedSha256", j.expectedSha256)
-                    if (j.verified) put("verified", true)
                     if (j.type != "http") put("type", j.type)
                 })
             }
@@ -71,8 +69,6 @@ class JobsPersistence(
                     order = o.optInt("order", 0),
                     startedAt = o.optLong("startedAt", 0L),
                     finishedAt = o.optLong("finishedAt", 0L),
-                    expectedSha256 = if (o.has("expectedSha256")) o.getString("expectedSha256") else null,
-                    verified = o.optBoolean("verified", false),
                     type = o.optString("type", "http"),
                 )
                 when (job.state) {
