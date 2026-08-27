@@ -17,6 +17,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.first
 import com.borasarang.droidrelay.relay.TorrentRepository
 import com.borasarang.droidrelay.relay.TorrentState
 import kotlinx.coroutines.launch
@@ -31,6 +32,10 @@ class RelayService : Service() {
     private var notificationsOn = true
     private var networkMonitor: NetworkMonitor? = null
     private var torrentEngine: TorrentEngine? = null
+    private var guardDaemon: GuardDaemon? = null
+    private var webhookManager: WebhookManager? = null
+    private var tunnelManager: TunnelManager? = null
+    private var schedulerManager: SchedulerManager? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -44,10 +49,54 @@ class RelayService : Service() {
         val persistence = JobsPersistence(applicationContext)
         val torrentEng = RelayApp.getTorrent(applicationContext)
         torrentEngine = torrentEng
+        DebugLogger.i(TAG, "초기화 시작 engine=${engine::class.simpleName} torrent=${torrentEng::class.simpleName}")
 
         // TorrentEngine 시작
         torrentEng.start()
         DebugLogger.i(TAG, "TorrentEngine 시작 완료")
+
+        // RSS 피드 매니저 시작
+        val rssManager = RssFeedManager(applicationContext)
+        rssManager.start()
+        DebugLogger.i(TAG, "RSS 피드 매니저 시작 완료")
+
+        // 가드 데몬 시작 (Phase 2.4)
+        val guard = GuardDaemon(applicationContext, settingsRepo)
+        guardDaemon = guard
+        guard.start()
+        DebugLogger.i(TAG, "가드 데몬 시작 완료")
+
+        // 가드 상태 변경 시 다운로드 일시정지/재개
+        guard.onThrottleChange = { throttled, reason ->
+            DebugLogger.i(TAG, "가드 상태 변경 throttled=$throttled reason=$reason")
+            if (throttled) {
+                // 실행 중인 다운로드 일시정지
+                JobsRepository.jobs.value.forEach { j ->
+                    if (j.state == JobState.RUNNING) {
+                        engine.pause(j.id)
+                    }
+                }
+            } else {
+                // 대기 중인 다운로드 재개
+                engine.retryFailed()
+            }
+        }
+
+        // 웹훅 매니저 시작 (Phase 2.2)
+        val webhook = WebhookManager(applicationContext)
+        webhookManager = webhook
+        DebugLogger.i(TAG, "웹훅 매니저 시작 완료")
+
+        // 터널 매니저 시작 (Phase 2.3)
+        val tunnel = TunnelManager(applicationContext)
+        tunnelManager = tunnel
+        DebugLogger.i(TAG, "터널 매니저 시작 완료")
+
+        // 스케줄러 시작 (Phase 3)
+        val scheduler = SchedulerManager(applicationContext)
+        schedulerManager = scheduler
+        scheduler.start(settingsRepo)
+        DebugLogger.i(TAG, "스케줄러 시작 완료")
 
         // ① 설정 감시: 포트 변경 → 서버 재시작 / 알림 토글 / 서버 스냅샷 갱신
         scope.launch {
@@ -96,10 +145,26 @@ class RelayService : Service() {
                         if (last[j.id] == JobState.RUNNING && j.state == JobState.DONE) {
                             DebugLogger.i(TAG, "완료 알림 '${j.filename}'")
                             notify(j.id.hashCode(), getString(R.string.notif_done_title), j.filename, done = true)
+                            // 웹훅 콜백 전송 (Phase 2.2)
+                            scope.launch {
+                                val s = try { settingsRepo.settings.first() } catch (_: Exception) { return@launch }
+                                webhookManager?.send("download_complete", org.json.JSONObject().apply {
+                                    put("id", j.id); put("filename", j.filename); put("url", j.url)
+                                    put("downloadedBytes", j.downloadedBytes); put("totalBytes", j.totalBytes)
+                                }, s)
+                            }
                         }
                         if (last[j.id] != null && j.state == JobState.FAILED) {
                             DebugLogger.i(TAG, "실패 알림 '${j.filename}' (${j.errorCode})")
                             notify(j.id.hashCode(), getString(R.string.notif_fail_title), j.filename + (j.errorMessage?.let { " — $it" } ?: ""), done = false)
+                            // 웹훅 콜백 전송 (Phase 2.2)
+                            scope.launch {
+                                val s = try { settingsRepo.settings.first() } catch (_: Exception) { return@launch }
+                                webhookManager?.send("download_failed", org.json.JSONObject().apply {
+                                    put("id", j.id); put("filename", j.filename); put("url", j.url)
+                                    put("errorCode", j.errorCode ?: ""); put("errorMessage", j.errorMessage ?: "")
+                                }, s)
+                            }
                         }
                     }
                 }
@@ -133,6 +198,14 @@ class RelayService : Service() {
                         if (prev == TorrentState.DOWNLOADING && t.state == TorrentState.DONE) {
                             DebugLogger.i(TAG, "torrent 완료 알림 '${t.name}'")
                             notifyTorrent(t.id.hashCode(), "Torrent 완료", t.name)
+                            // 웹훅 콜백 전송 (Phase 2.2)
+                            scope.launch {
+                                val s = try { settingsRepo.settings.first() } catch (_: Exception) { return@launch }
+                                webhookManager?.send("torrent_complete", org.json.JSONObject().apply {
+                                    put("id", t.id); put("name", t.name); put("magnet", t.magnet ?: "")
+                                    put("savePath", t.savePath)
+                                }, s)
+                            }
                         }
                         if (prev != null && prev != TorrentState.FAILED && t.state == TorrentState.FAILED) {
                             DebugLogger.i(TAG, "torrent 실패 알림 '${t.name}'")
@@ -160,12 +233,17 @@ class RelayService : Service() {
     private fun ip(intent: Intent?) = intent?.getStringExtra(EXTRA_IP) ?: ""
 
     override fun onDestroy() {
-        DebugLogger.i(TAG, "서비스 종료")
+        DebugLogger.i(TAG, "서비스 종료 시작 — 컴포넌트 정리")
         server?.stop()
         server = null
         networkMonitor?.unregister()
         torrentEngine?.stop()
         torrentEngine = null
+        guardDaemon?.stop()
+        guardDaemon = null
+        schedulerManager?.stop()
+        schedulerManager = null
+        DebugLogger.i(TAG, "서비스 종료 완료 — 영구 저장 실행")
         // 서버 상태 갱신
         SettingsRepository.get(applicationContext).updateServerState(ServerState(running = false, port = currentPort))
         // 강제종료/서비스 종료 시 즉시 영구 저장 (T-111)

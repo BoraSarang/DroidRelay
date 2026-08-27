@@ -17,6 +17,7 @@ import org.libtorrent4j.TorrentHandle
 import org.libtorrent4j.TorrentInfo
 import org.libtorrent4j.TorrentStatus
 import org.libtorrent4j.swig.torrent_flags_t
+import org.libtorrent4j.TorrentFlags
 import org.libtorrent4j.alerts.Alert
 import org.libtorrent4j.alerts.AlertType
 
@@ -34,6 +35,7 @@ class TorrentEngine(
 
     @Volatile private var latestUploadKbps: Long = 0L
     @Volatile private var latestDownloadKbps: Long = 0L
+    @Volatile private var latestSequentialDownload: Boolean = false
     private var lastPersistAt = 0L
     private fun persistNow() {
         try { persistence.save(TorrentRepository.all()) } catch (_: Exception) {}
@@ -51,8 +53,10 @@ class TorrentEngine(
             settings.settings.collect { s ->
                 latestUploadKbps = s.torrentUploadLimit
                 latestDownloadKbps = s.torrentDownloadLimit
-                DebugLogger.d(TAG, "설정 반영 업로드=${s.torrentUploadLimit}KB/s 다운로드=${s.torrentDownloadLimit}KB/s")
+                latestSequentialDownload = s.torrentSequentialDownload
+                DebugLogger.d(TAG, "설정 반영 업로드=${s.torrentUploadLimit}KB/s 다운로드=${s.torrentDownloadLimit}KB/s 시퀀셜=${s.torrentSequentialDownload}")
                 applyRateLimits()
+                applySequentialToAll(s.torrentSequentialDownload)
             }
         }
     }
@@ -152,8 +156,9 @@ class TorrentEngine(
 
         scope.launch {
             try {
-                session?.download(magnet, saveDir, torrent_flags_t())
-                DebugLogger.d(TAG, "magnet download 호출 완료 id=$id (ADD_TORRENT 대기)")
+                val flags = if (latestSequentialDownload) TorrentFlags.SEQUENTIAL_DOWNLOAD else torrent_flags_t()
+                session?.download(magnet, saveDir, flags)
+                DebugLogger.d(TAG, "magnet download 호출 완료 id=$id (ADD_TORRENT 대기) 시퀀셜=$latestSequentialDownload")
             } catch (e: Exception) {
                 DebugLogger.e(TAG, "magnet 추가 실패 id=$id", e)
                 TorrentRepository.update(id) {
@@ -188,7 +193,8 @@ class TorrentEngine(
                 persistFile.writeBytes(bytes)
                 val ti = TorrentInfo(tempFile)
                 val expectedHash = ti.infoHash().toString()
-                session?.download(ti, saveDir)
+                val flags = if (latestSequentialDownload) TorrentFlags.SEQUENTIAL_DOWNLOAD else torrent_flags_t()
+                session?.download(ti, saveDir, null, null, null, flags)
                 val files = (0 until ti.numFiles()).map { fi ->
                     TorrentFile(
                         index = fi,
@@ -364,6 +370,29 @@ class TorrentEngine(
         else -> "${bps / 1_048_576}MB/s"
     }
 
+    /** 시퀀셜 다운로드를 전체 활성 토렌트에 적용 */
+    private fun applySequentialToAll(sequential: Boolean) {
+        handleMap.forEach { (id, th) ->
+            applySequentialToHandle(th, sequential)
+        }
+        if (handleMap.isNotEmpty()) {
+            DebugLogger.i(TAG, "시퀀셜 다운로드 ${if (sequential) "활성화" else "비활성화"} (${handleMap.size}개 토렌트)")
+        }
+    }
+
+    /** 시퀀셜 다운로드를 개별 핸들에 적용 */
+    private fun applySequentialToHandle(th: TorrentHandle, sequential: Boolean) {
+        try {
+            if (sequential) {
+                th.setFlags(TorrentFlags.SEQUENTIAL_DOWNLOAD)
+            } else {
+                th.unsetFlags(TorrentFlags.SEQUENTIAL_DOWNLOAD)
+            }
+        } catch (e: Exception) {
+            DebugLogger.w(TAG, "시퀀셜 핸들 설정 실패: ${e.message}")
+        }
+    }
+
     /** 전체 설정 동적 적용 (재시작 불필요) */
     fun applySettings(s: AppSettings) {
         val session = session ?: return
@@ -401,8 +430,10 @@ class TorrentEngine(
                     TorrentRepository.update(id) {
                         it.copy(infoHash = hash)
                     }
+                    // 시퀀셜 다운로드 적용
+                    applySequentialToHandle(th, latestSequentialDownload)
                     persistNow()
-                    DebugLogger.d(TAG, "ADD_TORRENT 매핑 id=$id hash=$hash")
+                    DebugLogger.d(TAG, "ADD_TORRENT 매핑 id=$id hash=$hash 시퀀셜=$latestSequentialDownload")
                 }
             }
             AlertType.TORRENT_FINISHED -> {
@@ -644,8 +675,9 @@ class TorrentEngine(
                 if (hasMagnet) {
                     scope.launch {
                         try {
-                            session?.download(job.magnet, saveDir, torrent_flags_t())
-                            DebugLogger.d(TAG, "magnet 복원 id=${job.id}")
+                            val flags = if (latestSequentialDownload) TorrentFlags.SEQUENTIAL_DOWNLOAD else torrent_flags_t()
+                            session?.download(job.magnet, saveDir, flags)
+                            DebugLogger.d(TAG, "magnet 복원 id=${job.id} 시퀀셜=$latestSequentialDownload")
                         } catch (e: Exception) {
                             DebugLogger.e(TAG, "magnet 복원 실패 id=${job.id}", e)
                             TorrentRepository.update(job.id) {
@@ -661,7 +693,8 @@ class TorrentEngine(
                             try {
                                 val ti = TorrentInfo(torrentFile)
                                 val expectedHash = ti.infoHash().toString()
-                                session?.download(ti, saveDir)
+                                val flags = if (latestSequentialDownload) TorrentFlags.SEQUENTIAL_DOWNLOAD else torrent_flags_t()
+                                session?.download(ti, saveDir, null, null, null, flags)
                                 DebugLogger.d(TAG, "torrent 파일 복원 id=${job.id} hash=$expectedHash")
 
                                 delay(500)
