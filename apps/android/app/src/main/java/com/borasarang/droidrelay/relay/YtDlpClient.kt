@@ -5,6 +5,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
+import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
 
 /** yt-dlp 서버 클라이언트 — 서버에서 YouTube URL 분석/다운로드 URL 획득 */
@@ -58,5 +59,16 @@ object YtDlpClient {
         val urlsArray = json.optJSONArray("urls")
         if (urlsArray == null) throw RuntimeException("응답에 urls 필드 없음: $body")
         return (0 until urlsArray.length()).map { urlsArray.getString(it) }
+    }
+
+    /** 직링크 → 서버 /proxy 스트리밍 URL로 치환 (폰에서 403 없이 다운로드) */
+    fun proxyUrl(serverUrl: String, apiKey: String?, link: String): String {
+        val base = serverUrl.removeSuffix("/")
+        val sb = StringBuilder()
+            .append(base).append("/proxy?url=").append(URLEncoder.encode(link, "UTF-8"))
+        if (apiKey != null && apiKey.isNotBlank()) {
+            sb.append("&key=").append(URLEncoder.encode(apiKey, "UTF-8"))
+        }
+        return sb.toString()
     }
 }

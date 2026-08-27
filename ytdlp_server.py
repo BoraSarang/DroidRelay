@@ -14,21 +14,29 @@ API Endpoints:
     Response: {"title": "...", "formats": [...], "url": "..."}
   POST /download                  - Get direct download URL for a format
     Body: {"url": "https://youtube.com/watch?v=...", "format": "bestvideo+bestaudio/best"}
-    Response: {"url": "https://..."}
+    Response: {"urls": [...]}
+  GET  /proxy?url=<encoded>       - Stream proxy (server-side download relay).
+    Clients behind carrier NAT get 403 from googlevideo.com; proxy lets the
+    server download the media and relay it, so downloads work over the phone.
+    Auth: ?key=... or X-API-Key header. Incoming Range headers are forwarded.
 """
 
 import os
 import json
 import subprocess
-import asyncio
+import urllib.parse
+import urllib.request
+import ipaddress
 from typing import Optional
 from fastapi import FastAPI, HTTPException, Header, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, HttpUrl
 import uvicorn
 
 app = FastAPI(title="yt-dlp API Server")
 
-API_KEY = os.environ.get("YTDLP_API_KEY", "")
+def current_api_key() -> str:
+    return os.environ.get("YTDLP_API_KEY", "")
 
 class AnalyzeRequest(BaseModel):
     url: HttpUrl
@@ -38,7 +46,8 @@ class DownloadRequest(BaseModel):
     format: str = "bestvideo+bestaudio/best"
 
 def verify_api_key(x_api_key: Optional[str] = Header(None)):
-    if API_KEY and x_api_key != API_KEY:
+    key = current_api_key()
+    if key and x_api_key != key:
         raise HTTPException(status_code=401, detail="Invalid API key")
 
 @app.get("/health")
@@ -118,6 +127,76 @@ async def download(request: DownloadRequest, x_api_key: Optional[str] = Header(N
         return {"urls": urls, "format": request.format}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+PROXY_UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+PROXY_CHUNK = 64 * 1024
+
+
+def _check_proxy_auth(request: Request, key: Optional[str]):
+    api_key = current_api_key()
+    if not api_key:
+        return
+    ok = (key and key == api_key) or (request.headers.get("X-API-Key") == api_key)
+    if not ok:
+        raise HTTPException(status_code=401, detail="Invalid API key")
+
+
+def _is_private_target(host: str) -> bool:
+    """SSRF 방어: 내부/링크로컬 주소는 프록시 거부 (googlevideo 같은 외부 CDN만 허용)."""
+    try:
+        addr = ipaddress.ip_address(host)
+        return addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_multicast or addr.is_reserved
+    except ValueError:
+        pass
+    if host == "localhost":
+        return True
+    host = host.rstrip(".")
+    suffix = host.endswith(".local")
+    if suffix:
+        return True
+    try:
+        for info in __import__("socket").getaddrinfo(host, None):
+            ip = ipaddress.ip_address(info[4][0])
+            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
+                return True
+        return False
+    except Exception:
+        return False
+
+
+@app.get("/proxy")
+async def proxy(url: str, request: Request, key: Optional[str] = None):
+    _check_proxy_auth(request, key)
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        raise HTTPException(status_code=400, detail="Invalid URL")
+    if _is_private_target(parsed.hostname or ""):
+        raise HTTPException(status_code=403, detail="Private address not allowed")
+    headers = {"User-Agent": PROXY_UA, "Accept-Encoding": "identity"}
+    if request.headers.get("Range"):
+        headers["Range"] = request.headers["Range"]
+    try:
+        upstream = urllib.request.Request(parsed.geturl(), headers=headers)
+        resp = urllib.request.urlopen(upstream, timeout=30)
+    except urllib.error.HTTPError as e:
+        raise HTTPException(status_code=502, detail=f"upstream {e.code}")
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+    def gen():
+        try:
+            chunk = resp.read(PROXY_CHUNK)
+            while chunk:
+                yield chunk
+                chunk = resp.read(PROXY_CHUNK)
+        finally:
+            resp.close()
+
+    upstream_headers = {k: v for k, v in resp.headers.items()
+                        if k.lower() in ("content-type", "content-length", "content-range", "accept-ranges", "etag")}
+    return StreamingResponse(gen(), status_code=resp.getcode(), headers=upstream_headers)
+
 
 if __name__ == "__main__":
     import argparse

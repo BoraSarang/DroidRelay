@@ -1132,6 +1132,7 @@ private fun Application.relayRoutes(context: Context, serverRef: RelayServer) {
                     }
                     val formatId = json?.optString("format", "") ?: "bestvideo+bestaudio/best"
                     val downloadUrls = YtDlpClient.getDownloadUrls(settings.ytdlpServerUrl, settings.ytdlpApiKey, url, formatId)
+                    .map { YtDlpClient.proxyUrl(settings.ytdlpServerUrl, settings.ytdlpApiKey, it) }
                     val outName = VideoDownloadManager.safeFilename(wantName.ifBlank { "youtube_${System.currentTimeMillis()}" }, "mp4")
                     val argv = buildList {
                         add("-y"); add("-nostdin"); add("-hide_banner")
