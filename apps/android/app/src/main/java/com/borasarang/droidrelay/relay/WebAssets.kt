@@ -244,6 +244,7 @@ object WebAssets {
         <div class="settings-nav-item" onclick="switchSettingsSection('guard')">🛡 가드</div>
         <div class="settings-nav-item" onclick="switchSettingsSection('mcp')">🤖 MCP</div>
         <div class="settings-nav-item" onclick="switchSettingsSection('schedule')">⏰ 스케줄</div>
+        <div class="settings-nav-item" onclick="switchSettingsSection('ytdlp')">🎬 yt-dlp 서버</div>
         <div class="settings-nav-item" onclick="switchSettingsSection('storage')">💾 스토리지</div>
         <div class="settings-nav-item" onclick="switchSettingsSection('debug')">🐛 디버그</div>
         <div class="settings-nav-item" onclick="switchSettingsSection('reset')">↩ 기본값</div>
@@ -544,6 +545,32 @@ object WebAssets {
             <button class="ghost sm" onclick="saveScheduleSettings()">저장</button>
           </div>
           <div id="scheduleStatus" class="sb" style="margin-top:8px"></div>
+        </div>
+      </div>
+
+      <div class="settings-content" id="settings-ytdlp">
+        <div class="sg">
+          <div class="sh">🎬 yt-dlp 서버 (YouTube 다운로드용)</div>
+          <div class="sb">로컬 IP 차단으로 YouTube 추출이 안 될 때, yt-dlp가 설치된 서버를 지정하면 서버에서 추출 후 직링크를 받아옵니다.</div>
+          <div class="sr">
+            <div class="si">
+              <div class="sl">서버 사용</div>
+              <div class="sv"><input type="checkbox" id="ytdlpEnabled"></div>
+            </div>
+            <div class="si">
+              <div class="sl">서버 URL</div>
+              <div class="sv"><input type="url" id="ytdlpServerUrl" placeholder="http://your-server:8080" style="flex:1"></div>
+            </div>
+            <div class="si">
+              <div class="sl">API 키 (선택)</div>
+              <div class="sv"><input type="text" id="ytdlpApiKey" placeholder="서버 인증용 API 키" style="flex:1"></div>
+            </div>
+          </div>
+          <div class="rb" style="margin-top:12px">
+            <button class="ghost sm" onclick="saveYtdlpSettings()">저장</button>
+            <button class="ghost sm" onclick="testYtdlpServer()">🔗 연결 테스트</button>
+          </div>
+          <div id="ytdlpStatus" class="sb" style="margin-top:8px"></div>
         </div>
       </div>
 
@@ -1344,9 +1371,10 @@ function loadSettings(){
     fetch('/api/settings/tunnel').then(function(r){return r.json();}),
     fetch('/api/settings/guard').then(function(r){return r.json();}),
     fetch('/api/settings/mcp').then(function(r){return r.json();}),
-    fetch('/api/settings/schedule').then(function(r){return r.json();})
+    fetch('/api/settings/schedule').then(function(r){return r.json();}),
+    fetch('/api/settings/ytdlp').then(function(r){return r.json();})
   ]).then(function(res){
-    var sl=res[0], dl=res[1], tr=res[2], db=res[3], tn=res[4], gd=res[5], mc=res[6], sch=res[7];
+    var sl=res[0], dl=res[1], tr=res[2], db=res[3], tn=res[4], gd=res[5], mc=res[6], sch=res[7], yt=res[8];
     // 전역 속도 제한
     document.getElementById('dlSpeedEnabled').checked=sl.maxDownloadBps>0;
     document.getElementById('maxDownloadMbps').disabled=sl.maxDownloadBps<=0;
@@ -1412,6 +1440,10 @@ function loadSettings(){
       el.textContent='크론: "'+sch.scheduleCron+'"'+(sch.cronValid?' ✓':' ✗');
       el.style.color=sch.cronValid?'#69E29B':'#FF8A93';
     }
+    // yt-dlp 서버 설정
+    document.getElementById('ytdlpEnabled').checked=yt.ytdlpEnabled===true;
+    document.getElementById('ytdlpServerUrl').value=yt.ytdlpServerUrl||'';
+    document.getElementById('ytdlpApiKey').value=yt.ytdlpApiKey||'';
     loadRssFeeds();
     // 디버그 상태
     fetch('/api/debug/status').then(function(r){return r.json();}).then(function(d){
@@ -1812,7 +1844,49 @@ function saveScheduleSettings(){
     .catch(function(e){toast('저장 실패: '+e.message);});
 }
 
-function detectStorage(){
+function saveYtdlpSettings(){
+  var body={
+    ytdlpEnabled:document.getElementById('ytdlpEnabled').checked,
+    ytdlpServerUrl:document.getElementById('ytdlpServerUrl').value.trim(),
+    ytdlpApiKey:document.getElementById('ytdlpApiKey').value.trim()
+  };
+  fetch('/api/settings/ytdlp',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
+    .then(function(r){return r.json();})
+    .then(function(d){
+      if(d.ok){
+        toast('yt-dlp 서버 설정 저장 완료');
+        var el=document.getElementById('ytdlpStatus');
+        el.textContent=body.ytdlpEnabled?'서버: '+body.ytdlpServerUrl:'서버 비활성화';
+        el.style.color=body.ytdlpEnabled?'#69E29B':'#8FA3BF';
+      }else{
+        toast('저장 실패: '+(d.error||'알 수 없음'));
+      }
+    })
+    .catch(function(e){toast('저장 실패: '+e.message);});
+}
+
+function testYtdlpServer(){
+  var url=document.getElementById('ytdlpServerUrl').value.trim();
+  var key=document.getElementById('ytdlpApiKey').value.trim();
+  if(!url){toast('서버 URL을 입력해 주세요');return;}
+  var el=document.getElementById('ytdlpStatus');
+  el.textContent='연결 테스트 중...';el.style.color='#8FD8FF';
+  var headers={'Content-Type':'application/json'};
+  if(key)headers['X-API-Key']=key;
+  fetch(url.replace(/\/$/,'')+'/health',{method:'GET',headers:headers})
+    .then(function(r){
+      if(r.ok)return r.json();
+      throw new Error('HTTP '+r.status);
+    })
+    .then(function(d){
+      el.textContent='✓ 연결 성공: '+JSON.stringify(d).slice(0,80);
+      el.style.color='#69E29B';
+    })
+    .catch(function(e){
+      el.textContent='✗ 연결 실패: '+e.message;
+      el.style.color='#FF8A93';
+    });
+}
   var el=document.getElementById('storageList');
   el.textContent='감지 중...';el.style.color='#8FD8FF';
   fetch('/api/storage/external')

@@ -108,7 +108,8 @@ class RelayService : Service() {
                         val url = lanAddress()?.let { "http://$it:${s.port}" }
                         settingsRepo.updateServerState(ServerState(running = true, port = s.port, url = url))
                     } catch (e: Exception) {
-                        settingsRepo.updateServerState(ServerState(running = false, port = s.port, error = "포트 ${s.port}이(가) 이미 사용 중입니다"))
+                        DebugLogger.e(TAG, "서버 기동 실패: ${e.message}", e)
+                        settingsRepo.updateServerState(ServerState(running = false, port = s.port, error = "서버 기동 실패: ${e.message}"))
                     }
                     lastPort = s.port
                 } else {
@@ -121,7 +122,8 @@ class RelayService : Service() {
                             val url = lanAddress()?.let { "http://$it:${s.port}" }
                             settingsRepo.updateServerState(ServerState(running = true, port = s.port, url = url))
                         } catch (e: Exception) {
-                            settingsRepo.updateServerState(ServerState(running = false, port = s.port, error = "포트 ${s.port}이(가) 이미 사용 중입니다"))
+                            DebugLogger.e(TAG, "서버 재시작 실패: ${e.message}", e)
+                            settingsRepo.updateServerState(ServerState(running = false, port = s.port, error = "서버 재시작 실패: ${e.message}"))
                         }
                         lastPort = s.port
                         updateRunningNotification(s.port)

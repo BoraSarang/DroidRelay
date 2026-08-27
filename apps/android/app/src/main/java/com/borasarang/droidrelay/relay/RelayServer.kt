@@ -905,6 +905,30 @@ private fun Application.relayRoutes(context: Context, serverRef: RelayServer) {
             call.respondText("""{"ok":true}""", ContentType.Application.Json)
         }
 
+        // ── yt-dlp 서버 설정 ──
+        get("/api/settings/ytdlp") {
+            val s = serverRef.settings
+            call.respondText(
+                JSONObject().apply {
+                    put("ytdlpEnabled", s.ytdlpEnabled)
+                    put("ytdlpServerUrl", s.ytdlpServerUrl)
+                    put("ytdlpApiKey", s.ytdlpApiKey)
+                }.toString(),
+                ContentType.Application.Json
+            )
+        }
+
+        post("/api/settings/ytdlp") {
+            val body = call.receiveText()
+            val json = try { JSONObject(body) } catch (_: Exception) { null }
+            val repo = SettingsRepository.get(context)
+            if (json?.has("ytdlpEnabled") == true) json?.optBoolean("ytdlpEnabled")?.let { repo.setYtdlpEnabled(it) }
+            if (json?.has("ytdlpServerUrl") == true) json?.optString("ytdlpServerUrl")?.let { repo.setYtdlpServerUrl(it) }
+            if (json?.has("ytdlpApiKey") == true) json?.optString("ytdlpApiKey")?.let { repo.setYtdlpApiKey(it) }
+            serverRef.settings = repo.firstBlocking()
+            call.respondText("""{"ok":true}""", ContentType.Application.Json)
+        }
+
         // ── 외장 스토리지 감지 (Phase 3 확장) ──
         get("/api/storage/external") {
             val storages = StorageDetector.detectExternal(context)
@@ -1054,8 +1078,7 @@ private fun Application.relayRoutes(context: Context, serverRef: RelayServer) {
         // ── 비디오 API (범용 스트림) ──
 
         /**
-         * POST /api/video/analyze — URL 분석 (유튜브 제외 · 범용 스트림만)
-         * 스트림: 직접 m3u8/mpd 또는 페이지 스니핑 결과 URL 반환
+         * POST /api/video/analyze — URL 분석 (유튜브: yt-dlp 서버 사용 / 스트림: StreamDetector)
          */
         post("/api/video/analyze") {
             val body = call.receiveText()
@@ -1065,38 +1088,75 @@ private fun Application.relayRoutes(context: Context, serverRef: RelayServer) {
                 call.respondText("E-AND-VID-0101: 유효한 http(s) URL이 아닙니다", ContentType.Text.Plain, HttpStatusCode.UnprocessableEntity)
                 return@post
             }
-            withContext(Dispatchers.IO) {
-                val d = StreamDetector.analyze(url)
-                call.respondText(
-                    JSONObject().apply {
-                        put("kind", "stream"); put("title", d.title)
-                        put("streamUrl", d.url); put("direct", d.isDirect)
-                    }.toString(),
-                    ContentType.Application.Json,
-                )
+            val settings = serverRef.settings
+            val isYouTube = url.contains("youtube.com") || url.contains("youtu.be")
+            if (isYouTube) {
+                if (!settings.ytdlpEnabled || settings.ytdlpServerUrl.isBlank()) {
+                    call.respondText("E-AND-VID-0101: YouTube는 yt-dlp 서버가 필요합니다. 설정에서 서버를 구성해 주세요.", ContentType.Text.Plain, HttpStatusCode.UnprocessableEntity)
+                    return@post
+                }
+                withContext(Dispatchers.IO) {
+                    try {
+                        val result = YtDlpClient.analyze(settings.ytdlpServerUrl, settings.ytdlpApiKey, url)
+                        call.respondText(result.toString(), ContentType.Application.Json)
+                    } catch (e: Exception) {
+                        DebugLogger.e("YtDlp", "분석 실패: ${e.message}")
+                        call.respondText("E-AND-VID-0102: YouTube 분석 실패: ${e.message}", ContentType.Text.Plain, HttpStatusCode.InternalServerError)
+                    }
+                }
+            } else {
+                withContext(Dispatchers.IO) {
+                    val d = StreamDetector.analyze(url)
+                    call.respondText(
+                        JSONObject().apply {
+                            put("kind", "stream"); put("title", d.title)
+                            put("streamUrl", d.url); put("direct", d.isDirect)
+                        }.toString(),
+                        ContentType.Application.Json,
+                    )
+                }
             }
         }
 
         /**
          * POST /api/video/create — 비디오 잡 생성 + FFmpeg 시작
-         * {url, streamUrl(선택), filename(선택)} — 원본 copy
+         * 유튜브: {url, format, filename} — yt-dlp 서버에서 포맷 선택 후 다운로드
+         * 스트림: {url, streamUrl(선택), filename(선택)} — 원본 copy
          */
         post("/api/video/create") {
             val body = call.receiveText()
             val json = try { JSONObject(body) } catch (_: Exception) { null }
             val url = json?.optString("url", "")?.trim().orEmpty()
             val wantName = json?.optString("filename", "")?.trim().orEmpty()
+            val settings = serverRef.settings
+            val isYouTube = url.contains("youtube.com") || url.contains("youtu.be")
             val job = withContext(Dispatchers.IO) {
                 val videoManager = RelayApp.getVideo(context)
-                val streamUrl = json?.optString("streamUrl", "")?.trim().orEmpty()
-                    .ifEmpty { StreamDetector.analyze(url).url }
-                val outName = VideoDownloadManager.safeFilename(
-                    wantName.ifBlank { StreamDetector.analyze(url).title }, "mp4")
-                val argv = listOf(
-                    "-i", streamUrl, "-c", "copy", "-movflags", "+faststart",
-                    File(videoManager.workDir, outName).absolutePath,
-                )
-                videoManager.createAndStart(url, outName, argv)
+                if (isYouTube) {
+                    if (!settings.ytdlpEnabled || settings.ytdlpServerUrl.isBlank()) {
+                        throw VideoException("E-AND-VID-0101", "YouTube는 yt-dlp 서버가 필요합니다. 설정에서 서버를 구성해 주세요.")
+                    }
+                    val formatId = json?.optString("format", "") ?: "bestvideo+bestaudio/best"
+                    val downloadUrls = YtDlpClient.getDownloadUrls(settings.ytdlpServerUrl, settings.ytdlpApiKey, url, formatId)
+                    val outName = VideoDownloadManager.safeFilename(wantName.ifBlank { "youtube_${System.currentTimeMillis()}" }, "mp4")
+                    val argv = buildList {
+                        add("-y"); add("-nostdin"); add("-hide_banner")
+                        downloadUrls.forEach { add("-i"); add(it) }
+                        add("-c"); add("copy"); add("-movflags"); add("+faststart")
+                        add(File(videoManager.workDir, outName).absolutePath)
+                    }
+                    videoManager.createAndStart(url, outName, argv)
+                } else {
+                    val streamUrl = json?.optString("streamUrl", "")?.trim().orEmpty()
+                        .ifEmpty { StreamDetector.analyze(url).url }
+                    val outName = VideoDownloadManager.safeFilename(
+                        wantName.ifBlank { StreamDetector.analyze(url).title }, "mp4")
+                    val argv = listOf(
+                        "-i", streamUrl, "-c", "copy", "-movflags", "+faststart",
+                        File(videoManager.workDir, outName).absolutePath,
+                    )
+                    videoManager.createAndStart(url, outName, argv)
+                }
             }
             call.respondText(
                 JSONObject().put("id", job.id).toString(),
