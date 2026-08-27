@@ -76,23 +76,32 @@ class TorrentEngine(
     /** 완료된 토렌트 파일을 보관함으로 이동 */
     private fun moveToStorage(id: String, torrentName: String) {
         val src = File(saveDir, torrentName)
-        if (!src.exists() || !src.isDirectory) {
+        if (!src.exists()) {
             DebugLogger.w(TAG, "보관함 이동 스킵(소스 없음) id=$id name=$torrentName")
             return
         }
         val dst = File(storageDir, torrentName)
         try {
             if (dst.exists()) dst.deleteRecursively()
-            src.renameTo(dst).also { ok ->
-                if (ok) {
-                    DebugLogger.i(TAG, "보관함 이동 완료 id=$id → ${dst.absolutePath}")
-                } else {
-                    DebugLogger.w(TAG, "보관함 이동 실패(rename) id=$id → 복사 시도")
-                    src.copyRecursively(dst, overwrite = true)
-                    src.deleteRecursively()
-                    DebugLogger.i(TAG, "보관함 복사 완료 id=$id → ${dst.absolutePath}")
+            if (src.isDirectory) {
+                src.renameTo(dst).also { ok ->
+                    if (!ok) {
+                        DebugLogger.w(TAG, "보관함 이동 실패(rename) id=$id → 복사 시도")
+                        src.copyRecursively(dst, overwrite = true)
+                        src.deleteRecursively()
+                    }
+                }
+            } else {
+                // 단일 파일 토렌트
+                src.renameTo(dst).also { ok ->
+                    if (!ok) {
+                        DebugLogger.w(TAG, "보관함 이동 실패(rename) id=$id → 복사 시도")
+                        src.copyTo(dst, overwrite = true)
+                        src.delete()
+                    }
                 }
             }
+            DebugLogger.i(TAG, "보관함 이동 완료 id=$id → ${dst.absolutePath}")
         } catch (e: Exception) {
             DebugLogger.e(TAG, "보관함 이동 실패 id=$id", e)
         }
