@@ -8,6 +8,12 @@
 - **`/proxy` 스트리밍 프록시**: 직링크(googlevideo)를 서버가 받아 폰에 중계 — 폰 NAT IP로 인한 **403 회피 목적**. Range 헤더 전달 + Content-Length/Range 유지(이어받기·진행률 대응), `?key=`/`X-API-Key` 인증, SSRF 방어(private/link-local/멀티캐스트 거부). create 시 직링크를 `/proxy?url=<enc>&key=`로 치환
 - **에러코드**: `E-AND-VID-0101`(yt-dlp 서버 필요)·`0102`(분석 실패)·`0203`(yt-dlp 서버 IP가 YouTube에 차단) 갱신 — 502 프록시 실패 감지 시 친절 안내 표시
 
+### Added [android] — 앱 Compose 비디오 UI (T-863)
+- **DownloadsScreen '🎬 비디오' 섹션**: URL 입력 → 분석(스트림/YouTube) → 제목 확인 → **유튜브는 포맷 바텀시트**(자동 병합/해상도·확장자·대략 크기 표시) 선택, 스트림은 원본 copy 즉시 다운로드. JobCard에 `🎬` 배지
+- **SettingsScreen '비디오 (YouTube)' 설정**: yt-dlp 서버 사용 토글 + 서버 URL/API 키 저장
+- **공용 `VideoApi` 오케스트레이션**: RelayServer의 /api/video/analyze·create 인라인 로직을 별도 모듈로 추출 — 웹·앱이 동일 경로(에러코드 일치) 사용, 실패 응답 `{code}: {msg}`(422)로 통일
+- **VideoDownloadManager 진행 폴링 전환(버그 수정)**: `StatisticsCallback`은 `-c copy` 리먹스에서 이벤트를 내지 않아 진행률이 0에 머물던 문제 — 출력 파일 크기 **1초 폴링**(`SessionState` 종료 감지)으로 교체. 50MB급 스트림에서 0→206MB 진행·254KB/s 실측 갱신
+
 ### Changed [android+web]
 - **SHA-256 검증 기능 제거**(사용자 요청): `Job.expectedSha256/verified` 필드, `JobsPersistence` 저장/복원, `DownloadEngine` 스트리밍 체크섬 검증·`sha256()` 함수, `/api/jobs`의 `sha256` 입력·`hasChecksum/verified` 응답, 웹 UI 입력·`✓ 검증됨` 배지 전부 제거 (웹훅 `X-DroidRelay-Signature` 서명 유지)
 - **토렌트 단일 파일 보관함 이동 수정**: `moveToStorage`가 `isDirectory` 가드로 단일 파일 토렌트를 스킵하던 버그 — 파일은 `copyTo+delete`, 디렉토리는 기존 복사 분기 처리

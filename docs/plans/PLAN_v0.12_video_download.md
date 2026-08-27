@@ -65,7 +65,7 @@
 | T-860 | VideoDownloadManager: FFmpeg 실행·진행률·취소·MediaStore 게시 + Job(type) 통합 | ✅ |
 | T-861 | StreamDetector: 웹페이지 스니핑 + 직접 .m3u8/.mpd 입력 허용 | ✅ |
 | T-862 | API 2종 + 웹 UI(분석→다운로드) | ✅ |
-| T-863 | 앱 Compose UI | ⏸ 후속으로 연기 |
+| T-863 | 앱 Compose UI | ✅ v0.12.1에서 구현 (T-875~877) — '🎬 비디오' 섹션+포맷 시트+yt-dlp 설정 |
 | T-864 | 실기기 E2E(m3u8 원본 copy) · CHANGELOG · error_message_ko.json · AI_MODELS · 세션 로그 · 커밋 | 🔄 진행 중 |
 
 ## 위험/제한 (명시)

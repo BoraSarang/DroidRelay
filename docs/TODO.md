@@ -192,7 +192,7 @@ T-001~T-008 전부 완료 (커밋 7574486).
 | T-860 | VideoDownloadManager — FFmpeg 실행·진행률·취소·MediaStore 게시 + Job(type) 통합 | ✅ |
 | T-861 | StreamDetector — 웹페이지 m3u8/mpd 스니핑 + 직접 입력 병행 | ✅ |
 | T-862 | API 2종(POST /api/video/analyze, /create) + 웹 UI(분석→다운로드) | ✅ |
-| T-863 | 앱 Compose UI (후속 v0.12.1 후보) | ⏸ |
+| T-863 | 앱 Compose UI (v0.12.1 T-875~877로 구현 완료) | ✅ |
 | T-864 | 실기기 E2E(m3u8 원본 copy) — Mux HLS 162MB DONE+ffprobe 무결성, 제거 후 회귀 스모크(분석→생성→진행→취소)·error_message_ko.json·세션 로그 | ✅ |
 | T-865 | 유튜브 코드 제거 — TubeEngine.kt 삭제, RelayServer analyze/create 유튜브 분기 제거, newpipe/JitPack 의존성 제거, WebAssets placeholder·에러코드 정리, PLAN/TODO/CHANGELOG 갱신 | ✅ |
 | T-866 | 307 리다이렉트 커밋 분리 완료 (`af29009`) | ✅ |
@@ -208,3 +208,7 @@ T-001~T-008 전부 완료 (커밋 7574486).
 | T-872 | 비디오 진행률 실시간화(TICK_MS 2000→1000 + StatisticsCallback) + 웹 정보바에 토렌트 활동 반영(대기중 허위 표시 해소, FETCHING_METADATA 속도 표시) | ✅ |
 | T-873 | RelayService 기동 실패 실제 예외 표시("포트 이미 사용 중" 하드코딩 제거) — adb reverse로 8080 점유했던 원인 규명 문서화 | ✅ |
 | T-874 | 문서 갱신 — CHANGELOG v0.12.1, TODO, PLAN_v0.12, error_message_ko.json(0101/0102/0203), 세션 로그 + 커밋 | ✅ |
+| T-875 | **앱 Compose 비디오 UI(T-863 승계)** — DownloadsScreen '🎬 비디오' 섹션(URL 분석→제목 확인), 유튜브 포맷 바텀시트(자동/해상도/확장자), 스트림 원본 copy 다운로드, JobCard 🎬 배지 | ✅ |
+| T-876 | SettingsScreen '비디오 (YouTube)' 설정 — yt-dlp 사용 토글 + 서버 URL/API 키 저장 | ✅ |
+| T-877 | 공용 VideoApi 추출 + RelayServer analyze/create 핸들러 리팩터(422+코드/메시지 응답 통일) + **진행 폴링 전환**(StatisticsCallback이 `-c copy`에서 무감응 → 파일 크기 1초 폴링, SessionState 종료 감지) — 실기기 스트림 0→206MB 진행·254KB/s 실측 | ✅ |
+| T-878 | 실기기 검증(스트림 분석→다운로드→진행률, 유튜브 분석 23포맷·포맷 시트 데이터) + CHANGELOG/TODO/세션 로그 + 커밋 | 🔄 |
