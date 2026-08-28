@@ -76,10 +76,6 @@ data class AppSettings(
     val scheduleWifiOnly: Boolean = true,
     val scheduleChargingOnly: Boolean = false,
     val scheduleBatteryMin: Int = 30,
-    // yt-dlp server (Phase 4)
-    val ytdlpEnabled: Boolean = false,
-    val ytdlpServerUrl: String = "",
-    val ytdlpApiKey: String = "",
 )
 
 private val Context.settingsDataStore by preferencesDataStore("droidrelay_settings")
@@ -144,10 +140,6 @@ class SettingsRepository(private val context: Context) {
         val SCHED_WIFI = booleanPreferencesKey("sched_wifi_only")
         val SCHED_CHARGING = booleanPreferencesKey("sched_charging_only")
         val SCHED_BATTERY_MIN = intPreferencesKey("sched_battery_min")
-        // yt-dlp server
-        val YTDLP_ENABLED = booleanPreferencesKey("ytdlp_enabled")
-        val YTDLP_SERVER_URL = stringPreferencesKey("ytdlp_server_url")
-        val YTDLP_API_KEY = stringPreferencesKey("ytdlp_api_key")
     }
 
     val settings: Flow<AppSettings> = context.settingsDataStore.data.map { p ->
@@ -196,9 +188,6 @@ class SettingsRepository(private val context: Context) {
             scheduleWifiOnly = p[Keys.SCHED_WIFI] ?: true,
             scheduleChargingOnly = p[Keys.SCHED_CHARGING] ?: false,
             scheduleBatteryMin = (p[Keys.SCHED_BATTERY_MIN] ?: 30).coerceIn(5, 100),
-            ytdlpEnabled = p[Keys.YTDLP_ENABLED] ?: false,
-            ytdlpServerUrl = p[Keys.YTDLP_SERVER_URL] ?: "",
-            ytdlpApiKey = p[Keys.YTDLP_API_KEY] ?: "",
         )
     }
 
@@ -340,16 +329,6 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun setScheduleBatteryMin(min: Int) =
         context.settingsDataStore.edit { it[Keys.SCHED_BATTERY_MIN] = min.coerceIn(5, 100) }
-
-    // yt-dlp server setters
-    suspend fun setYtdlpEnabled(enabled: Boolean) =
-        context.settingsDataStore.edit { it[Keys.YTDLP_ENABLED] = enabled }
-
-    suspend fun setYtdlpServerUrl(url: String) =
-        context.settingsDataStore.edit { it[Keys.YTDLP_SERVER_URL] = url }
-
-    suspend fun setYtdlpApiKey(key: String) =
-        context.settingsDataStore.edit { it[Keys.YTDLP_API_KEY] = key }
 
     companion object {
         @Volatile private var instance: SettingsRepository? = null

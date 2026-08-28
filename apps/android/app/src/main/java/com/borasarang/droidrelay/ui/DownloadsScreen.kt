@@ -70,7 +70,6 @@ import com.borasarang.droidrelay.relay.JobState
 import com.borasarang.droidrelay.relay.JobsRepository
 import com.borasarang.droidrelay.relay.RelayApp
 import com.borasarang.droidrelay.relay.RelayService
-import com.borasarang.droidrelay.relay.SettingsRepository
 import com.borasarang.droidrelay.relay.VideoApi
 import com.borasarang.droidrelay.relay.VideoException
 import com.borasarang.droidrelay.relay.currentNetworkType
@@ -79,7 +78,6 @@ import com.google.zxing.BarcodeFormat
 import com.google.zxing.EncodeHintType
 import com.google.zxing.qrcode.QRCodeWriter
 import kotlinx.coroutines.launch
-import org.json.JSONArray
 import org.json.JSONObject
 
 @OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
@@ -271,8 +269,7 @@ private fun AddRow() {
     }
 }
 
-/** 🎬 비디오 — 스트림(m3u8/mpd)/YouTube URL 분석 → 다운로드 (유튜브는 포맷 선택 시트) */
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
+/** 🎬 비디오 — 스트림(m3u8/mpd) URL 분석 → 다운로드 */
 @Composable
 private fun VideoAddRow(onDlStarted: () -> Unit) {
     val ctx = LocalContext.current
@@ -283,7 +280,6 @@ private fun VideoAddRow(onDlStarted: () -> Unit) {
     var starting by remember { mutableStateOf(false) }
     var result by remember { mutableStateOf<JSONObject?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
-    var showFormats by remember { mutableStateOf(false) }
 
     fun analyze() {
         val u = url.trim()
@@ -292,9 +288,8 @@ private fun VideoAddRow(onDlStarted: () -> Unit) {
         analyzing = true; result = null; error = null
         scope.launch {
             try {
-                val settings = SettingsRepository.get(ctx).firstBlocking()
-                result = VideoApi.analyze(settings, u)
-                DebugLogger.i("UI Video", "분석 성공 kind=${result?.optString("kind") ?: "youtube"}")
+                result = VideoApi.analyze(u)
+                DebugLogger.i("UI Video", "분석 성공 kind=${result?.optString("kind") ?: "stream"}")
             } catch (e: VideoException) {
                 error = "${e.code}: ${e.message}"
                 DebugLogger.w("UI Video", "분석 실패 ${e.code}: ${e.message}")
@@ -306,16 +301,15 @@ private fun VideoAddRow(onDlStarted: () -> Unit) {
         }
     }
 
-    fun start(formatId: String?) {
+    fun start() {
         val r = result ?: return
         val u = url.trim()
         starting = true; error = null
         scope.launch {
             try {
-                val settings = SettingsRepository.get(ctx).firstBlocking()
                 val streamUrl = r.optString("streamUrl").ifBlank { null }
-                VideoApi.create(ctx, settings, u, streamUrl, formatId, null)
-                DebugLogger.i("UI Video", "다운로드 시작 url=${u.take(90)} formatId=${formatId ?: "auto"}")
+                VideoApi.create(ctx, u, streamUrl, null)
+                DebugLogger.i("UI Video", "다운로드 시작 url=${u.take(90)}")
                 onDlStarted()
                 result = null; url = ""
             } catch (e: VideoException) {
@@ -329,18 +323,16 @@ private fun VideoAddRow(onDlStarted: () -> Unit) {
         }
     }
 
-    val isStream = result?.optString("kind") == "stream"
-
     Card(colors = CardDefaults.cardColors(containerColor = cs.surfaceContainerHigh), shape = MaterialTheme.shapes.medium) {
         Column(Modifier.fillMaxWidth().padding(14.dp)) {
-            Text("🎬 비디오 (스트림 · YouTube)", color = cs.primary, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.titleSmall)
-            Text("스트림(m3u8/mpd) 또는 YouTube 페이지. 유튜브는 yt-dlp 서버 필요 (설정 탭)", color = cs.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
+            Text("🎬 비디오 (스트림)", color = cs.primary, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.titleSmall)
+            Text("스트림 주소(m3u8/mpd) 또는 스트리밍 웹페이지", color = cs.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
             Spacer(Modifier.height(8.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 OutlinedTextField(
                     value = url,
                     onValueChange = { url = it },
-                    placeholder = { Text("스트림 또는 YouTube URL", fontSize = 13.sp, color = cs.onSurfaceVariant) },
+                    placeholder = { Text("스트림 URL", fontSize = 13.sp, color = cs.onSurfaceVariant) },
                     singleLine = true,
                     shape = MaterialTheme.shapes.small,
                     colors = OutlinedTextFieldDefaults.colors(
@@ -367,79 +359,20 @@ private fun VideoAddRow(onDlStarted: () -> Unit) {
                 Spacer(Modifier.height(10.dp))
                 Column(Modifier.fillMaxWidth().padding(start = 2.dp)) {
                     Text(r.optString("title").ifBlank { url }, color = cs.onSurface, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    if (isStream) {
-                        Text(r.optString("streamUrl"), color = cs.onSurfaceVariant, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    }
+                    Text(r.optString("streamUrl"), color = cs.onSurfaceVariant, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Spacer(Modifier.height(6.dp))
-                    val fmtCount = r.optJSONArray("formats")?.length() ?: 0
                     Button(
-                        onClick = {
-                            if (isStream) start(null) else if (fmtCount > 0) showFormats = true
-                        },
+                        onClick = { start() },
                         enabled = !starting,
                         shape = MaterialTheme.shapes.small,
                         modifier = Modifier.fillMaxWidth(),
                     ) {
-                        Text(if (starting) "시작 중..." else if (isStream) "▶ 다운로드 (원본 그대로)" else "🎬 포맷 선택 ($fmtCount)")
+                        Text(if (starting) "시작 중..." else "▶ 다운로드 (원본 그대로)")
                     }
                 }
             }
         }
     }
-
-    if (showFormats) {
-        val arr = result?.optJSONArray("formats") ?: JSONArray()
-        ModalBottomSheet(
-            onDismissRequest = { showFormats = false },
-            containerColor = cs.surfaceContainerHigh,
-        ) {
-            Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
-                Text("포맷 선택", color = cs.primary, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.titleMedium)
-                Spacer(Modifier.height(4.dp))
-                Text(result?.optString("title") ?: "", color = cs.onSurfaceVariant, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Spacer(Modifier.height(8.dp))
-                LazyColumn {
-                    item {
-                        FormatRow("🟢", "자동 (비디오+오디오 병합)", hint = "bestvideo+bestaudio/best") {
-                            showFormats = false; start("bestvideo+bestaudio/best")
-                        }
-                    }
-                    items(arr.length()) { i ->
-                        val f = arr.optJSONObject(i) ?: return@items
-                        val fmtName = buildString {
-                            append(f.optString("resolution").ifBlank { f.optString("id") })
-                            if (f.optString("ext").isNotBlank()) append(" · ${f.optString("ext")}")
-                            val fs = f.optLong("filesize").takeIf { it > 0 }
-                            if (fs != null) append(" · ${fmtBytes(fs)}")
-                        }
-                        FormatRow("🎬", fmtName, hint = f.optString("id")) {
-                            showFormats = false; start(f.optString("id"))
-                        }
-                    }
-                }
-                Spacer(Modifier.height(24.dp))
-            }
-        }
-    }
-}
-
-@Composable
-private fun FormatRow(icon: String, label: String, hint: String, onClick: () -> Unit) {
-    val cs = MaterialTheme.colorScheme
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .combinedClickable(onClick = onClick),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(icon, color = cs.primary)
-        Spacer(Modifier.width(8.dp))
-        Column(Modifier.weight(1f)) {
-            Text(label, color = cs.onSurface, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(hint, color = cs.onSurfaceVariant, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        }
-    }
-    Spacer(Modifier.height(6.dp))
 }
 
 @Composable

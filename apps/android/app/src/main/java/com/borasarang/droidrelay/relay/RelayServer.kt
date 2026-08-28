@@ -905,30 +905,6 @@ private fun Application.relayRoutes(context: Context, serverRef: RelayServer) {
             call.respondText("""{"ok":true}""", ContentType.Application.Json)
         }
 
-        // ── yt-dlp 서버 설정 ──
-        get("/api/settings/ytdlp") {
-            val s = serverRef.settings
-            call.respondText(
-                JSONObject().apply {
-                    put("ytdlpEnabled", s.ytdlpEnabled)
-                    put("ytdlpServerUrl", s.ytdlpServerUrl)
-                    put("ytdlpApiKey", s.ytdlpApiKey)
-                }.toString(),
-                ContentType.Application.Json
-            )
-        }
-
-        post("/api/settings/ytdlp") {
-            val body = call.receiveText()
-            val json = try { JSONObject(body) } catch (_: Exception) { null }
-            val repo = SettingsRepository.get(context)
-            if (json?.has("ytdlpEnabled") == true) json?.optBoolean("ytdlpEnabled")?.let { repo.setYtdlpEnabled(it) }
-            if (json?.has("ytdlpServerUrl") == true) json?.optString("ytdlpServerUrl")?.let { repo.setYtdlpServerUrl(it) }
-            if (json?.has("ytdlpApiKey") == true) json?.optString("ytdlpApiKey")?.let { repo.setYtdlpApiKey(it) }
-            serverRef.settings = repo.firstBlocking()
-            call.respondText("""{"ok":true}""", ContentType.Application.Json)
-        }
-
         // ── 외장 스토리지 감지 (Phase 3 확장) ──
         get("/api/storage/external") {
             val storages = StorageDetector.detectExternal(context)
@@ -1072,19 +1048,18 @@ private fun Application.relayRoutes(context: Context, serverRef: RelayServer) {
         // ── 비디오 API (범용 스트림) ──
 
         /**
-         * POST /api/video/analyze — URL 분석 (유튜브: yt-dlp 서버 사용 / 스트림: StreamDetector)
+         * POST /api/video/analyze — URL 분석 (StreamDetector)
          */
         post("/api/video/analyze") {
             val body = call.receiveText()
             val json = try { JSONObject(body) } catch (_: Exception) { null }
             val url = json?.optString("url", "")?.trim().orEmpty()
             if (!url.startsWith("http://") && !url.startsWith("https://")) {
-                call.respondText("E-AND-VID-0101: 유효한 http(s) URL이 아닙니다", ContentType.Text.Plain, HttpStatusCode.UnprocessableEntity)
+                call.respondText("E-AND-VID-0101: 주소가 올바르지 않거나 지원하지 않는 URL입니다", ContentType.Text.Plain, HttpStatusCode.UnprocessableEntity)
                 return@post
             }
-            val settings = serverRef.settings
             try {
-                val result = VideoApi.analyze(settings, url)
+                val result = VideoApi.analyze(url)
                 call.respondText(result.toString(), ContentType.Application.Json)
             } catch (e: VideoException) {
                 DebugLogger.e("VideoApi", "분석 실패 ${e.code}: ${e.message}")
@@ -1097,7 +1072,6 @@ private fun Application.relayRoutes(context: Context, serverRef: RelayServer) {
 
         /**
          * POST /api/video/create — 비디오 잡 생성 + FFmpeg 시작
-         * 유튜브: {url, format, filename} — yt-dlp 서버에서 포맷 선택 후 다운로드
          * 스트림: {url, streamUrl(선택), filename(선택)} — 원본 copy
          */
         post("/api/video/create") {
@@ -1105,14 +1079,11 @@ private fun Application.relayRoutes(context: Context, serverRef: RelayServer) {
             val json = try { JSONObject(body) } catch (_: Exception) { null }
             val url = json?.optString("url", "")?.trim().orEmpty()
             val streamUrl = json?.optString("streamUrl", "")?.trim().orEmpty()
-            val formatId = json?.optString("format", "")?.trim().orEmpty()
             val wantName = json?.optString("filename", "")?.trim().orEmpty()
-            val settings = serverRef.settings
             val job = try {
                 VideoApi.create(
-                    context, settings, url,
+                    context, url,
                     streamUrl.ifBlank { null },
-                    formatId.ifBlank { null },
                     wantName.ifBlank { null },
                 )
             } catch (e: VideoException) {

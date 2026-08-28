@@ -4,10 +4,12 @@
 > 통신사 LTE NAT IP 평판 차단(`Sign in to confirm you're not a bot`)으로 NewPipeExtractor·ANDROID_VR 스푸핑
 > 우회를 전부 적용해도 비로그인 추출이 IP 단위로 막혀 실사용 불가 → 관련 코드·의존성 제거.
 > **범용 m3u8/mpd 스트림 다운로드만 제공**(원본 copy).
+>
+> **2026-08-28 (v0.12.2)**: v0.12.1에서 시도한 **yt-dlp 서버 방식도 유튜브 PoToken/봇가드 정책 변화로 폐기** — 유튜브 지원은 완전 종료, 스트림 다운로드로 확정.
 
 ## 개요
 웹 대시보드(웨일)에서 '안전한 다운로드' 이후 다음 단계 — **비디오 다운로드 기능** 추가.
-- ~~유튜브: URL 붙여넣기 → 해상도/음성 선택 → 다운로드~~ → **제외** (2026 유튜브 안티봇/IP 차단)
+- ~~유튜브: URL 붙여넣기 → 해상도/음성 선택 → 다운로드~~ → **제외 (2026 유튜브 안티봇/IP 차단, v0.12.2 최종 폐기)**
 - **범용 스트림**: 스트림이 담긴 웹페이지 URL 또는 직접 `.m3u8`/`.mpd` URL → 원본 copy 다운로드
 
 ## 사용자 확정 범위 (승인 완료 + 갱신)
@@ -61,18 +63,18 @@
 |----|------|------|
 | T-857 | PLAN 작성 | ✅ |
 | T-858 | 의존성: NewPipe+desugar+ffmpeg 검증 · 빌드 게이트 | ✅ (ffmpeg https로 교체 포함) |
-| T-859 | ~~유튜브 추출기~~ | ❌ **취소** — 2026 유튜브 IP/기능 차단으로 제외 → **v0.12.1 yt-dlp 서버 방식으로 재도입** (T-867~869) |
+| T-859 | ~~유튜브 추출기~~ | ❌ **취소** — 2026 유튜브 IP/기능 차단으로 제외 → ~~v0.12.1 yt-dlp 서버 방식으로 재도입~~ (v0.12.2에서 최종 폐기) |
 | T-860 | VideoDownloadManager: FFmpeg 실행·진행률·취소·MediaStore 게시 + Job(type) 통합 | ✅ |
 | T-861 | StreamDetector: 웹페이지 스니핑 + 직접 .m3u8/.mpd 입력 허용 | ✅ |
 | T-862 | API 2종 + 웹 UI(분석→다운로드) | ✅ |
-| T-863 | 앱 Compose UI | ✅ v0.12.1에서 구현 (T-875~877) — '🎬 비디오' 섹션+포맷 시트+yt-dlp 설정 |
-| T-864 | 실기기 E2E(m3u8 원본 copy) · CHANGELOG · error_message_ko.json · AI_MODELS · 세션 로그 · 커밋 | 🔄 진행 중 |
+| T-863 | 앱 Compose UI | ✅ v0.12.1에서 구현 (T-875~877) — '🎬 비디오' 섹션+포맷 시트 *(포맷 시트는 0.12.2에서 제거)* |
+| T-864 | 실기기 E2E(m3u8 원본 copy) · CHANGELOG · error_message_ko.json · AI_MODELS · 세션 로그 · 커밋 | ✅ |
 
 ## 위험/제한 (명시)
 | 항목 | 대응 |
 |------|------|
 | DRM(Widevine/FairPlay) | 실행 실패 시 `E-AND-VID-0300` 차단 안내 (재생 불가 콘텐츠는 다운로드 불가가 정상) |
-| ~~유튜브 (PoToken·IP 평판)~~ | **기능 제외** — NewPipeExtractor 0.26.5 최신으로도 2026 유튜브 PoToken + LTE NAT IP 평판 차단(visitor_id 주입, ANDROID_VR 스푸핑까지 시도)에 실패. m3u8/mpd 직접 경로 안내. **v0.12.1(y-t-dlp 서버) 시도 결과**: 분석/직링크 생성은 서버에서 성공(23 formats), 다운로드는 서버 IP가 googlevideo 403로 차단 — **yt-dlp 서버는 평판 좋은 IP(클라우드/고정 IP)에서 운영** 필요. `/proxy` 스트리밍 프록시 구현 완료 |
+| ~~유튜브 (PoToken·IP 평판)~~ | **기능 제외** — NewPipeExtractor 0.26.5 최신으로도 2026 유튜브 PoToken + LTE NAT IP 평판 차단(visitor_id 주입, ANDROID_VR 스푸핑까지 시도)에 실패. m3u8/mpd 직접 경로 안내. ~~v0.12.1 yt-dlp 서버 시도도 유튜브 PoToken/봇가드 정책 변화로 폐기(0.12.2)~~ → 유튜브 지원 종료 |
 | m3u8 토큰 만료(세션 한정) | 분석→다운로드 지연 최소화, 실패 시 재분석 유도 메시지 |
 | 스트림 페이지 Cloudflare 403 | 직접 m3u8 URL 경로로 안내 (터널 미통과는 범위外) |
 | FFmpeg 네트워크 스로틀 미적용 | 전역 속도제한은 기존 HTTP 잡에만 유효 — 비디오는 제한 없음 |
@@ -84,10 +86,10 @@
 - FFmpeg 스모크(`-version`) 로그 확인 ✅
 - ~~유튜브 머지 다운로드~~ → 제외
 - **m3u8 E2E ✅**: Mux HLS(`url_0/193039199_mp4_h264_aac_hd_7`) 분석(kind:stream) → 생성(잡 `mtbvvj2q622`) → RUNNING 진행·속도 리포트 162.37MB → DONE → `Download/DroidRelay/mux_hls_test.mp4` 게시 → ffprobe 무결성(mov,mp4, duration 634.6s, 170,260,672B)
-- 유튜브 제거 후 회귀 스모크 ✅: 재설치 → analyze→create(RUNNING 22MB 진행)→DELETE 취소 → REMOVED_OK
+- 유튜브 제거 후 회귀 스모크 ✅: 재설치 → analyze→create(RUNNING 22MB 진행)→DELETE 취소 → REMOVED_OK *(v0.12.2 재검증: ktlint/assembleDebug + 스트림 회귀)*
 - DRM/무효 URL 에러코드 표면 (error_message_ko.json 매핑)
 
-## 에러코드 (E-AND-VID-XXXX · 최종)
+## 에러코드 (E-AND-VID-XXXX · 최종, 0.12.2 갱신)
 | 코드 | 의미 |
 |------|------|
 | E-AND-VID-0100 | 비디오 분석 실패 (네트워크 오류) |
@@ -98,6 +100,7 @@
 | E-AND-VID-0300 | DRM 보호 콘텐츠 (다운로드 불가) |
 | E-AND-VID-0400 | 사용자 취소 |
 | E-AND-VID-0401 | 앱 재시작 후 잡 미재개 (스테일 정리) |
+> ~~0102(yt-dlp 분석 실패)·0203(YouTube 차단)~~ — v0.12.2에서 삭제
 
 ## 라이선스
 - FFmpegKit 유지 포크 `https` 변형 LGPL-3.0 — **개인·비배포** 용도로 수용. NewPipeExtractor GPL-3.0은 제거됨.

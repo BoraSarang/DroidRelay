@@ -1,24 +1,29 @@
 # Changelog
 
+## [0.12.2] - 2026-08-28
+
+### Removed [android+server] — YouTube/yt-dlp 지원 전면 제거
+- **Mac yt-dlp 서버 의존 제거**: `ytdlp_server.py`, `/proxy` 스트리밍 프록시, `YtDlpClient.kt` 삭제 — 폰은 외부 서버 없이 독립 동작. (yt-dlp 방식은 PoToken/봇가드 등 유튜브 정책 변화로 막힐 위험이 커 완전 폐기)
+- **YouTube 관련 코드 제거**: `SettingsRepository.ytdlpEnabled/ytdlpServerUrl/ytdlpApiKey` 필드·키·세터, `/api/settings/ytdlp` GET/POST, `VideoApi`의 유튜브/yt-dlp 분기와 `formatId` 파라미터 제거 → 스트림(m3u8/mpd) 단일 경로로 통합
+- **UI 제거**: 앱 `SettingsScreen` "비디오 (YouTube)" 설정, `DownloadsScreen` 유튜브 포맷 바텀시트, 웹 설정 "🎬 yt-dlp 서버" 섹션·연결 테스트, 웹 `analyzeVideo` 유튜브 포맷/해상도 선택 UI
+- **에러코드 정리**: `E-AND-VID-0102`(yt-dlp 분석 실패)·`0203`(YouTube 차단) 제거, `0101` 문구를 유튜브 무관 "지원하지 않는 URL"로 정정 — `error_message_ko.json`/코드 반영
+
+### Fixed [android] (유지)
+- **실패 알림 반복 재발송 + 무의미 재시도 루프 차단**: FAILED로 고정된 잡이 진행률성 갱신을 받을 때마다 `실패 알림`이 **2초 간격으로 무한 반복**(소리·노티 폭주)되던 문제 — 실패 알림을 **상태 전이 시에만**(이전 상태가 FAILED가 아닐 때) + **동일 원인(에러코드+메시지) 재발신 금지** 가드로 1회만 발송. `retryFailed()`는 `type=="video"` 잡 제외(FFmpeg/VideoDownloadManager 소관) → 반복 재다운로드 루프 원천 차단
+
+### Verified (E2E)
+- ktlint + assembleDebug 통과, 앱/웹에서 yt-dlp·YouTube 참조 0건, 스트림(m3u8/mpd) 분석→다운로드 회귀 확인
+
 ## [0.12.1] - 2026-08-28
 
-### Added [android+web+server] — yt-dlp 서버 연동으로 YouTube 분석/다운로드 재시도
-- **yt-dlp 서버 방식 도입**(`ytdlp_server.py`, FastAPI): 폰 대신 서버(`yt-dlp`)가 YouTube를 추출·직링크 생성 — 2026 PoToken/IP 평판 차단을 "좋은 IP" 서버로 우회하는 형태. `/health`, `/analyze`(제목·포맷 목록), `/download`(직링크 리스트) 구성, `--api-key` 인증
-- **설정 연동**: `SettingsRepository`에 `ytdlpEnabled/ytdlpServerUrl/ytdlpApiKey`, `POST/GET /api/settings/ytdlp`, 웹 설정에 "🎬 yt-dlp 서버"(활성화/서버 URL/API 키/저장/연결 테스트) 섹션
-- **`/proxy` 스트리밍 프록시**: 직링크(googlevideo)를 서버가 받아 폰에 중계 — 폰 NAT IP로 인한 **403 회피 목적**. Range 헤더 전달 + Content-Length/Range 유지(이어받기·진행률 대응), `?key=`/`X-API-Key` 인증, SSRF 방어(private/link-local/멀티캐스트 거부). create 시 직링크를 `/proxy?url=<enc>&key=`로 치환
-- **에러코드**: `E-AND-VID-0101`(yt-dlp 서버 필요)·`0102`(분석 실패)·`0203`(yt-dlp 서버 IP가 YouTube에 차단) 갱신 — 502 프록시 실패 감지 시 친절 안내 표시
-
 ### Added [android] — 앱 Compose 비디오 UI (T-863)
-- **DownloadsScreen '🎬 비디오' 섹션**: URL 입력 → 분석(스트림/YouTube) → 제목 확인 → **유튜브는 포맷 바텀시트**(자동 병합/해상도·확장자·대략 크기 표시) 선택, 스트림은 원본 copy 즉시 다운로드. JobCard에 `🎬` 배지
-- **SettingsScreen '비디오 (YouTube)' 설정**: yt-dlp 서버 사용 토글 + 서버 URL/API 키 저장
+- **DownloadsScreen '🎬 비디오' 섹션**: URL 입력 → 분석(스트림/YouTube) → 제목 확인 → **유튜브는 포맷 바텀시트**(자동 병합/해상도·확장자·대략 크기 표시) 선택, 스트림은 원본 copy 즉시 다운로드. JobCard에 `🎬` 배지 *(0.12.2에서 유튜브 포맷 시트 제거)*
+- **SettingsScreen '비디오 (YouTube)' 설정**: yt-dlp 서버 사용 토글 + 서버 URL/API 키 저장 *(0.12.2에서 제거)*
 - **공용 `VideoApi` 오케스트레이션**: RelayServer의 /api/video/analyze·create 인라인 로직을 별도 모듈로 추출 — 웹·앱이 동일 경로(에러코드 일치) 사용, 실패 응답 `{code}: {msg}`(422)로 통일
 - **VideoDownloadManager 진행 폴링 전환(버그 수정)**: `StatisticsCallback`은 `-c copy` 리먹스에서 이벤트를 내지 않아 진행률이 0에 머물던 문제 — 출력 파일 크기 **1초 폴링**(`SessionState` 종료 감지)으로 교체. 50MB급 스트림에서 0→206MB 진행·254KB/s 실측 갱신
 
-### Added [web]
-- **웹 UI 유튜브 포맷/해상도 선택**: `analyzeVideo` 결과에 `formats` 목록이 있으면 "포맷/해상도 선택"으로 렌더 — 🟢 자동(비디오+오디오 병합)·🎬 원본(best)·각 포맷(해상도 · 확장자 · 대략 크기) 행. 선택 시 `createVideo(v, format)`로 `format` 파라미터 전달(기존 "원본 그대로" 버튼은 스트림에만 유지). 앱 포맷 바텀시트와 동일 데이터
-
-### Fixed [android]
-- **실패 알림 반복 재발송 + 무의미 재시도 루프 차단**: `E-AND-VID-0203`(yt-dlp 서버 IP 차단) 등으로 FAILED로 고정된 잡이 진행률성 갱신을 받을 때마다 `실패 알림`이 **2초 간격으로 무한 반복**(소리·노티 폭주)되던 문제 — 실패 알림을 **상태 전이 시에만**(이전 상태가 FAILED가 아닐 때) + **동일 원인(에러코드+메시지) 재발신 금지** 가드로 1회만 발송. `retryFailed()`는 `type=="video"` 잡 제외(FFmpeg/VideoDownloadManager 소관) → 502/403 반복 재다운로드 루프 원천 차단. 실기기 검증: 2초 무한 반복 → 삭제 후 소멸, HTTP 404 잡 실패 시 알림 **1회만** 확인
+### Removed [android+web] — (History) 유튜브 yt-dlp 서버 연동
+- **(2026-08-28, 0.12.2에서 전체 제거됨)** ~~`ytdlp_server.py` 연동, `/proxy` 프록시, 웹 유튜브 포맷 선택~~ — 해당 기능은 v0.12.2에서 폐기
 
 ### Changed [android+web]
 - **SHA-256 검증 기능 제거**(사용자 요청): `Job.expectedSha256/verified` 필드, `JobsPersistence` 저장/복원, `DownloadEngine` 스트리밍 체크섬 검증·`sha256()` 함수, `/api/jobs`의 `sha256` 입력·`hasChecksum/verified` 응답, 웹 UI 입력·`✓ 검증됨` 배지 전부 제거 (웹훅 `X-DroidRelay-Signature` 서명 유지)
@@ -30,12 +35,9 @@
 ### Verified (E2E)
 - **HTTP 다운로드 진행률**: 50MB 파일 0→100% 1초 단위 갱신, DONE 확인, `/api/jobs`에서 `verified`/`hasChecksum` 제거 확인
 - **토렌트 실속도**: sintel(.torrent 업로드) DOWNLOADING down=104→418KB/s·up=7~18KB/s·시드/피어 실측 갱신 확인
-- **yt-dlp 서버**: `/health`(yt-dlp 2026.07.04), `/analyze` 23 formats(제목 정상), `/download` 직링크 추출, `/proxy` googlevideo **206 Partial Content(video/mp4)** — 인증 401·SSRF 403 동작 확인
-- **YouTube 다운로드**: analyze→create→RUNNING 까지는 정상 추적 but /proxy로 전달된 직링크가 **서버 IP(175.223.26.84)에 대해 googlevideo 403** 반환 지속 — 초기 2회 206 후 반복 직링크 생성으로 IP 포화차단(yt-dlp 자체 다운로드도 403). **근본 해법: yt-dlp 서버를 평판 좋은 IP(클라우드/집 고정 IP)에서 운영** → 502 감지 시 `E-AND-VID-0203` 안내 표시 확인
 
 ### Notes
-- yt-dlp 서버는 터널(Tailscale) 대신 cloud 등 공인 IP 위에 둔 뒤, 폰 설정에서 서버 URL+API 키 입력으로 사용(예: `https://ytdlp.example.com`)
-- `adb reverse tcp:8081 tcp:8080` 방식은 USB 연결 개발 중에만 사용 가능 — 폰이 LTE에 있는 동안엔 yt-dlp 서버 접속 불가
+- ~~yt-dlp 서버 운영 안내·`adb reverse`~~ *(0.12.2에서 유튜브 제거로 폐기)*
 
 ## [0.12.0] - 2026-08-27
 
@@ -55,7 +57,7 @@
 
 ### Notes
 - APK 크기 네이티브(FFmpeg) 포함 증가 — 개인 배포(GitHub) 대상이라 영향 없음
-- 유튜브 대체: m3u8/mpd 직접 주소 또는 스트리밍 페이지 경로. 델리게이트 폰/서버 기반 유튜브는 v0.13+ 후보로 문서화 (PLAN_v0.12 위험 절)
+- 유튜브 대체: m3u8/mpd 직접 주소 또는 스트리밍 페이지 경로 *(0.12.2에서 유튜브 지원 완전 폐기)*
 
 ## [0.11.1] - 2026-08-27
 

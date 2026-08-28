@@ -325,46 +325,6 @@ fun SettingsScreen(onPortChanged: (Int) -> Unit) {
 
         HorizontalDivider(color = cs.outlineVariant)
 
-        // ── 비디오 (YouTube) ──
-        SettingSection("비디오 (YouTube)") {
-            var ytEnabled by remember(s.ytdlpEnabled) { mutableStateOf(s.ytdlpEnabled) }
-            var ytUrl by remember(s.ytdlpServerUrl) { mutableStateOf(s.ytdlpServerUrl) }
-            var ytKey by remember { mutableStateOf("") }
-            SwitchRow("yt-dlp 서버 사용", ytEnabled) {
-                ytEnabled = it
-                DebugLogger.i("Settings", "yt-dlp 사용 → $it")
-                kotlinx.coroutines.MainScope().launch { repo.setYtdlpEnabled(it) }
-            }
-            Text(
-                "YouTube 추출/다운로드는 폰이 아닌 yt-dlp 서버에서 처리합니다. 서버는 유튜브가 허용하는 공인 IP(클라우드/고정 IP)에서 실행해 주세요.",
-                color = cs.onSurfaceVariant,
-                style = MaterialTheme.typography.labelSmall,
-            )
-            if (ytEnabled) {
-                Spacer(Modifier.height(8.dp))
-                OutlinedTextField(
-                    value = ytUrl, onValueChange = { ytUrl = it },
-                    label = { Text("서버 URL (예: http://1.2.3.4:8080)") },
-                    singleLine = true, shape = MaterialTheme.shapes.small, modifier = Modifier.fillMaxWidth(),
-                )
-                Spacer(Modifier.height(6.dp))
-                OutlinedTextField(
-                    value = ytKey, onValueChange = { ytKey = it },
-                    label = { Text(if (s.ytdlpApiKey.isEmpty()) "API 키" else "API 키 (변경 시 입력)") },
-                    singleLine = true, shape = MaterialTheme.shapes.small, modifier = Modifier.fillMaxWidth(),
-                )
-                Spacer(Modifier.height(6.dp))
-                Button(onClick = {
-                    DebugLogger.i("Settings", "yt-dlp 서버 저장 url=$ytUrl")
-                    val key = ytKey.trim()
-                    kotlinx.coroutines.MainScope().launch {
-                        repo.setYtdlpServerUrl(ytUrl.trim())
-                        repo.setYtdlpApiKey(key.ifEmpty { s.ytdlpApiKey })
-                    }
-                }) { Text("서버 저장") }
-            }
-        }
-
         // ── 앱 정보 ──
         val appVersion = remember {
             runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName }.getOrNull() ?: "?"

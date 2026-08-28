@@ -181,6 +181,15 @@ T-001~T-008 전부 완료 (커밋 7574486).
 | T-855 | 웨일 "안전하지 않은 다운로드" 회피 — mkcert 자체 서명 인증서 + Ktor 엔진 **CIO→Netty 전환**(CIO는 HTTPS 미지원)+ HTTPS 8443 이중 커넥터. 웹 다운로드 링크를 `https://<host>:8443` 절대 경로로 전환, `/dl-file`에 nosniff·cache-control 헤더 추가. HTTP/HTTPS 동일 바이트(MD5 일치) 검증, 맥은 최초 1회 TLS 경고 후 정상 사용(CA 등록은 선택·미사용) | ✅ |
 | T-856 | HTTP→HTTPS 리다이렉트(307) — LAN 클라이언트의 `http://…:8080` 접속을 `https://…:8443`로 이동. loopback(localhost/127.0.0.1/자기 IP)은 예외(터널 tailscaled·앱 자체 점검 보호). 맥에서 307→HTTPS follow 200 + ISO 전체 수신, 기기 loopback 200 확인 | ✅ |
 
+## v0.12.2 (2026-08-28) — YouTube/yt-dlp 지원 전면 제거
+> yt-dlp 방식은 유튜브 PoToken/봇가드 등 정책 변화로 막힐 위험이 커 **완전 폐기** — 폰은 외부 서버 없이 스트림(m3u8/mpd) 다운로드로 독립 동작.
+
+| T-번호 | 내용 | 상태 |
+|--------|------|------|
+| T-882 | 유튜브/yt-dlp 코드 제거 — YtDlpClient.kt 삭제, SettingsRepository(ytdlp 3필드), /api/settings/ytdlp GET/POST, VideoApi 유튜브 분기·formatId 제거 → 스트림 단일 경로, VideoDownloadManager 0203 분류 제거 | ✅ |
+| T-883 | 유튜브 UI 제거 — SettingsScreen '비디오 (YouTube)' 섹션, DownloadsScreen 유튜브 포맷 바텀시트, WebAssets yt-dlp 설정 섹션·연결테스트·analyzeVideo 포맷 UI, 에러코드(0102/0203 제거, 0101 문구 스트림 전용) | ✅ |
+| T-884 | ytdlp_server.py·__pycache__ 삭제 + 문서(CHANGELOG 0.12.2, TODO, PLAN_v0.12) 유튜브 잔여 정리 + ktlint/assembleDebug + 스트림 회귀 검증 | ✅ |
+
 ## v0.12 (2026-08-27) — 비디오 다운로드 (범용 스트림 · 유튜브 제외 결정)
 > 유튜브: NewPipeExtractor 최신(0.26.5)+visitor_id 주입+ANDROID_VR 스푸핑까지 시도했으나 PoToken+통신사 LTE NAT IP 평판 차단으로 실사용 불가 → **기능 제외**, m3u8/mpd 직접 경로만 제공.
 
@@ -200,17 +209,18 @@ T-001~T-008 전부 완료 (커밋 7574486).
 ### v0.12.1 (2026-08-28) — yt-dlp 서버 연동 + UX 정리
 | ID | 작업 | 상태 |
 |----|------|------|
-| T-867 | yt-dlp 서버(외부 실행) 통합 — SettingsRepository(ytdlpEnabled/ServerUrl/ApiKey), /api/settings/ytdlp GET/POST, YtDlpClient(analyze/getDownloadUrls), WebAssets 설정 UI, ytdlp_server.py(FastAPI, /health·/analyze·/download, X-API-Key) | ✅ |
-| T-868 | yt-dlp 서버 /proxy 스트리밍 프록시 — googlevideo 403(폰 NAT IP) 우회 목적. Range 전달 + Content-Length/Content-Range 전달, ?key=/X-API-Key 인증, SSRF 차단(private/link-local 거부), 생성 직링크를 /proxy URL로 치환 | ✅ |
-| T-869 | YouTube 다운로드 E2E — analyze(23 formats) 성공, /proxy googlevideo **206 Partial Content(MP4 1MB)** 확인. 다운로드 전체 흐름은 서버 IP(175.223.26.84)가 유튜브 CDN에 403 차단되어 **미완(근본 해법: 서버 IP 교체)** → 502 감지 시 E-AND-VID-0203 안내 | 🔄 |
+| T-867 | ~~yt-dlp 서버(외부 실행) 통합~~ — ❌ **0.12.2에서 전면 폐기**(유튜브 PoToken/봇가드 불안정) | ❌ |
+| T-868 | ~~yt-dlp 서버 /proxy 스트리밍 프록시~~ — ❌ **0.12.2에서 전면 폐기** | ❌ |
+| T-869 | ~~YouTube 다운로드 원인 규명~~ — ❌ **0.12.2에서 전면 폐기** | ❌ |
+| T-881 | ~~0203 차단 원인 반영 — 직링크 1회 재시도 + 클라이언트 정합~~ — ❌ **0.12.2에서 전면 폐기** | ❌ |
 | T-870 | SHA-256 검증 기능 제거(사용자 요청) — Job 필드/영속/DownloadEngine 검증·sha256()/jobs API·웹 UI 입력·배지 전부 제거. 웹훅 서명(sha256=)은 유지. HTTP 50MB 다운로드 0→100% 진행 갱신 검증 | ✅ |
 | T-871 | 토렌트 단일 파일 보관함 이동 수정 — moveToStorage isDirectory 가드로 단일 파일 스킵되던 버그, 파일/디렉토리 분기 처리 | ✅ |
 | T-872 | 비디오 진행률 실시간화(TICK_MS 2000→1000 + StatisticsCallback) + 웹 정보바에 토렌트 활동 반영(대기중 허위 표시 해소, FETCHING_METADATA 속도 표시) | ✅ |
 | T-873 | RelayService 기동 실패 실제 예외 표시("포트 이미 사용 중" 하드코딩 제거) — adb reverse로 8080 점유했던 원인 규명 문서화 | ✅ |
 | T-874 | 문서 갱신 — CHANGELOG v0.12.1, TODO, PLAN_v0.12, error_message_ko.json(0101/0102/0203), 세션 로그 + 커밋 | ✅ |
-| T-875 | **앱 Compose 비디오 UI(T-863 승계)** — DownloadsScreen '🎬 비디오' 섹션(URL 분석→제목 확인), 유튜브 포맷 바텀시트(자동/해상도/확장자), 스트림 원본 copy 다운로드, JobCard 🎬 배지 | ✅ |
-| T-876 | SettingsScreen '비디오 (YouTube)' 설정 — yt-dlp 사용 토글 + 서버 URL/API 키 저장 | ✅ |
+| T-875 | **앱 Compose 비디오 UI(T-863 승계)** — DownloadsScreen '🎬 비디오' 섹션(URL 분석→제목 확인), ~~유튜브~~·스트림 원본 copy 다운로드, JobCard 🎬 배지 *(유튜브 포맷 시트는 0.12.2 T-883에서 제거)* | ✅ |
+| T-876 | ~~SettingsScreen '비디오 (YouTube)' 설정~~ — ❌ **0.12.2 T-883에서 제거** | ❌ |
 | T-877 | 공용 VideoApi 추출 + RelayServer analyze/create 핸들러 리팩터(422+코드/메시지 응답 통일) + **진행 폴링 전환**(StatisticsCallback이 `-c copy`에서 무감응 → 파일 크기 1초 폴링, SessionState 종료 감지) — 실기기 스트림 0→206MB 진행·254KB/s 실측 | ✅ |
-| T-878 | 실기기 검증(스트림 분석→다운로드→진행률, 유튜브 분석 23포맷·포맷 시트 데이터) + CHANGELOG/TODO/세션 로그 + 커밋 | 🔄 |
+| T-878 | 실기기 검증(스트림 분석→다운로드→진행률) + CHANGELOG/TODO/세션 로그 + 커밋 — *(유튜브 검증은 0.12.2에서 폐기)* | ✅ |
 | T-879 | **실패 알림 반복+무의미 재시도 루프 차단** — RelayService 실패 알림을 상태 전이 시 1회로 + 동일 원인(에러코드+메시지) 재발신 금지, DownloadEngine.retryFailed에서 `type=="video"` 제외. 실기기 2초 무한 알림 소멸 확인 + HTTP 404 FAILED 알림 **1회만**(커밋 `df41ba6`) | ✅ |
-| T-880 | **웹 UI 유튜브 포맷/해상도 선택** — analyzeVideo formats 렌더(자동 병합/원본 best + 해상도·확장자·크기), createVideo(v, format)로 format 전달. node --check + 실기기 33 formats 렌더·"자동 병합" 클릭 → 잡 생성 → 0203 실패 알림 1회/반복 없음 검증 | ✅ |
+| T-880 | ~~**웹 UI 유튜브 포맷/해상도 선택**~~ — ❌ **0.12.2 T-883에서 제거**(포맷 선택 UI 폐기, 스트림 "원본 그대로" 단일 버튼 유지) | ❌ |

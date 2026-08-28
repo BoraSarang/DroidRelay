@@ -42,10 +42,6 @@ object WebAssets {
   .QUEUED{background:#22335A}.PAUSED{background:#3A3312;color:#FFD59E}.CANCELED{background:#333}
   .badge.video{background:#0A3A2F;color:#6FE3C4}
   .vcard{background:#101E3A;border:1px solid #22345A;border-radius:12px;padding:12px;margin-top:10px}
-  .fmthead{color:#8FD8FF;font-weight:600;font-size:12px;margin-top:12px;margin-bottom:2px}
-  .fmtrow{margin-top:6px}.fmtbtn{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;background:#0A1630;border:1px solid #22345A;color:#C7D6F2;padding:9px 12px;border-radius:10px;font-size:13px;cursor:pointer;text-align:left}
-  .fmtbtn:hover{border-color:#3A5A8C;background:#0F1F3F}
-  .fmtlabel{font-weight:600;color:#8FD8FF}.fmtsub{color:#8FA3BF;font-size:12px}.fmttag{color:#69E29B;font-size:11px;border:1px solid #2A5C4A;background:#0E2A22;border-radius:6px;padding:1px 6px;flex-shrink:0}
   .err{color:#FF8A93;font-size:12px;margin-top:4px}
   .empty{color:#55688C;text-align:center;padding:26px 0}
   .speed{color:#8FD8FF;font-weight:600}
@@ -248,7 +244,6 @@ object WebAssets {
         <div class="settings-nav-item" onclick="switchSettingsSection('guard')">🛡 가드</div>
         <div class="settings-nav-item" onclick="switchSettingsSection('mcp')">🤖 MCP</div>
         <div class="settings-nav-item" onclick="switchSettingsSection('schedule')">⏰ 스케줄</div>
-        <div class="settings-nav-item" onclick="switchSettingsSection('ytdlp')">🎬 yt-dlp 서버</div>
         <div class="settings-nav-item" onclick="switchSettingsSection('storage')">💾 스토리지</div>
         <div class="settings-nav-item" onclick="switchSettingsSection('debug')">🐛 디버그</div>
         <div class="settings-nav-item" onclick="switchSettingsSection('reset')">↩ 기본값</div>
@@ -552,32 +547,6 @@ object WebAssets {
         </div>
       </div>
 
-      <div class="settings-content" id="settings-ytdlp">
-        <div class="sg">
-          <div class="sh">🎬 yt-dlp 서버 (YouTube 다운로드용)</div>
-          <div class="sb">로컬 IP 차단으로 YouTube 추출이 안 될 때, yt-dlp가 설치된 서버를 지정하면 서버에서 추출 후 직링크를 받아옵니다.</div>
-          <div class="sr">
-            <div class="si">
-              <div class="sl">서버 사용</div>
-              <div class="sv"><input type="checkbox" id="ytdlpEnabled"></div>
-            </div>
-            <div class="si">
-              <div class="sl">서버 URL</div>
-              <div class="sv"><input type="url" id="ytdlpServerUrl" placeholder="http://your-server:8080" style="flex:1"></div>
-            </div>
-            <div class="si">
-              <div class="sl">API 키 (선택)</div>
-              <div class="sv"><input type="text" id="ytdlpApiKey" placeholder="서버 인증용 API 키" style="flex:1"></div>
-            </div>
-          </div>
-          <div class="rb" style="margin-top:12px">
-            <button class="ghost sm" onclick="saveYtdlpSettings()">저장</button>
-            <button class="ghost sm" onclick="testYtdlpServer()">🔗 연결 테스트</button>
-          </div>
-          <div id="ytdlpStatus" class="sb" style="margin-top:8px"></div>
-        </div>
-      </div>
-
       <div class="settings-content" id="settings-storage">
         <div class="sg">
           <div class="sh">💾 스토리지</div>
@@ -689,19 +658,9 @@ var __videoState=null;
 function videoErr(msg){
   document.getElementById('videoArea').innerHTML='<div class="err">'+esc(msg||'오류')+'</div>';
 }
-function fmtButton(id,label,sub,tag){
-  var fmt=(''+id).replace(/\\/g,'\\\\').replace(/'/g,"\\'");
-  var url=(document.getElementById('vurl').value||'').trim().replace(/\\/g,'\\\\').replace(/'/g,"\\'");
-  if(!url){url=(__videoState&&__videoState.url||'').replace(/\\/g,'\\\\').replace(/'/g,"\\'");}
-  return '<div class="fmtrow"><button class="fmtbtn" onclick="createVideo(\''+url+'\',\''+fmt+'\')">'
-    +'<span class="fmtlabel">'+esc(label)+'</span>'
-    +(sub?'<span class="fmtsub">'+esc(sub)+'</span>':'')
-    +(tag?'<span class="fmttag">'+esc(tag)+'</span>':'')
-    +'</button></div>';
-}
 function analyzeVideo(){
   var v=document.getElementById('vurl').value.trim();
-  if(!v){videoErr('스트림 URL(HLS/DASH) 또는 유튜브 URL을 입력해 주세요');return;}
+  if(!v){videoErr('스트림 URL(HLS/DASH)을 입력해 주세요');return;}
   var area=document.getElementById('videoArea');
   area.innerHTML='<div class="info">스트림 주소 확인 중… (페이지 스니핑)</div>';
   fetch('/api/video/analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:v})}).then(function(r){
@@ -709,23 +668,10 @@ function analyzeVideo(){
     return r.json();
   }).then(function(j){
     __videoState=j;
-    var fs=j.formats||[];
     var h='<div class="vcard" style="margin-top:8px"><div class="name">'+esc(j.title)+'</div>'
       +'<div class="meta">'+(j.direct?'직접 스트림 주소':'페이지에서 스트림 감지')+'</div>'
-      +'<div class="meta" style="word-break:break-all;color:#8FD8FF">'+esc(j.streamUrl)+'</div>';
-    if(fs.length>0){
-      h+='<div class="fmthead">포맷/해상도 선택</div>';
-      h+=fmtButton('bestvideo+bestaudio/best','🟢 자동 (비디오+오디오 병합)',null,'best');
-      h+=fmtButton('best','🎬 원본 그대로 (best)',null,'best');
-      for(var i=0;i<fs.length;i++){
-        var f=fs[i];
-        var label=(f.resolution||f.id||'')+(f.ext?(' · '+f.ext):'');
-        var sub=(f.filesize>0?fmt(f.filesize)+' · ':'')+(f.id||'');
-        h+=fmtButton(f.id,label,sub,f.resolution||'');
-      }
-    } else {
-      h+='<div style="margin-top:12px"><button onclick="createVideo(\''+v.replace(/\\/g,'\\\\').replace(/'/g,"\\'")+'\')">다운로드 (원본 그대로)</button></div>';
-    }
+      +'<div class="meta" style="word-break:break-all;color:#8FD8FF">'+esc(j.streamUrl)+'</div>'
+      +'<div style="margin-top:12px"><button onclick="createVideo(\''+v.replace(/\\/g,'\\\\').replace(/'/g,"\\'")+'\')">다운로드 (원본 그대로)</button></div>';
     h+='</div>';
     area.innerHTML=h;
     refresh();
@@ -733,10 +679,9 @@ function analyzeVideo(){
     videoErr('분석 실패: '+(e.message||e));
   });
 }
-function createVideo(v,fmt){
+function createVideo(v){
   var j=__videoState||{};
   var body={url:v,streamUrl:(j.streamUrl||'')};
-  if(fmt)body.format=fmt;
   var area=document.getElementById('videoArea');
   area.innerHTML='<div class="info">다운로드 시작 중…</div>';
   fetch('/api/video/create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(function(r){
@@ -1409,10 +1354,9 @@ function loadSettings(){
     fetch('/api/settings/tunnel').then(function(r){return r.json();}),
     fetch('/api/settings/guard').then(function(r){return r.json();}),
     fetch('/api/settings/mcp').then(function(r){return r.json();}),
-    fetch('/api/settings/schedule').then(function(r){return r.json();}),
-    fetch('/api/settings/ytdlp').then(function(r){return r.json();})
+    fetch('/api/settings/schedule').then(function(r){return r.json();})
   ]).then(function(res){
-    var sl=res[0], dl=res[1], tr=res[2], db=res[3], tn=res[4], gd=res[5], mc=res[6], sch=res[7], yt=res[8];
+    var sl=res[0], dl=res[1], tr=res[2], db=res[3], tn=res[4], gd=res[5], mc=res[6], sch=res[7];
     // 전역 속도 제한
     document.getElementById('dlSpeedEnabled').checked=sl.maxDownloadBps>0;
     document.getElementById('maxDownloadMbps').disabled=sl.maxDownloadBps<=0;
@@ -1478,10 +1422,6 @@ function loadSettings(){
       el.textContent='크론: "'+sch.scheduleCron+'"'+(sch.cronValid?' ✓':' ✗');
       el.style.color=sch.cronValid?'#69E29B':'#FF8A93';
     }
-    // yt-dlp 서버 설정
-    document.getElementById('ytdlpEnabled').checked=yt.ytdlpEnabled===true;
-    document.getElementById('ytdlpServerUrl').value=yt.ytdlpServerUrl||'';
-    document.getElementById('ytdlpApiKey').value=yt.ytdlpApiKey||'';
     loadRssFeeds();
     // 디버그 상태
     fetch('/api/debug/status').then(function(r){return r.json();}).then(function(d){
@@ -1882,49 +1822,6 @@ function saveScheduleSettings(){
     .catch(function(e){toast('저장 실패: '+e.message);});
 }
 
-function saveYtdlpSettings(){
-  var body={
-    ytdlpEnabled:document.getElementById('ytdlpEnabled').checked,
-    ytdlpServerUrl:document.getElementById('ytdlpServerUrl').value.trim(),
-    ytdlpApiKey:document.getElementById('ytdlpApiKey').value.trim()
-  };
-  fetch('/api/settings/ytdlp',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
-    .then(function(r){return r.json();})
-    .then(function(d){
-      if(d.ok){
-        toast('yt-dlp 서버 설정 저장 완료');
-        var el=document.getElementById('ytdlpStatus');
-        el.textContent=body.ytdlpEnabled?'서버: '+body.ytdlpServerUrl:'서버 비활성화';
-        el.style.color=body.ytdlpEnabled?'#69E29B':'#8FA3BF';
-      }else{
-        toast('저장 실패: '+(d.error||'알 수 없음'));
-      }
-    })
-    .catch(function(e){toast('저장 실패: '+e.message);});
-}
-
-function testYtdlpServer(){
-  var url=document.getElementById('ytdlpServerUrl').value.trim();
-  var key=document.getElementById('ytdlpApiKey').value.trim();
-  if(!url){toast('서버 URL을 입력해 주세요');return;}
-  var el=document.getElementById('ytdlpStatus');
-  el.textContent='연결 테스트 중...';el.style.color='#8FD8FF';
-  var headers={'Content-Type':'application/json'};
-  if(key)headers['X-API-Key']=key;
-  fetch(url.replace(/\/$/,'')+'/health',{method:'GET',headers:headers})
-    .then(function(r){
-      if(r.ok)return r.json();
-      throw new Error('HTTP '+r.status);
-    })
-    .then(function(d){
-      el.textContent='✓ 연결 성공: '+JSON.stringify(d).slice(0,80);
-      el.style.color='#69E29B';
-    })
-    .catch(function(e){
-      el.textContent='✗ 연결 실패: '+e.message;
-      el.style.color='#FF8A93';
-    });
-}
 function detectStorage(){
   var el=document.getElementById('storageList');
   el.textContent='감지 중...';el.style.color='#8FD8FF';

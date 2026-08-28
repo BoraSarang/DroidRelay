@@ -159,15 +159,12 @@ class VideoDownloadManager(
                 val code = when {
                     log.contains("encrypted", true) || log.contains("widevine", true) ||
                         log.contains("cannot decrypt", true) -> "E-AND-VID-0300"
-                    log.contains("/proxy?", true) && log.contains("HTTP error 502", true) ->
-                        "E-AND-VID-0203"
                     else -> "E-AND-VID-0202"
                 }
                 val tail = log.lines().takeLast(6).joinToString(" ").take(220)
                 out.delete()
                 val msg = when (code) {
                     "E-AND-VID-0300" -> "DRM(저작권 보호) 콘텐츠는 다운로드할 수 없습니다"
-                    "E-AND-VID-0203" -> "yt-dlp 서버가 YouTube에 차단됐습니다. 서버 IP를 바꾸거나 잠시 후 다시 시도해 주세요"
                     else -> "스트림 다운로드 실패 — 다시 시도하거나 재분석해 주세요"
                 }
                 JobsRepository.update(jobId) {
