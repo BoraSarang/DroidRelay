@@ -41,6 +41,17 @@ object WebAssets {
   .RUNNING{background:#123A63;color:#8FD8FF}.DONE{background:#12402F;color:#69E29B}.FAILED{background:#40191C;color:#FF8A93}
   .QUEUED{background:#22335A}.PAUSED{background:#3A3312;color:#FFD59E}.CANCELED{background:#333}
   .badge.video{background:#0A3A2F;color:#6FE3C4}
+  .badges{display:inline-flex;gap:6px;align-items:center}
+  .overlay{position:fixed;inset:0;background:rgba(5,10,20,.62);backdrop-filter:blur(2px);display:flex;align-items:center;justify-content:center;z-index:9998}
+  .popup{background:#0E1B33;border:1px solid #22345A;border-radius:14px;padding:18px;max-width:340px;width:calc(100% - 40px);box-shadow:0 12px 40px rgba(0,0,0,.5)}
+  .popup h3{margin:0 0 6px;font-size:15px;color:#E8F0FF}
+  .popup .msg{color:#8FA3BF;font-size:13px;margin:0 0 14px;white-space:pre-line;word-break:break-word}
+  .popup input{width:100%;box-sizing:border-box;padding:9px 10px;border-radius:8px;border:1px solid #2A3B5C;background:#101E3A;color:#E8F0FF;font-size:14px;margin:0 0 14px;outline:none}
+  .popup input:focus{border-color:#2F80ED}
+  .popup .pbtns{display:flex;gap:8px;justify-content:flex-end}
+  .popup .pbtns button{padding:7px 16px;border-radius:8px;border:1px solid #2A3B5C;background:#101E3A;color:#C7D4F0;font-size:13px;cursor:pointer}
+  .popup .pbtns button.ok{background:#2F80ED;border-color:#2F80ED;color:#fff;font-weight:600}
+  .popup .pbtns button.danger{background:#40191C;border-color:#40191C;color:#FF8A93;font-weight:600}
   .vcard{background:#101E3A;border:1px solid #22345A;border-radius:12px;padding:12px;margin-top:10px}
   .err{color:#FF8A93;font-size:12px;margin-top:4px}
   .empty{color:#55688C;text-align:center;padding:26px 0}
@@ -741,14 +752,28 @@ function render(jobs){
   var h='';
   var now=Date.now();
   jobs.forEach(function(j){
-    var pct=Math.min(100,Math.max(0,j.totalBytes>0?Math.round(j.progress*100):(j.state==='DONE'?100:0)));
+    var isVideo=j.type==='video';
+    var pct;
+    if(isVideo)pct=Math.round(j.progress*100);
+    else pct=j.totalBytes>0?Math.round(j.progress*100):(j.state==='DONE'?100:0);
+    pct=Math.min(100,Math.max(0,pct));
     var size=j.downloadedBytes?(fmt(j.downloadedBytes)+(j.totalBytes>0?' / '+fmt(j.totalBytes):'')):'';
+    if(isVideo&&j.segmentsTotal>0)size=(size?size+' · ':'')+'세그먼트 '+(j.segmentsDone||0)+'/'+j.segmentsTotal+'개';
     var sp=j.state==='RUNNING'?'<span class="speed">'+spd(j.speedBps)+'</span>':'';
     var eta='';
-    if(j.state==='RUNNING'&&j.speedBps>0){
+    if(j.state==='RUNNING'&&(j.speedBps>0||(isVideo&&(j.segmentsDone>0||j.downloadedBytes>0)))){
       var parts=[];
-      if(j.startedAt>0){var elapsed=(now-j.startedAt)/1000;parts.push(fmtDuration(elapsed)+' 경과');}
-      if(j.totalBytes>0&&j.downloadedBytes<j.totalBytes){var remain=(j.totalBytes-j.downloadedBytes)/j.speedBps;parts.push(fmtDuration(remain)+' 남음');}
+      var elapsed=(j.startedAt>0)?(now-j.startedAt)/1000:0;
+      if(j.startedAt>0)parts.push(fmtDuration(elapsed)+' 경과');
+      if(isVideo&&j.totalDurationMs>0&&j.progress>0&&j.progress<1&&elapsed>0){
+        var doneMs=j.progress*j.totalDurationMs;var rate=doneMs/elapsed;
+        if(rate>0){var rem=(j.totalDurationMs-doneMs)/rate;parts.push(fmtDuration(rem)+' 남음');}
+      }else if(isVideo&&j.segmentsTotal>0&&j.segmentsDone>0&&j.segmentsDone<j.segmentsTotal&&elapsed>0){
+        var segRate=j.segmentsDone/elapsed;
+        if(segRate>0)parts.push(fmtDuration((j.segmentsTotal-j.segmentsDone)/segRate)+' 남음');
+      }else if(j.speedBps>0&&j.totalBytes>0&&j.downloadedBytes<j.totalBytes){
+        var remain=(j.totalBytes-j.downloadedBytes)/j.speedBps;parts.push(fmtDuration(remain)+' 남음');
+      }
       if(parts.length>0)eta='<span class="eta"> · '+parts.join(' · ')+'</span>';
     }
     var err=j.errorMessage?'<div class="err">'+esc(j.errorMessage)+'</div>':'';
@@ -760,11 +785,11 @@ function render(jobs){
     if(j.type==='video'&&j.state==='RUNNING')pause='<span class="eta" style="align-self:center">FFmpeg → 삭제로 취소</span>';
     if(j.type!=='video'&&(j.state==='PAUSED'||j.state==='FAILED'))pause='<button class="ghost" onclick="act(\''+j.id+'\',\'resume\')">재개</button>';
     if(j.type==='video'&&j.state==='FAILED')pause='<button class="ghost" onclick="retryVideo(\''+esc(j.url).replace(/\\/g,'\\\\').replace(/'/g,"\\'")+'\')">재시도</button>';
-    var cancel='<button class="ghost" onclick="if(confirm(\'이 항목을 삭제하시겠습니까?\'))delJob(\''+j.id+'\')">삭제</button>';
+    var cancel='<button class="ghost" onclick="delJobConfirm(\''+j.id+'\')">삭제</button>';
     h+='<div class="card" draggable="true" data-id="'+j.id+'">'
       +'<div style="flex:1;min-width:0;padding:14px">'
       +'<div class="name">'+esc(j.filename)+'</div>'
-      +'<div class="meta"><span class="badge '+j.state+'">'+label(j.state)+'</span>'+vbadge+'<span>'+size+'</span><span>'+pct+'%</span>'+sp+eta+'</div>'
+      +'<div class="meta"><span class="badges"><span class="badge '+j.state+'">'+label(j.state)+'</span>'+vbadge+'</span><span>'+size+'</span><span>'+pct+'%</span>'+sp+eta+'</div>'
       +'<div class="bar"><div class="fill" style="width:'+pct+'%"></div></div>'+err
       +'</div><div class="card-acts">'+act+pause+cancel+'</div></div>';
   });
@@ -1074,42 +1099,69 @@ function restoreItem(name){
     if(d.error){alert(d.error)}else{showDlToast('복구됨: '+name+' → 보관함 루트')}
     refreshStorage()}).catch(function(e){alert(e)});
 }
+function makeOverlay(){var o=document.createElement('div');o.className='overlay';o.id='popupOverlay';o.onclick=function(e){if(e.target===o)closePopup();};document.body.appendChild(o);return o;}
+function closePopup(){var o=document.getElementById('popupOverlay');if(o)o.remove();return false;}
+function confirmPopup(title,msg,onOk,danger){
+  makeOverlay().innerHTML='<div class="popup"><h3>'+esc(title)+'</h3><p class="msg">'+esc(msg)+'</p><div class="pbtns">'
+    +'<button onclick="closePopup()">취소</button>'
+    +'<button class="'+(danger?'danger':'ok')+'" id="popupOk" autofocus>확인</button></div></div>';
+  document.getElementById('popupOk').onclick=function(){closePopup();if(onOk)onOk();};
+  return false;
+}
+function promptPopup(title,placeholder,initial,onOk){
+  makeOverlay().innerHTML='<div class="popup"><h3>'+esc(title)+'</h3>'
+    +'<input id="popupInput" type="text" placeholder="'+esc(placeholder||'')+'" value="'+esc(initial||'')+'" maxlength="80">'
+    +'<div class="pbtns"><button onclick="closePopup()">취소</button>'
+    +'<button class="ok" id="popupOk">확인</button></div></div>';
+  function go(){var v=document.getElementById('popupInput').value.trim();if(!v){return;}closePopup();onOk(v);}
+  document.getElementById('popupOk').onclick=go;
+  document.getElementById('popupInput').onkeydown=function(e){if(e.key==='Enter')go();if(e.key==='Escape')closePopup();};
+  setTimeout(function(){var i=document.getElementById('popupInput');if(i){i.focus();i.select();}},10);
+  return false;
+}
 function purgeItem(name){
-  if(!confirm('영구 삭제: '+name+'\n복구할 수 없습니다.'))return;
-  fetch('/api/storage/trash/purge',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({name:name})})
-  .then(function(r){return r.json()}).then(function(d){
-    if(d.error){alert(d.error)}else{showDlToast('영구삭제됨: '+name)}
-    refreshStorage()}).catch(function(e){alert(e)});
+  confirmPopup('영구 삭제','「'+esc(name)+'」을(를) 영구 삭제합니다.\n복구할 수 없습니다.',function(){
+    fetch('/api/storage/trash/purge',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({name:name})})
+    .then(function(r){return r.json()}).then(function(d){
+      if(d.error){alert(d.error)}else{showDlToast('영구삭제됨: '+name)}
+      refreshStorage()}).catch(function(e){alert(e)});
+  },true);
 }
 function emptyTrash(){
-  if(!confirm('휴지통 전체를 비웁니다.\n모든 항목이 영구 삭제되며 복구할 수 없습니다.'))return;
-  fetch('/api/storage/trash/purge',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'})
-  .then(function(r){return r.json()}).then(function(d){
-    if(d.error){alert(d.error)}else{showDlToast('휴지통을 비웠습니다')}
-    refreshStorage()}).catch(function(e){alert(e)});
+  confirmPopup('휴지통 비우기','휴지통 전체를 비웁니다.\n모든 항목이 영구 삭제되며 복구할 수 없습니다.',function(){
+    fetch('/api/storage/trash/purge',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'})
+    .then(function(r){return r.json()}).then(function(d){
+      if(d.error){alert(d.error)}else{showDlToast('휴지통을 비웠습니다')}
+      refreshStorage()}).catch(function(e){alert(e)});
+  },true);
 }
 function createFolder(){
-  var name=prompt('폴더 이름:');if(!name)return;
-  fetch('/api/storage/mkdir',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({path:curPath,name:name})})
-  .then(function(r){return r.json()}).then(function(d){if(d.error)alert(d.error);refreshStorage()}).catch(function(e){alert(e)});
+  promptPopup('새 폴더','폴더 이름','',function(name){
+    fetch('/api/storage/mkdir',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({path:curPath,name:name})})
+    .then(function(r){return r.json()}).then(function(d){if(d.error)alert(d.error);refreshStorage()}).catch(function(e){alert(e)});
+  });
 }
 function renameItem(f){
-  var name=prompt('새 이름:',f.name);if(!name||name===f.name)return;
-  var full=curPath?curPath+'/'+f.name:f.name;
-  fetch('/api/storage/rename',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({from:full,to:name})})
-  .then(function(r){return r.json()}).then(function(d){if(d.error)alert(d.error);refreshStorage()}).catch(function(e){alert(e)});
+  promptPopup('이름 변경','새 이름',f.name,function(name){
+    if(!name||name===f.name)return;
+    var full=curPath?curPath+'/'+f.name:f.name;
+    fetch('/api/storage/rename',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({from:full,to:name})})
+    .then(function(r){return r.json()}).then(function(d){if(d.error)alert(d.error);refreshStorage()}).catch(function(e){alert(e)});
+  });
 }
 function delItem(f){
-  if(!confirm('휴지통으로 이동: '+f.name+'?'))return;
-  var full=curPath?curPath+'/'+f.name:f.name;
-  fetch('/api/storage/delete',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({path:full})})
-  .then(function(r){return r.json()}).then(function(d){if(d.error)alert(d.error);selItem=null;refreshStorage()}).catch(function(e){alert(e)});
+  confirmPopup('휴지통으로 이동','「'+esc(f.name)+'」을(를) 휴지통으로 이동할까요?',function(){
+    var full=curPath?curPath+'/'+f.name:f.name;
+    fetch('/api/storage/delete',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({path:full})})
+    .then(function(r){return r.json()}).then(function(d){if(d.error)alert(d.error);selItem=null;refreshStorage()}).catch(function(e){alert(e)});
+  });
 }
 function deleteSelected(){if(selItem)delItem(selItem);}
+function delJobConfirm(id){confirmPopup('항목 삭제','이 다운로드 항목을 삭제하시겠습니까?',function(){delJob(id);});}
 function uploadFiles(input){
   var files=input.files;if(!files.length)return;
   Array.from(files).forEach(function(file){
@@ -1642,13 +1694,14 @@ function addRssFeed(){
 }
 
 function deleteRssFeed(id){
-  if(!confirm('이 피드를 삭제하시겠습니까?'))return;
-  fetch('/api/rss/'+id,{method:'DELETE'})
-    .then(function(r){return r.json();})
-    .then(function(d){
-      if(d.ok){showDlToast('피드 삭제됨');loadRssFeeds();}
-    })
-    .catch(function(e){alert('실패: '+e);});
+  confirmPopup('피드 삭제','이 피드를 삭제하시겠습니까?',function(){
+    fetch('/api/rss/'+id,{method:'DELETE'})
+      .then(function(r){return r.json();})
+      .then(function(d){
+        if(d.ok){showDlToast('피드 삭제됨');loadRssFeeds();}
+      })
+      .catch(function(e){alert('실패: '+e);});
+  },true);
 }
 
 function checkRssFeeds(){
@@ -1660,16 +1713,18 @@ function checkRssFeeds(){
 }
 
 function resetSettings(category){
-  if(!confirm((category==='all'?'전체 설정을':'\''+category+'\''+' 설정을')+' 기본값으로 초기화하시겠습니까?\n(전역 속도 제한은 초기화되지 않습니다)'))return;
-  fetch('/api/settings/reset',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({category:category})})
-    .then(function(r){return r.json();})
-    .then(function(d){
-      if(d.ok){
-        showDlToast('기본값 복원됨');
-        loadSettings();
-      }else alert('실패');
-    })
-    .catch(function(e){alert('실패: '+e);});
+  var label=category==='all'?'전체 설정':'「'+category+'」 설정';
+  confirmPopup('설정 초기화',label+'을(를) 기본값으로 초기화하시겠습니까?\n(전역 속도 제한은 초기화되지 않습니다)',function(){
+    fetch('/api/settings/reset',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({category:category})})
+      .then(function(r){return r.json();})
+      .then(function(d){
+        if(d.ok){
+          showDlToast('기본값 복원됨');
+          loadSettings();
+        }else alert('실패');
+      })
+      .catch(function(e){alert('실패: '+e);});
+  },true);
 }
 
 // 슬라이더 변경 이벤트 바인딩 (초기화 시 한 번만)

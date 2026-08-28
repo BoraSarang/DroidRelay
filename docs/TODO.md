@@ -193,6 +193,17 @@ T-001~T-008 전부 완료 (커밋 7574486).
 | T-889 | 앱 Compose UI(DownloadsScreen 해상도 선택·파일명 입력·JobCard video 재시도 분기) | ✅ |
 | T-890 | 검증(ktlint·assembleDebug·testDebugUnitTest·node --check) + 실기기 E2E(네이버 MP4·토렌트씨 스트림해상도·재시도) + CHANGELOG/error_message_ko.json/세션 로그 + 커밋 | |
 
+## v0.13.1 (2026-08-28) — 스트림 진행률 · 배지 · 한글 파일명 · 팝업 5종
+> 동일 커밋 `feat/android-v013-stream-progress`로 5종 해결. 진행률 신호는 FFmpegKit LogCallback(불안정) 대신 **-progress 파일/out_time** 기반으로 전환(실기기 회귀 발견).
+
+| T-번호 | 내용 | 상태 |
+|--------|------|------|
+| T-891 | 스트림 진행률 — StreamDetector 재생시간(EXTINF 합·마스터 첫 variant 팔로우) + Job.totalDurationMs + VideoDownloadManager `-progress` 파일 poll(`parseOutTimeUs`) + computeProgress 우선순위 + VideoApi 전달 + /api/jobs 응답 + 웹 UI(재생시간%·남은시간·용량) — 실기기 1→100% 단조 증가·DONE/63.9MB 검증 | ✅ |
+| T-892 | 배지 정렬 — 웹 .badges 그룹화(state+video 배지 한 줄 정렬) | ✅ |
+| T-893 | 파일명 한글 깨짐 — safeFilename 한글 보존 회귀 테스트 + 실기기 `한글파일명_테스트.mp4` JSON 보존 확인(회귀 테스트로 확정) | ✅ |
+| T-894 | confirm/prompt 제거 → 팝업 레이어 + 폴더/파일 rename 팝업 — makeOverlay/confirmPopup/promptPopup/delJobConfirm, 웹 9곳 confirm/prompt 제거 | ✅ |
+| T-895 | 검증 — ktlint + testDebugUnitTest 10건 GREEN + assembleDebug + WebAssets JS node --check + 실기기 E2E 2회 완주 + 문서/세션 로그 + 커밋 | ✅ |
+
 ## v0.12.2 (2026-08-28) — YouTube/yt-dlp 지원 전면 제거
 > yt-dlp 방식은 유튜브 PoToken/봇가드 등 정책 변화로 막힐 위험이 커 **완전 폐기** — 폰은 외부 서버 없이 스트림(m3u8/mpd) 다운로드로 독립 동작.
 

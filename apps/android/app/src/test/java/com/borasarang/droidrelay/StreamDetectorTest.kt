@@ -1,6 +1,7 @@
 package com.borasarang.droidrelay
 
 import com.borasarang.droidrelay.relay.StreamDetector
+import com.borasarang.droidrelay.relay.VideoDownloadManager
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -102,5 +103,112 @@ class StreamDetectorTest {
         assertEquals("stream", StreamDetector.kindOf("https://cdn.example.com/master.m3u8"))
         assertEquals("stream", StreamDetector.kindOf("https://cdn.example.com/manifest.mpd"))
         assertEquals("page", StreamDetector.kindOf("https://brand.example.com/products/123"))
+    }
+
+    @Test
+    fun `HLS 미디어 플레이리스트에서 세그먼트 개수를 센다`() {
+        val playlist = """
+            #EXTM3U
+            #EXT-X-VERSION:3
+            #EXT-X-TARGETDURATION:10
+            #EXTINF:10.0,
+            0000.ts
+            #EXTINF:10.0,
+            0001.ts
+            #EXTINF:3.04,
+            0002.ts
+            #EXT-X-ENDLIST
+        """.trimIndent()
+        assertEquals(3, StreamDetector.countHlsSegments(playlist))
+    }
+
+    @Test
+    fun `미디어 플레이리스트가 아니거나 비면 세그먼트 0`() {
+        assertEquals(0, StreamDetector.countHlsSegments(""))
+        assertEquals(0, StreamDetector.countHlsSegments("#EXTM3U\n#EXT-X-ENDLIST\n"))
+    }
+
+    @Test
+    fun `미디어 플레이리스트에서 총 재생 시간을 EXTINF 합으로 센다`() {
+        val playlist = """
+            #EXTM3U
+            #EXT-X-VERSION:3
+            #EXTINF:10.0,
+            0000.ts
+            #EXTINF:10.5,
+            0001.ts
+            #EXTINF:3.04,
+            0002.ts
+            #EXT-X-ENDLIST
+        """.trimIndent()
+        assertEquals(23540L, StreamDetector.playlistDurationMs(playlist))
+    }
+
+    @Test
+    fun `마스터 또는 빈 플레이리스트는 재생 시간 0`() {
+        assertEquals(0L, StreamDetector.playlistDurationMs(""))
+        assertEquals(0L, StreamDetector.playlistDurationMs("#EXTM3U\n#EXT-X-STREAM-INF:RESOLUTION=1280x720\nmid.m3u8\n"))
+    }
+
+    @Test
+    fun `progress 파일에서 마지막 out_time_us를 파싱한다`() {
+        val content = """
+            frame=100
+            out_time_us=5000000
+            progress=continue
+            frame=200
+            out_time_us=12500000
+            progress=continue
+        """.trimIndent()
+        assertEquals(12_500_000L, VideoDownloadManager.parseOutTimeUs(content))
+        assertEquals(0L, VideoDownloadManager.parseOutTimeUs("frame=100\nprogress=end\n"))
+        assertEquals(0L, VideoDownloadManager.parseOutTimeUs(""))
+    }
+
+    @Test
+    fun `안전 파일명은 한글을 보존한다_밑줄로 뭉개지지 않음`() {
+        // 회귀: ____(_____) 한글 깨짐이 다시 나오지 않도록 한글 보존 보장
+        assertEquals("스트림_(직접_주소).mp4", VideoDownloadManager.safeFilename("스트림 (직접 주소)", "mp4"))
+        assertEquals("동영상.mp4", VideoDownloadManager.safeFilename("동영상", "mp4"))
+        val blank = VideoDownloadManager.safeFilename("  ", "mp4")
+        assertTrue(blank.startsWith("video-") && blank.endsWith(".mp4"))
+    }
+
+    @Test
+    fun `FFmpeg 로그에서 열린 세그먼트 basename을 distinct개로 센다`() {
+        val log = """
+            [hls @ 0x55] Opening '0000.ts' for reading
+            [hls @ 0x55] Opening '0001.ts' for reading
+            [hls @ 0x55] Opening '0002.ts' for reading
+        """.trimIndent()
+        assertEquals(3, VideoDownloadManager.segmentsDoneFromLog(log, 10))
+    }
+
+    @Test
+    fun `실제 스트림 url_N ts basename도 distinct개로 센다`() {
+        // mux 스트림 사례: https://…/url_848/193039199_mp4_h264_aac_hq_7.ts — basename이 구분되므로 distinct개
+        val log = """
+            [https @ 0x1] Opening 'https://cdn.example.com/url_848/193039199_mp4_h264_aac_hq_7.ts' for reading
+            [https @ 0x1] Opening 'https://cdn.example.com/url_849/193039199_mp4_h264_aac_hq_7.ts' for reading
+            [https @ 0x1] Opening 'https://cdn.example.com/url_850/193039199_mp4_h264_aac_hq_7.ts' for reading
+        """.trimIndent()
+        assertEquals(3, VideoDownloadManager.segmentsDoneFromLog(log, 100))
+    }
+
+    @Test
+    fun `같은 세그먼트를 재시도해도 distinct라 중복 카운트하지 않는다`() {
+        val log = """
+            [hls] Opening 'partA.ts' for reading
+            [hls] Opening 'partA.ts' for reading
+            [hls] Opening 'partB.ts' for reading
+        """.trimIndent()
+        assertEquals(2, VideoDownloadManager.segmentsDoneFromLog(log, 5))
+    }
+
+    @Test
+    fun `세그먼트 로그가 없으면 0이고 전체를 초과하지 않는다`() {
+        assertEquals(0, VideoDownloadManager.segmentsDoneFromLog("", 5))
+        val over = VideoDownloadManager.segmentsDoneFromLog("[hls] Opening '0000.ts' for reading\n[hls] Opening '0001.ts' for reading", 1)
+        assertEquals(1, over)
     }
 }

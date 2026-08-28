@@ -97,3 +97,29 @@
 
 ## 라이선스
 - 변경 범위에 새 라이브러리 없음(기존 OkHttp/FFmpegKit 유지).
+
+---
+
+## v0.13.1 부록 — 스트림 진행률 안정화 + 배지/한글/팝업 (T-891~T-895, 동일 커밋)
+> 동일 브랜치 `feat/android-v013-stream-progress`에서 5종을 한 커밋으로 해결.
+
+### 진행률 신호 방식 변경 (핵심 결정)
+- **회귀 발견(실기기)**: FFmpegKit `LogCallback`의 HLS `Opening '...ts'` 로그 전달이 **비결정적** — 동일 미디어 m3u8도 실행마다 전부(64/64) 또는 한정(2/64) 불안정. bytes는 증가하는데 segmentsDone이 정체 → 세그먼트 로그 기반 %는 신뢰 불가
+- **결정**: FFmpeg argv에 `-progress <file>` 추가 → `pollProgress`가 1초마다 파일의 `out_time_us`(µs)를 읽어 총 재생시간(`#EXTINF` 합)으로 나눠 % 계산. FFmpeg 자체 출력이라 단조·신뢰성 확보
+- 분모 재생시간: `StreamDetector.mediaDurationMsFromUrl`(마스터면 첫 variant 팔로우)
+- 진행률 우선순위: `out_time/총재생시간` → 세그먼트(보조 표시) → 파일 크기/총용량
+
+### 마일스톤 (T-891 ~ T-895)
+| ID | 내용 | 상태 |
+|----|------|------|
+| T-891 | 스트림 진행률 — 재생시간 파싱/Job.totalDurationMs/-progress poll/웹 UI 검증(1→100% 단조) | ✅ |
+| T-892 | 배지 정렬 — 웹 .badges 그룹화 | ✅ |
+| T-893 | 파일명 한글 깨짐 — safeFilename 회귀 테스트로 확정 | ✅ |
+| T-894 | confirm/prompt → 팝업 레이어 + 폴더/파일 rename 팝업 | ✅ |
+| T-895 | 검증(ktlint·10건 단위·assembleDebug·node --check·실기기 E2E 2회) + 문서/커밋 | ✅ |
+
+### 위험/제한 (갱신)
+| 항목 | 대응 |
+|------|------|
+| FFmpegKit LogCallback 불안정 | 진행률은 `-progress` 파일 기반으로 우회 (세그먼트 개수는 보조 표시만) |
+

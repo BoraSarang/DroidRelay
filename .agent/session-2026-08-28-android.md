@@ -1,62 +1,65 @@
-# 세션 로그 2026-08-28 (Android + Web) — v0.12.2 유튜브 제거 + v0.13 비디오 다운로드 개선
+# 세션 로그 2026-08-28 (Android + Web) — v0.13.1 스트림 진행률 + 배지 + 한글 + 팝업 5종
 
 ## 세션 요약
-- **무엇을/플랫폼**: [ANDROID+WEB] v0.12.2 YouTube/yt-dlp 전면 제거(커밋 `757155d`) 후 v0.13 — 비디오 다운로드 개선 3종: ① FAILED video 재요청(재시도), ② MP4 직접 다운로드, ③ 해상도 선택·파일명 변경 UI. PageKit(네이버 MP4·토렌트씨 스트림) 동작을 OkHttp 정규식 한계 내 구현
-- **빌드**: BUILD SUCCESSFUL (ktlint + testDebugUnitTest StreamDetectorTest 7건 GREEN + assembleDebug). `JAVA_HOME=/Applications/Android Studio.app/Contents/jbr/Contents/Home`, gradlew는 apps/android. WebAssets JS `node --check` OK
-- **PERF/CACHE**: 해당 없음 (기능 개선). FFmpeg 재다운로드 경로는 부분 재개 불가 → 재시도는 원본 url 재분석
-- **남은TODO**: T-890 실기기 E2E(네이버 MP4·토렌트씨 스트림·재시도) + 커밋
-- **전달로그**: 토렌트씨(Cloudflare Turnstile)·네이버 쇼핑(JS 동적 로드)은 **OkHttp로 원천 불가** — fetch 브라우저 헤더 보강으로 네이버류 봇 차단 302→200 통과 확인(증명). Cloudflare JS 챌린지는 브라우저에서 m3u8/mpd 주소 직접 복사 입력 안내
-- **문서갱신**: PLAN_v0.13_stream_download.md, TODO T-885~T-890, CHANGELOG v0.13.0, 본 세션 로그, error_message_ko.json(0205 추가, 사용 안 하는 0204 제거)
+- **무엇을/플랫폼**: [ANDROID+WEB] 커밋 `feat/android-v013-stream-progress`에서 5종 해결: ① 스트림 진행률(HLS 세그먼트 기반 %/남은시간/용량), ② 배지 정렬, ③ 파일명 `____(_____)` 한글 깨짐, ④ confirm/prompt → 팝업 레이어, ⑤ 폴더/파일 rename 팝업
+- **빌드**: BUILD SUCCESSFUL (ktlint + testDebugUnitTest 확장 10건 GREEN + assembleDebug). WebAssets JS 추출(615~1977행) `node --check` OK
+- **PERF/CACHE**: 해당 없음. 진행률 신호는 FFmpegKit **LogCallback**(HLS 브랜치에서 불안정 — 동일 URL도 64/64 또는 2/64) → **`-progress` 파일 poll로 전환(신뢰성 확보)**
+- **남은TODO**: 없음 (실기기 E2E로 전 항목 검증 완료, 커밋 예정)
+- **전달로그**: FFmpegKit LogCallback의 HLS segment-open 로그 전달이 비결정적임을 실기기로 증명 → `-progress 파일의 out_time / 총재생시간(ms)` 기반 진행률로 우회. `-progress` 파일은 `handleComplete`에서 삭제
+- **문서갱신**: TODO, CHANGELOG v0.13.1, PLAN_v0.13, 본 세션 로그
 - **큐상태**: 없음
-- **E2E**: StreamDetectorTest 7건 단위 테스트 GREEN(순수 파싱 함수 TDD). 실기기 E2E 미수행
+- **E2E**: 단위 10건 + 실기기 완주 검증 (진행률 1→100% 단조 증가, 한글 파일명 보존, DONE/FAILED 전환 확인)
 
-## 구현 내역
+## 핵심 기술 결정 — 진행률 신호 (회귀 발견)
+- FFmpegKit `LogCallback`은 HLS `Opening '...ts'` 로그를 **불안정 전달**: `한글테스트`(직접 미디어 m3u8)는 64/64 전달됐지만 동일 URL `최종확인`은 2/64에서 정체. bytes는 커지는데 segmentsDone이 안 오름 → 로그 기반 세그먼트%는 신뢰 불가
+- **해결**: FFmpeg argv에 `-progress <file>` 추가 → `pollProgress`가 1초마다 파일의 `out_time_us`(µs)를 읽고 `totalDurationMs`(미디어 플레이리스트 `#EXTINF` 합)로 나눠 % 계산. `out_time`은 FFmpeg 자체 출력이라 단조·신뢰성 확보
+- 진행률 우선순위: `out_time/총재생시간` → 세그먼트(불안정, 보조) → 파일크기/총용량
+- `parseOutTimeUs`는 companion 순수 함수로 TDD, `totalDurationMs`는 `StreamDetector.playlistDurationMs/mediaDurationMsFromUrl`(마스터면 첫 variant 팔로우)
 
-### StreamDetector.kt — MP4 직접 + 해상도 variant 파싱 (T-886, TDD)
-- `Quality(label, url, protocol)` + `Found(kind, qualities)` — kind = `stream`|`mp4`|`page`
-- `analyze`: `.mp4` 직접 → kind=mp4 / 웹페이지 MP4_RE(`.mp4|.webm|.mov`) 스니핑 / 매니페스트 스니핑 + `parseManifestVariants`
-- `parseHlsMaster`: `#EXT-X-STREAM-INF:RESOLUTION=` → 라벨(예: 720p) + variant URI 절대화(resolve)
-- `parseDashManifest`: `Representation` width/height + `BaseURL`
-- `kindOf(url)` public, `parseManifestVariants`/`scan(html,pattern)` private, `decodeEntities`/`resolve` 기존 유지
-- **fetch 헤더 보강**: Referer·Sec-Fetch-*·Accept-Language·Upgrade-Insecure-Requests + Accept에 mpd/m3u8 mime — 네이버 쇼핑 봇 차단 302→200 통과, 직접 CDN 매니페스트 조회 최적화. 403 안내 문구를 Cloudflare/봇 차단 명확화
+## 구현 내역 (v0.13.1)
 
-### StreamDetectorTest.kt (신규, 7건 GREEN)
-- HLS 마스터 해상도 라벨/URI 절대화, 단일 variant, 마스터 아님(미디어 플레이리스트) 빈 목록
-- DASH Representation 해상도 + BaseURL, Representation 없음 빈 목록
-- kindOf 판별 (mp4/stream/stream/page)
+### ① 스트림 진행률 (T-891, -progress 기반, TDD)
+- `StreamDetector`: `playlistDurationMs(playlist)`("`#EXTINF`" 합, 순수) + `mediaDurationMsFromUrl(url)`(마스터면 첫 variant 팔로우) 추가, `EXTINF_RE` 상수
+- `Job`(JobsRepository): `totalDurationMs: Long` 필드 추가
+- `VideoDownloadManager`:
+  - `createAndStart(..., totalDurationMs)` — 총재생시간 저장
+  - `start`: argv에 `-progress <progressFile>` 삽입, `progressFiles[jobId]` 맵. LogCallback 버퍼는 세그먼트 **보조 표시용**으로 유지
+  - `pollProgress`: 우선순위로 `computeProgress(jobId,job)` → `out_time/총재생시간` → 세그먼트 → 파일크기/총용량
+  - companion 순수 함수 `parseOutTimeUs(content)` — 마지막 `out_time_us=` 파싱 (TDD)
+  - `handleComplete`에서 `progressFiles[jobId]?.delete()`
+- `VideoApi.create`: `mediaDurationMsFromUrl(stream)` 계산해 전달, 디버그 로그에 seg/dur 기록
+- `RelayServer` `/api/jobs`: `totalDurationMs` 응답 추가
 
-### VideoApi.kt — analyze 결과에 kind·qualities 반영
-- `analyze` JSON에 `kind`, `qualities`(label/url/protocol 배열) 추가
+### ② 배지 정렬 (웹)
+- `.badges` 그룹 CSS + render에서 state·video 배지를 `<span class="badges">`로 묶음 (한 줄 정렬). 앱 JobCard는 🎬 이모지로 이미 정렬됨
 
-### API/웹 UI (T-888)
-- `/api/video/create`에 `variantUrl`(streamUrl)·`filename` 전달·검증 (기존 create 시그니처 유지)
-- WebAssets JS: analyzeVideo kind별 라벨(MP4 직접/직접 스트림/페이지) + 해상도 라디오(name=vq) + 파일명 input(#vname) + currentVideoUrl() 선택 variant + createVideo body 확장 + retryVideo(FAILED video 재시도, 재분석/재다운로드) + render FAILED video "재시도" 버튼
+### ③ 파일명 한글 깨짐 — 회귀 테스트로 확정
+- 원인은 현재 코드에 없음(모든 sanitizer가 한글 유지). `safeFilename` 한글 보존 회귀 테스트 추가 → 실기기 `한글파일명_테스트.mp4` JSON에도 깨짐 없이 저장 확인(직접 URL은 url 파일명 기본값 커밋 `96570b6`로 해결)
 
-### 앱 Compose UI (T-889)
-- VideoAddRow: 분석 결과 해상도 라디오(qualities>1일 때)·파일명 OutlinedTextField·kind별 라벨, start()가 선택 variant+파일명 전달
-- JobCard: video FAILED 잡이 engine.resume()(DownloadEngine, video 미지원) 대신 VideoApi.create 재시도 분기, 실패 시 E-AND-VID-0205 설정
+### ④ confirm/prompt → 팝업 레이어 (웹) + ⑤ rename 팝업
+- CSS `.overlay`/`.popup` + JS `makeOverlay`/`closePopup`/`confirmPopup`/`promptPopup`/`delJobConfirm`
+- 모든 `confirm(`/`prompt(` 제거: purgeItem, emptyTrash, createFolder, renameItem, delItem, deleteSelected, delJob(780행, `delJobConfirm`), deleteRssFeed, resetSettings
 
-## 검증 요지
-- TDD: 파싱 순수 함수 테스트 먼저 작성(GREEN) 후 구현 확정
-- curl 진단: 네이버는 UA+전체 브라우저 헤더+302 follow → 200 (기존 302 차단 우회), 토렌트씨는 Mobile/전체 헤더로도 403 고정(Cloudflare)
-- JS 문법: WebAssets JS 추출(604~1921행) `node --check` OK (단일 raw string, 빠진 추출 시 `</script>` 포함으로 SyntaxError 확인)
-- 0204 에러코드: 실제 throw 없음(parseManifestVariants는 원본 폴백) → 죽은 코드 방지 위해 error_message_ko.json·PLAN에서 제거
+### 검증
+- TDD: `playlistDurationMs`(합/0) 2건, `parseOutTimeUs`(마지막값/빈값) 1건, 기존 `segmentsDoneFromLog` 5건 + `safeFilename` 한글 보존 포함 총 10건 GREEN
+- WebAssets JS 추출(615~1977행) `node --check` OK
+- 실기기 E2E: `진행검증.mp4`(64세그먼트 hq, 634.6s) → **진행률 1→100% 단조 증가**(bytes 동반) 후 `DONE/100%/63.9MB`. segmentsDone은 불안정 로그에도 진행률은 신뢰성 있게 증가
+- `한글파일명_테스트.mp4` → DONE/100%/63.9MB, 파일명 JSON 보존
 
 ## 문서
-- CHANGELOG.md: v0.12.2 유튜브 제거 + v0.13.0(MP4 직접·해상도·파일명·재시도·0205·헤더 강화) 기록
-- TODO.md: v0.13 섹션 T-885~T-890 등록 (885~889 ✅, 890 진행중)
-- PLAN_v0.13_stream_download.md: 요구/기술 제약/결정 사항/마일스톤/에러코드(0205만)
+- TODO.md: v0.13.1 섹션 T-891(진행률)+T-892(배지)+T-893(한글)+T-894(팝업) 등록/완료
+- CHANGELOG.md: v0.13.1 (스트림 진행률-safe·배지·한글 회귀·팝업 레이어·rename)
+- PLAN_v0.13_stream_download.md: 진행률 신호를 LogCallback→-progress로 갱신
 
 ## 주요 변경 파일
-- **변경**: StreamDetector.kt (kind/qualities/MP4 직접/해상도 파싱/브라우저 헤더), VideoApi.kt (kind·qualities 반영), WebAssets.kt (해상도·파일명·재시도), DownloadsScreen.kt (VideoAddRow/JobCard), error_message_ko.json (0205), CHANGELOG.md, TODO.md
-- **신규**: StreamDetectorTest.kt (TDD 7건), PLAN_v0.13_stream_download.md
+- **변경**: StreamDetector.kt(재생시간/마스터 팔로우), VideoApi.kt(totalDurationMs), VideoDownloadManager.kt(-progress/pollProgress/computeProgress/parseOutTimeUs), JobsRepository.kt(totalDurationMs), RelayServer.kt(응답), WebAssets.kt(배지/팝업/진행률 UI), StreamDetectorTest.kt(신규 테스트), CHANGELOG.md, TODO.md
 
 ## 남은 TODO
-- T-890: 실기기 E2E(네이버 MP4·토렌트씨 스트림 해상도·재시도) — 실기기 필요로 미수행, 커밋은 별도 요청으로 진행
+- 없음 (5종 모두 검증, 커밋 진행)
 
 ## 큐 상태
 - 없음
 
 ## E2E
-- StreamDetectorTest 단위 테스트 7건 GREEN (HLS/DASH 해상도·MP4 kind 판정)
-- 실기기 E2E 미수행 (T-890 잔여)
+- 단위 10건 GREEN (진행률 파싱·세그먼트·한글 파일명)
+- 실기기 2회 완주: 직접 미디어 m3u8 다운로드(진행률 1→100% 신뢰성), 한글 파일명 보존

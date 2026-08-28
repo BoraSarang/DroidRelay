@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.13.1] - 2026-08-28
+
+### Added [android+web] — 스트림 진행률 · 배지 정렬 · 한글 파일명 · 팝업 5종
+- **스트림 진행률 (재작업·신뢰성 확보)**:
+  - **회귀 발견**: FFmpegKit `LogCallback`은 HLS `Opening '...ts'` 로그를 **불안정 전달** — 동일 미디어 m3u8도 실행마다 64/64 또는 2/64에서 정체(로그 기반 세그먼트%는 신뢰 불가, 실기기 증명)
+  - **해결**: FFmpeg argv에 `-progress <file>` 추가 → `pollProgress`가 1초마다 파일의 `out_time_us`를 읽고 총 재생시간으로 나눠 % 계산(신뢰/단조). 우선순위: `out_time/총재생시간` → 세그먼트(보조) → 파일 크기/총용량
+  - `StreamDetector.playlistDurationMs`(`#EXTINF` 합)·`mediaDurationMsFromUrl`(마스터면 첫 variant 팔로우), `Job.totalDurationMs`, `VideoDownloadManager.parseOutTimeUs` 순수 함수(TDD), `/api/jobs`에 `totalDurationMs` 응답
+  - **웹 UI**: 비디오 카드에 재생시간 %·용량·경과/남은시간 표시(세그먼트는 불안정 로그라 보조만). 실기기 `진행검증.mp4` 1→100% 단조 증가·DONE/63.9MB 검증
+- **배지 정렬**: 웹 다운로드 카드 state·video 배지를 `.badges` 그룹으로 묶어 한 줄 정렬
+- **파일명 한글 깨짐 — 회귀 테스트로 확정 처리**: 현재 코드에는 조각화 원인 없음(모든 sanitizer가 한글 유지, 직접 URL은 `96570b6`로 해결). `safeFilename` 한글 보존 회귀 테스트 추가 + 실기기 `한글파일명_테스트.mp4` JSON에 깨짐 없이 저장 확인
+- **confirm/prompt 제거 → 팝업 레이어**: 웹에서 브라우저 `confirm()`/`prompt()`를 9곳 전부 제거하고 커스텀 `.overlay`/`.popup`(makeOverlay·confirmPopup·promptPopup·delJobConfirm)으로 대체 — 휴지통 비우기·폴더 생성/rename·파일 삭제·다운로드 삭제·RSS 삭제·설정 초기화 등
+
+### Verified (E2E)
+- ktlint + `testDebugUnitTest` 10건 GREEN(진행률 파싱·세그먼트·한글 파일명) + assembleDebug + WebAssets JS `node --check`
+- 실기기 2회 완주: 직접 미디어 m3u8 다운로드(진행률 1→100% 신뢰성 증가, DONE/63.9MB), 한글 파일명 보존 확인
+
 ## [0.13.0] - 2026-08-28
 
 ### Added [android+server] — 비디오 다운로드 개선 (MP4 직접 · 해상도 선택 · 재요청)

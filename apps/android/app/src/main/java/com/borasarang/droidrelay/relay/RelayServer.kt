@@ -966,6 +966,9 @@ private fun Application.relayRoutes(context: Context, serverRef: RelayServer) {
                     put("order", j.order)
                     put("errorMessage", j.errorMessage ?: JSONObject.NULL)
                     put("type", j.type)
+                    put("segmentsTotal", j.segmentsTotal)
+                    put("segmentsDone", j.segmentsDone)
+                    put("totalDurationMs", j.totalDurationMs)
                 })
             }
             call.respondText(arr.toString(), ContentType.Application.Json)

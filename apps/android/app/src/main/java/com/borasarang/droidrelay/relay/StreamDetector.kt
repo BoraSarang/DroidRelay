@@ -24,6 +24,7 @@ object StreamDetector {
     private val TITLE_RE = Pattern.compile("<title[^>]*>\\s*([^<]{1,120})</title>", Pattern.CASE_INSENSITIVE)
     private val directManifest = Regex("^https?://\\S+\\.(m3u8|mpd)([?#].*)?$", RegexOption.IGNORE_CASE)
     private val directMp4 = Regex("^https?://\\S+\\.(mp4|webm|mov)([?#].*)?$", RegexOption.IGNORE_CASE)
+    private val EXTINF_RE = Regex("""#EXTINF:\s*([0-9]+(?:\.[0-9]+)?)""")
 
     /** 해상도 선택 가능한 스트림 variant — label(예: 720p) + 실제 다운로드 URL + 프로토콜 */
     data class Quality(
@@ -38,6 +39,7 @@ object StreamDetector {
         val isDirect: Boolean,
         val kind: String, // stream | mp4 | page
         val qualities: List<Quality> = emptyList(),
+        val segmentsTotal: Int = 0, // HLS 세그먼트 전체 개수 (0이면 미지원/미측정)
     )
 
     private val client by lazy {
@@ -58,7 +60,7 @@ object StreamDetector {
         if (directManifest.containsMatchIn(url)) {
             DebugLogger.i(TAG, "[FEATURE] 직접 매니페스트 url=${url.take(90)}")
             val qs = parseManifestVariants(url)
-            return Found(url, "스트림 (직접 주소)", true, "stream", qs)
+            return Found(url, "스트림 (직접 주소)", true, "stream", qs, resolveSegmentsCount(url))
         }
         if (!url.startsWith("http://") && !url.startsWith("https://")) {
             throw VideoException("E-AND-VID-0200", "스트림 주소(m3u8/mpd) 또는 웹페이지 URL이 아닙니다")
@@ -83,7 +85,7 @@ object StreamDetector {
         val abs = resolve(url, found)
         val qs = parseManifestVariants(abs)
         DebugLogger.i(TAG, "검출 성공 title='$title' url=${abs.take(90)} quality=${qs.size}")
-        return Found(abs, title, false, "stream", qs)
+        return Found(abs, title, false, "stream", qs, resolveSegmentsCount(abs))
     }
 
     /** 매니페스트 URL을 GET해 variant(해상도) 및 프로토콜 판정 */
@@ -110,6 +112,53 @@ object StreamDetector {
         directMp4.containsMatchIn(url) -> "mp4"
         directManifest.containsMatchIn(url) -> "stream"
         else -> "page"
+    }
+
+    /** HLS 매니페스트 본문에서 세그먼트 개수(#EXTINF 라인 수)를 센다 — 미디어 플레이리스트 기준 */
+    fun countHlsSegments(playlist: String): Int {
+        var n = 0
+        var lines = playlist.lineSequence()
+        // #EXTINF 값이 줄바꿈으로 이어질 수 있으나, 일반적으로 EXTINF 1줄 = 세그먼트 1개
+        for (line in lines) {
+            val t = line.trim()
+            if (t.startsWith("#EXTINF")) n++
+            if (t.startsWith("#EXT-X-ENDLIST")) break
+        }
+        return n
+    }
+
+    /** HLS 미디어 플레이리스트에서 총 재생 시간(ms)을 센다 (#EXTINF 합) — 미디어 플레이리스트 기준 */
+    fun playlistDurationMs(playlist: String): Long {
+        var total = 0L
+        for (line in playlist.lineSequence()) {
+            val t = line.trim()
+            val v = EXTINF_RE.find(t)?.groupValues?.get(1) ?: continue
+            total += (v.toDouble() * 1000).toLong()
+            if (t.startsWith("#EXT-X-ENDLIST")) break
+        }
+        return total
+    }
+
+    /** 매니페스트 URL에서 미디어 총 재생 시간(ms) 추정 — 마스터면 첫 variant 팔로우, 측정 불가 시 0 */
+    fun mediaDurationMsFromUrl(url: String): Long = try {
+        val body = fetch(url)
+        val d = playlistDurationMs(body)
+        if (d > 0) d
+        else parseHlsMaster(body, url).firstOrNull()?.let { q -> playlistDurationMs(fetch(q.url)) } ?: 0
+    } catch (_: Exception) {
+        0
+    }
+
+    /** 직접 매니페스트/검출 매니페스트에서 실측 세그먼트 전체 개수 추정 (미디어 플레이리스트, 실패 시 마스터 첫 variant 팔로우) */
+    fun resolveSegmentsCount(url: String): Int = try {
+        val body = fetch(url)
+        val cnt = countHlsSegments(body)
+        if (cnt > 0) cnt
+        else parseHlsMaster(body, url).firstOrNull()?.let { q ->
+            countHlsSegments(fetch(q.url))
+        } ?: 0
+    } catch (_: Exception) {
+        0
     }
 
     /** HLS 마스터 매니페스트에서 #EXT-X-STREAM-INF(RESOLUTION) variant를 해상도별로 추출 */
