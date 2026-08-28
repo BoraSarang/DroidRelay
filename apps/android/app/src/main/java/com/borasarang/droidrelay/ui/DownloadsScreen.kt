@@ -293,9 +293,7 @@ private fun VideoAddRow(onDlStarted: () -> Unit) {
             try {
                 val r = VideoApi.analyze(u)
                 result = r
-                fileName = (r.optString("title").ifBlank { "video" }
-                    .replace(Regex("[\\\\/:*?\"<>|\\s]+"), "_")
-                    .trim('.', '_', ' ').take(60)).plus(".mp4")
+                fileName = defaultFileName(r, u)
                 DebugLogger.i("UI Video", "분석 성공 kind=${r.optString("kind") ?: "stream"} qualities=${r.optJSONArray("qualities")?.length() ?: 0}")
             } catch (e: VideoException) {
                 error = "${e.code}: ${e.message}"
@@ -665,4 +663,18 @@ internal fun qrBitmap(content: String): Bitmap? {
             }
         }
     }.getOrNull()
+}
+
+/** 분석 결과 JSON과 원본 입력 URL로 기본 다운로드 파일명(확장자 제외)을 만든다 */
+private fun defaultFileName(r: JSONObject, inputUrl: String): String {
+    val base = if (r.optBoolean("direct")) {
+        val u = r.optString("streamUrl").ifBlank { inputUrl }
+        u.substringAfterLast('/').substringBefore('?').substringBefore('#')
+            .substringBeforeLast('.').replace(Regex("[\\\\/:*?\"<>|\\s]+"), "_")
+            .ifBlank { "video" }
+    } else {
+        r.optString("title").ifBlank { "video" }
+            .replace(Regex("[\\\\/:*?\"<>|\\s]+"), "_").trim('.', '_', ' ')
+    }
+    return base.trim('.', '_', ' ').take(60).ifBlank { "video" }.plus(".mp4")
 }

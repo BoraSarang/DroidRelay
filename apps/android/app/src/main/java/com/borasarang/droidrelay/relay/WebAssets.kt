@@ -687,7 +687,8 @@ function analyzeVideo(){
       window.__videoQIdx=-1;
     }
     h+='<div class="meta" style="margin-top:8px">파일명</div>';
-    h+='<input id="vname" type="text" value="'+esc((j.title||'video').replace(/[\\/:*?"<>|]/g,'_').slice(0,60))+'.mp4" style="width:100%;margin:4px 0 12px;box-sizing:border-box">';
+    var baseName=(j.direct?((j.streamUrl||v).split('/').pop().split('?')[0].split('#')[0].replace(/\.[^.]+$/,'')||'video'):((j.title||'video').replace(/[\\/:*?"<>|]/g,'_'))).slice(0,60)||'video';
+    h+='<input id="vname" type="text" value="'+esc(baseName)+'.mp4" style="width:100%;margin:4px 0 12px;box-sizing:border-box">';
     h+='<div style="margin-top:6px"><button onclick="createVideo(\''+v.replace(/\\/g,'\\\\').replace(/'/g,"\\'")+'\')">▶ 다운로드</button></div>';
     h+='</div>';
     area.innerHTML=h;
