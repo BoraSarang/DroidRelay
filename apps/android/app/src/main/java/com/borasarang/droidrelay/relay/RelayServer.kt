@@ -325,12 +325,19 @@ private fun Application.relayRoutes(context: Context, serverRef: RelayServer) {
     }
 
     // API 호출 자동 기록 — Call 단계 (응답 후 status 캡처)
+    // 폴링(정보 획득용 GET) 엔드포인트는 웹의 refresh()로 빈번히 호출되어 버퍼/로그를 채우므로 제외
+    val pollExempt = setOf(
+        "/api/info", "/api/jobs", "/api/torrents", "/api/guard/status"
+    )
     intercept(ApplicationCallPipeline.Call) {
         val pathRaw = call.request.path()
         try {
             proceed()
         } finally {
-            if (pathRaw.startsWith("/api/") && !pathRaw.startsWith("/api/events")) {
+            if (pathRaw.startsWith("/api/") &&
+                !pathRaw.startsWith("/api/events") &&
+                pathRaw !in pollExempt
+            ) {
                 val status = call.response.status()?.value ?: 0
                 DebugLogger.api("?", pathRaw, status)
             }

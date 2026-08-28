@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.13.3] - 2026-08-28
+
+### Fixed [web] — 모바일 레이아웃 후속
+- **보관함/휴지통 가로 100%**: `.storage-main{width:100%}` — flex column에서 `.storage-main`이 명시 폭 없이 일부만 채워 비어 보이던 문제 해결
+- **설정 메뉴 오른쪽 여백**: `.settings-nav`에 `padding:0 12px` + `box-sizing:border-box` — 12개 칩이 가로 스크롤될 때 우측이 화면 가장자리에 붙던 문제 해결
+- **카드 액션 삐져나감 (다운로드·토렌트)**: `.card-acts`에 `box-sizing:border-box` — `width:100%` + 좌우 `padding`이 content-box로 더해져 카드 폭(366px)을 벗어나던 문제 해결 (모바일 390px 실측: acts 폭 364px, 카드 안에 정확히 수용)
+
+### Changed [web] — 서브타이틀 문구 축약
+- `.sub`: `이 페이지에서 요청하면 휴대폰이 직접 다운로드합니다 · 끊겨도 이어받기됩니다` → **`휴대폰이 직접 다운로드합니다 · 끊겨도 이어받기됩니다`**
+
+### Changed [android] — 폴링 API 디버그 로그 억제
+- 정보 획득용 GET 폴링 엔드포인트(`/api/info`, `/api/jobs`, `/api/torrents`, `/api/guard/status`)를 `DebugLogger.api` 자동 기록에서 제외 — 웹 `refresh()`에 의해 빈번히 호출되어 API 버퍼/Logcat을 채우던 노이즈 제거 (RelayServer.kt `pollExempt`)
+
+### Verified (E2E)
+- `assembleDebug` 성공 + 실기기 재설치. agent-browser 모바일(iPhone 14, 390px) 실측: 다운로드/토렌트 카드 `.card-acts` L=13~R=377 (카드 R=378) 삐져나감 없음. 설정 `.settings-nav` 우측 여백 확보 확인
+
 ## [0.13.2] - 2026-08-28
 
 ### Added [web] — 모바일 대응

@@ -169,12 +169,14 @@ object WebAssets {
     .info{flex-direction:column;align-items:stretch;gap:8px}
     .info-left,.info-right{flex-wrap:wrap;gap:8px 14px;white-space:normal;overflow:visible}
     .card{flex-direction:column}
-    .card-acts{width:100%;flex-direction:row;gap:6px;padding:0 14px 14px}
+    .card-acts{width:100%;box-sizing:border-box;flex-direction:row;gap:6px;padding:0 14px 14px}
     .card-acts .ghost,.card-acts .btn-dl{flex:1;width:auto;padding:8px 0}
+    .name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;word-break:normal;max-width:100%}
     #panel-storage>div{flex-direction:column}
     #treePanel{display:none}
+    .storage-main{width:100%}
     .settings-layout{flex-direction:column}
-    .settings-nav{width:100%;display:flex;flex-wrap:nowrap;overflow-x:auto;gap:6px;padding-bottom:6px;-webkit-overflow-scrolling:touch}
+    .settings-nav{width:100%;display:flex;flex-wrap:nowrap;overflow-x:auto;gap:6px;padding:0 12px 6px;box-sizing:border-box;-webkit-overflow-scrolling:touch}
     .settings-nav .settings-nav-title{display:none}
     .settings-nav .settings-nav-item{flex-shrink:0;white-space:nowrap}
     .settings-content{width:100%}
@@ -187,7 +189,7 @@ object WebAssets {
 </style></head><body>
 <div class="wrap">
   <h1>📡 DroidRelay</h1>
-  <div class="sub">이 페이지에서 요청하면 휴대폰이 직접 다운로드합니다 · 끊겨도 이어받기됩니다</div>
+  <div class="sub">휴대폰이 직접 다운로드합니다 · 끊겨도 이어받기됩니다</div>
   <div class="info" id="info">서버 정보 로딩 중…</div>
 
   <div class="tabs">

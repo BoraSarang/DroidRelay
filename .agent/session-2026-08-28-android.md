@@ -18,6 +18,16 @@
 - **검증**: POPUP/트래쉬/모바일 모두 `assembleDebug` 성공, 서버 응답에 새 핸들러(`__popupOk`, `width:auto;padding:5px 10px`, `@media(max-width:640px)`) 반영 확인
 - **문서갱신**: TODO T-896, CHANGELOG v0.13.2
 
+## v0.13.3 후속 (동일 일자 — v0.13.2 커밋 `f772e6b` 이후)
+- **사용자 실기기 보고 이슈 4건 수정 (T-897)**:
+  1. **보관함/휴지통 가로 100% 미충족**: flex column 컨테이너에서 `.storage-main`이 명시 폭 없이(부분)만 채움 → 모바일 CSS에 `.storage-main{width:100%}` 추가
+  2. **설정 메뉴 오른쪽 여백 없음**: `.settings-nav`가 stretch로 콘텐츠 폭 100%, 12개 칩이 `flex-shrink:0`+`nowrap` → `overflow-x:auto` 스크롤 시 우측이 화면 가장자리에 닿음. 처음엔 `width:calc(100%+24px)`+`margin-left:-12px`로 시도했으나 **오른쪽이 +12px 초과해 오히려 0px** → `margin-left`/`width:calc` 제거하고 `padding:0 12px`+`box-sizing:border-box`로 확정
+  3. **카드 액션 삐져나감 (다운로드·토렌트 동일)**: `.card-acts`가 content-box라 `width:100%`+`padding` 14px 좌우가 더해져 카드 폭(366px)을 초과 → `.card-acts{box-sizing:border-box}` 추가. agent-browser 모바일 실측: acts L=13~R=377(카드 R=378) **삐져나감 없음**
+  4. **서브타이틀 문구 축약**: `.sub` → `휴대폰이 직접 다운로드합니다 · 끊겨도 이어받기됩니다` (옵션 B, 사용자 직접 선택)
+- **디버그 로그 억제 (RelayServer.kt)**: 폴링(정보 획득용) GET 엔드포인트 `/api/info`, `/api/jobs`, `/api/torrents`, `/api/guard/status`는 웹이 `refresh()`로 빈번히 호출 → API 자동 기록 인터셉터(`DebugLogger.api`)에서 `pollExempt` set으로 제외해 버퍼/로그 낭비 방지. 각 자체 핸들러의 `DebugLogger`는 그대로 유지(오류만).
+- **검증**: `assembleDebug` 성공 + 실기기 재설치. agent-browser(iPhone 14, 390px)로 다운로드/토렌트 카드 `.card-acts` 수용 확인. 설정 `.settings-nav` 우측 여백 확보
+- **문서갱신**: TODO T-897, CHANGELOG v0.13.3
+
 ## 핵심 기술 결정 — 진행률 신호 (회귀 발견)
 - FFmpegKit `LogCallback`은 HLS `Opening '...ts'` 로그를 **불안정 전달**: `한글테스트`(직접 미디어 m3u8)는 64/64 전달됐지만 동일 URL `최종확인`은 2/64에서 정체. bytes는 커지는데 segmentsDone이 안 오름 → 로그 기반 세그먼트%는 신뢰 불가
 - **해결**: FFmpeg argv에 `-progress <file>` 추가 → `pollProgress`가 1초마다 파일의 `out_time_us`(µs)를 읽고 `totalDurationMs`(미디어 플레이리스트 `#EXTINF` 합)로 나눠 % 계산. `out_time`은 FFmpeg 자체 출력이라 단조·신뢰성 확보
