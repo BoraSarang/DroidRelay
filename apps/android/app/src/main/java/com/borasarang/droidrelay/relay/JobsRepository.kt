@@ -21,8 +21,10 @@ data class Job(
     val startedAt: Long = 0L,
     val finishedAt: Long = 0L,
     val order: Int = 0,
-    val expectedSha256: String? = null,
-    val verified: Boolean = false,
+    val type: String = "http",
+    val segmentsTotal: Int = 0, // HLS 세그먼트 전체 (0=미지원) — video 전용
+    val segmentsDone: Int = 0, // 처리된 세그먼트 수 — video 전용 (진행률 근거)
+    val totalDurationMs: Long = 0L, // HLS 총 재생 시간(ms) — video 전용 (-progress 기반 진행률 근거)
 )
 
 object JobsRepository {
@@ -34,7 +36,7 @@ object JobsRepository {
     fun all(): List<Job> = _jobs.value
     fun get(id: String): Job? = map[id]
 
-    fun add(url: String, filename: String, expectedSha256: String? = null): Job {
+    fun add(url: String, filename: String, type: String = "http"): Job {
         map.values.none { it.url == url && it.state == JobState.RUNNING }
             .also { dup ->
                 if (!dup) DebugLogger.w(TAG, "중복 URL 재추가 감지: $url")
@@ -42,24 +44,26 @@ object JobsRepository {
         val nextOrder = (map.values.maxOfOrNull { it.order } ?: 0) + 1
         val job = Job(
             id = newId(), url = url, filename = uniqueName(filename),
-            order = nextOrder, expectedSha256 = expectedSha256?.lowercase(),
+            order = nextOrder, type = type,
         )
         map[job.id] = job
         refresh()
-        DebugLogger.i(TAG, "작업 추가 id=${job.id} file='${job.filename}' state=QUEUED order=$nextOrder sha256=${if (expectedSha256 != null) "지정" else "없음"}")
+        DebugLogger.i(TAG, "작업 추가 id=${job.id} file='${job.filename}' state=QUEUED type=$type order=$nextOrder")
         return job
     }
 
     fun update(id: String, transform: (Job) -> Job) {
+        var changed = false
         map.computeIfPresent(id) { _, before ->
             val after = transform(before)
-            if (before.state != after.state) {
+            changed = after != before
+            if (changed && before.state != after.state) {
                 DebugLogger.i(
                     TAG,
                     "상태전이 id=$id '${before.filename}' ${before.state} → ${after.state}" +
                         " (${fmt(after.downloadedBytes)}/${if (after.totalBytes > 0) fmt(after.totalBytes) else "?"})",
                 )
-            } else if (after.downloadedBytes != before.downloadedBytes &&
+            } else if (changed && after.downloadedBytes != before.downloadedBytes &&
                 after.state == JobState.RUNNING &&
                 crossedMilestone(before.downloadedBytes, after.downloadedBytes, after.totalBytes)
             ) {
@@ -70,7 +74,7 @@ object JobsRepository {
             }
             after
         }
-        refresh()
+        if (changed) refresh()
     }
 
     fun remove(id: String): Boolean {        val removed = map.remove(id)

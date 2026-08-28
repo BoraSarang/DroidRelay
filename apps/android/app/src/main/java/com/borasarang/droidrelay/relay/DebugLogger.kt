@@ -8,11 +8,12 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * DebugLogger — 디버그 빌드에서만 동작하는 인메모리 링버퍼 로거 (AGENTS.md 8장·10장)
+ * DebugLogger — 디버그 빌드에서만 동작하는 인메모리 링버퍼 로거
  *
  * - enabled = BuildConfig.DEBUG : 릴리즈 빌드에선 기록·Logcat 출력 모두 0비용(조기 반환)
- * - 최근 600줄 링버퍼 유지 → 디버그 패널에서 선택/전체 복사 지원 (10.2)
+ * - 최근 300줄 링버퍼 유지 → 웹/안드로이드 디버그 패널에서 라이브 스트리밍
  * - 레벨: D(세부동작) I(주요흐름) W(경고) E(오류+원인)
+ * - API 호출 자동 기록 (API 태그, /api/debug/api-calls 로 조회)
  */
 object DebugLogger {
 
@@ -20,13 +21,25 @@ object DebugLogger {
     var enabled: Boolean = BuildConfig.DEBUG
 
     private const val TAG = "DroidRelay"
-    private const val MAX_LINES = 600
+    private const val MAX_LINES = 300
     private val buf = ArrayDeque<String>(MAX_LINES + 16)
+    private val apiBuf = ArrayDeque<String>(MAX_LINES + 16)
     private val time = SimpleDateFormat("HH:mm:ss.SSS", Locale.US)
 
     fun d(tag: String, message: String) = write("D", tag, message)
     fun i(tag: String, message: String) = write("I", tag, message)
     fun w(tag: String, message: String) = write("W", tag, message)
+
+    /** API 호출 자동 기록 (path, method, status, bytes, ms) */
+    fun api(method: String, path: String, status: Int, bytes: Long = 0, ms: Long = 0) {
+        if (!enabled) return
+        val line = "[${time.format(Date())}][API] $method $path → $status ${bytes}B ${ms}ms"
+        synchronized(apiBuf) {
+            if (apiBuf.size >= MAX_LINES) apiBuf.removeFirst()
+            apiBuf.addLast(line)
+        }
+        Log.i(TAG, line)
+    }
 
     fun e(tag: String, message: String, throwable: Throwable? = null) {
         val cause = throwable?.let { t ->
@@ -55,11 +68,16 @@ object DebugLogger {
     @Synchronized
     fun clear() {
         buf.clear()
+        synchronized(apiBuf) { apiBuf.clear() }
         if (enabled) i("Logger", "로그 버퍼 비움 (사용자 요청)")
     }
 
     @Synchronized
     fun count(): Int = buf.size
+
+    fun apiLines(): List<String> = synchronized(apiBuf) { apiBuf.toList() }
+    fun apiDump(): String = synchronized(apiBuf) { apiBuf.joinToString("\n") }
+    fun apiCount(): Int = synchronized(apiBuf) { apiBuf.size }
 
     @Synchronized
     private fun write(level: String, tag: String, message: String) {

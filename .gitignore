@@ -11,3 +11,8 @@ captures/
 .cxx/
 .build/
 *.xcodeproj/
+
+# 보안 — 릴리즈 서명 키 (절대 커밋 금지)
+*.jks
+*.keystore
+keystore.properties

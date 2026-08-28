@@ -63,9 +63,11 @@ object TorrentRepository {
     }
 
     fun update(id: String, transform: (TorrentJob) -> TorrentJob) {
+        var changed = false
         map.computeIfPresent(id) { _, before ->
             val after = transform(before)
-            if (before.state != after.state) {
+            changed = after != before
+            if (changed && before.state != after.state) {
                 DebugLogger.i(
                     TAG,
                     "상태전이 id=$id '${before.name}' ${before.state} → ${after.state}" +
@@ -74,7 +76,7 @@ object TorrentRepository {
             }
             after
         }
-        refresh()
+        if (changed) refresh()
     }
 
     fun remove(id: String): Boolean {

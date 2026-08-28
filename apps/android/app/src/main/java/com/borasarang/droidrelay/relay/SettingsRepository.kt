@@ -50,6 +50,32 @@ data class AppSettings(
     val torrentDhtEnabled: Boolean = true,
     val torrentPexEnabled: Boolean = true,
     val torrentListenPort: Int = 6881,
+    val torrentSequentialDownload: Boolean = false,
+    // Debrid (Phase 1.3)
+    val debridEnabled: Boolean = false,
+    val debridProvider: String = "",
+    val debridApiKey: String = "",
+    // Guard (Phase 2.4)
+    val guardEnabled: Boolean = false,
+    val guardThermalLimit: Int = 50,
+    val guardBatteryLimit: Int = 20,
+    val guardStorageLimit: Int = 90,
+    // Webhook (Phase 2.2)
+    val webhookEnabled: Boolean = false,
+    val webhookUrl: String = "",
+    val webhookSecret: String = "",
+    // Tunnel (Phase 2.3)
+    val tunnelEnabled: Boolean = false,
+    val tunnelProvider: String = "",
+    // MCP permissions (Phase 2.1 확장)
+    val mcpPrivacyMode: Boolean = false,
+    val mcpToolsDisabled: Set<String> = emptySet(),
+    // Schedule (Phase 3 확장)
+    val scheduleEnabled: Boolean = false,
+    val scheduleCron: String = "",
+    val scheduleWifiOnly: Boolean = true,
+    val scheduleChargingOnly: Boolean = false,
+    val scheduleBatteryMin: Int = 30,
 )
 
 private val Context.settingsDataStore by preferencesDataStore("droidrelay_settings")
@@ -88,6 +114,32 @@ class SettingsRepository(private val context: Context) {
         val TORRENT_DHT = booleanPreferencesKey("torrent_dht")
         val TORRENT_PEX = booleanPreferencesKey("torrent_pex")
         val TORRENT_LISTEN_PORT = intPreferencesKey("torrent_listen_port")
+        val TORRENT_SEQUENTIAL = booleanPreferencesKey("torrent_sequential")
+        // Debrid
+        val DEBRID_ENABLED = booleanPreferencesKey("debrid_enabled")
+        val DEBRID_PROVIDER = stringPreferencesKey("debrid_provider")
+        val DEBRID_API_KEY = stringPreferencesKey("debrid_api_key")
+        // Guard
+        val GUARD_ENABLED = booleanPreferencesKey("guard_enabled")
+        val GUARD_THERMAL = intPreferencesKey("guard_thermal_limit")
+        val GUARD_BATTERY = intPreferencesKey("guard_battery_limit")
+        val GUARD_STORAGE = intPreferencesKey("guard_storage_limit")
+        // Webhook
+        val WEBHOOK_ENABLED = booleanPreferencesKey("webhook_enabled")
+        val WEBHOOK_URL = stringPreferencesKey("webhook_url")
+        val WEBHOOK_SECRET = stringPreferencesKey("webhook_secret")
+        // Tunnel
+        val TUNNEL_ENABLED = booleanPreferencesKey("tunnel_enabled")
+        val TUNNEL_PROVIDER = stringPreferencesKey("tunnel_provider")
+        // MCP permissions
+        val MCP_PRIVACY = booleanPreferencesKey("mcp_privacy_mode")
+        val MCP_TOOLS_DISABLED = stringSetPreferencesKey("mcp_tools_disabled")
+        // Schedule
+        val SCHED_ENABLED = booleanPreferencesKey("sched_enabled")
+        val SCHED_CRON = stringPreferencesKey("sched_cron")
+        val SCHED_WIFI = booleanPreferencesKey("sched_wifi_only")
+        val SCHED_CHARGING = booleanPreferencesKey("sched_charging_only")
+        val SCHED_BATTERY_MIN = intPreferencesKey("sched_battery_min")
     }
 
     val settings: Flow<AppSettings> = context.settingsDataStore.data.map { p ->
@@ -116,6 +168,26 @@ class SettingsRepository(private val context: Context) {
             torrentDhtEnabled = p[Keys.TORRENT_DHT] ?: true,
             torrentPexEnabled = p[Keys.TORRENT_PEX] ?: true,
             torrentListenPort = (p[Keys.TORRENT_LISTEN_PORT] ?: 6881).coerceIn(1024, 65535),
+            torrentSequentialDownload = p[Keys.TORRENT_SEQUENTIAL] ?: false,
+            debridEnabled = p[Keys.DEBRID_ENABLED] ?: false,
+            debridProvider = p[Keys.DEBRID_PROVIDER] ?: "",
+            debridApiKey = p[Keys.DEBRID_API_KEY] ?: "",
+            guardEnabled = p[Keys.GUARD_ENABLED] ?: false,
+            guardThermalLimit = (p[Keys.GUARD_THERMAL] ?: 50).coerceIn(50, 70),
+            guardBatteryLimit = (p[Keys.GUARD_BATTERY] ?: 20).coerceIn(5, 50),
+            guardStorageLimit = (p[Keys.GUARD_STORAGE] ?: 90).coerceIn(50, 99),
+            webhookEnabled = p[Keys.WEBHOOK_ENABLED] ?: false,
+            webhookUrl = p[Keys.WEBHOOK_URL] ?: "",
+            webhookSecret = p[Keys.WEBHOOK_SECRET] ?: "",
+            tunnelEnabled = p[Keys.TUNNEL_ENABLED] ?: false,
+            tunnelProvider = p[Keys.TUNNEL_PROVIDER] ?: "",
+            mcpPrivacyMode = p[Keys.MCP_PRIVACY] ?: false,
+            mcpToolsDisabled = p[Keys.MCP_TOOLS_DISABLED] ?: emptySet(),
+            scheduleEnabled = p[Keys.SCHED_ENABLED] ?: false,
+            scheduleCron = p[Keys.SCHED_CRON] ?: "",
+            scheduleWifiOnly = p[Keys.SCHED_WIFI] ?: true,
+            scheduleChargingOnly = p[Keys.SCHED_CHARGING] ?: false,
+            scheduleBatteryMin = (p[Keys.SCHED_BATTERY_MIN] ?: 30).coerceIn(5, 100),
         )
     }
 
@@ -188,6 +260,75 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun setTorrentListenPort(port: Int) =
         context.settingsDataStore.edit { it[Keys.TORRENT_LISTEN_PORT] = port.coerceIn(1024, 65535) }
+
+    suspend fun setTorrentSequentialDownload(enabled: Boolean) =
+        context.settingsDataStore.edit { it[Keys.TORRENT_SEQUENTIAL] = enabled }
+
+    // Debrid setters
+    suspend fun setDebridEnabled(enabled: Boolean) =
+        context.settingsDataStore.edit { it[Keys.DEBRID_ENABLED] = enabled }
+
+    suspend fun setDebridProvider(provider: String) =
+        context.settingsDataStore.edit { it[Keys.DEBRID_PROVIDER] = provider }
+
+    suspend fun setDebridApiKey(key: String) =
+        context.settingsDataStore.edit { it[Keys.DEBRID_API_KEY] = key }
+
+    // Guard setters
+    suspend fun setGuardEnabled(enabled: Boolean) =
+        context.settingsDataStore.edit { it[Keys.GUARD_ENABLED] = enabled }
+
+    suspend fun setGuardThermalLimit(limit: Int) =
+        context.settingsDataStore.edit { it[Keys.GUARD_THERMAL] = limit.coerceIn(50, 70) }
+
+    suspend fun setGuardBatteryLimit(limit: Int) =
+        context.settingsDataStore.edit { it[Keys.GUARD_BATTERY] = limit.coerceIn(5, 50) }
+
+    suspend fun setGuardStorageLimit(limit: Int) =
+        context.settingsDataStore.edit { it[Keys.GUARD_STORAGE] = limit.coerceIn(50, 99) }
+
+    // Webhook setters
+    suspend fun setWebhookEnabled(enabled: Boolean) =
+        context.settingsDataStore.edit { it[Keys.WEBHOOK_ENABLED] = enabled }
+
+    suspend fun setWebhookUrl(url: String) =
+        context.settingsDataStore.edit { it[Keys.WEBHOOK_URL] = url }
+
+    suspend fun setWebhookSecret(secret: String) =
+        context.settingsDataStore.edit { it[Keys.WEBHOOK_SECRET] = secret }
+
+    // Tunnel setters
+    suspend fun setTunnelEnabled(enabled: Boolean) =
+        context.settingsDataStore.edit { it[Keys.TUNNEL_ENABLED] = enabled }
+
+    suspend fun setTunnelProvider(provider: String) =
+        context.settingsDataStore.edit { it[Keys.TUNNEL_PROVIDER] = provider }
+
+    // MCP permission setters
+    suspend fun setMcpPrivacyMode(enabled: Boolean) =
+        context.settingsDataStore.edit { it[Keys.MCP_PRIVACY] = enabled }
+
+    suspend fun setMcpToolDisabled(toolName: String, disabled: Boolean) =
+        context.settingsDataStore.edit {
+            val current = it[Keys.MCP_TOOLS_DISABLED] ?: emptySet()
+            it[Keys.MCP_TOOLS_DISABLED] = if (disabled) current + toolName else current - toolName
+        }
+
+    // Schedule setters
+    suspend fun setScheduleEnabled(enabled: Boolean) =
+        context.settingsDataStore.edit { it[Keys.SCHED_ENABLED] = enabled }
+
+    suspend fun setScheduleCron(cron: String) =
+        context.settingsDataStore.edit { it[Keys.SCHED_CRON] = cron }
+
+    suspend fun setScheduleWifiOnly(wifiOnly: Boolean) =
+        context.settingsDataStore.edit { it[Keys.SCHED_WIFI] = wifiOnly }
+
+    suspend fun setScheduleChargingOnly(chargingOnly: Boolean) =
+        context.settingsDataStore.edit { it[Keys.SCHED_CHARGING] = chargingOnly }
+
+    suspend fun setScheduleBatteryMin(min: Int) =
+        context.settingsDataStore.edit { it[Keys.SCHED_BATTERY_MIN] = min.coerceIn(5, 100) }
 
     companion object {
         @Volatile private var instance: SettingsRepository? = null

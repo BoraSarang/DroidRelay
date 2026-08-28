@@ -323,6 +323,8 @@ fun SettingsScreen(onPortChanged: (Int) -> Unit) {
             SwitchRow("PEX (피어 교환)", s.torrentPexEnabled) { v -> kotlinx.coroutines.MainScope().launch { repo.setTorrentPexEnabled(v) } }
         }
 
+        HorizontalDivider(color = cs.outlineVariant)
+
         // ── 앱 정보 ──
         val appVersion = remember {
             runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName }.getOrNull() ?: "?"

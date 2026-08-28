@@ -4,6 +4,15 @@ plugins {
     alias(libs.plugins.ktlint)
 }
 
+import java.util.Properties
+
+val keystorePropsFile = rootProject.file("keystore.properties")
+val keystoreProps = Properties().apply {
+    if (keystorePropsFile.exists()) {
+        keystorePropsFile.inputStream().use { load(it) }
+    }
+}
+
 android {
     namespace = "com.borasarang.droidrelay"
     compileSdk = 36
@@ -12,22 +21,48 @@ android {
         applicationId = "com.borasarang.droidrelay"
         minSdk = 26
         targetSdk = 36
-        versionCode = 2
-        versionName = "0.5.0"
+        versionCode = 13
+        versionName = "0.13.3"
+    }
+
+    signingConfigs {
+        create("release") {
+            if (keystorePropsFile.exists()) {
+                storeFile = rootProject.file(keystoreProps["storeFile"] as String)
+                storePassword = keystoreProps["storePassword"] as String
+                keyAlias = keystoreProps["keyAlias"] as String
+                keyPassword = keystoreProps["keyPassword"] as String
+            }
+        }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
+            if (keystorePropsFile.exists()) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+        isCoreLibraryDesugaringEnabled = true
     }
     buildFeatures {
         compose = true
         buildConfig = true
+    }
+    packaging {
+        resources {
+            excludes +=
+                setOf(
+                    "META-INF/INDEX.LIST",
+                    "META-INF/io.netty.versions.properties",
+                    "META-INF/native-image/**",
+                    "META-INF/versions/9/**",
+                )
+        }
     }
     testOptions {
         unitTests.isReturnDefaultValues = true
@@ -49,11 +84,15 @@ dependencies {
 
     implementation(libs.okhttp)
     implementation(libs.ktor.server.core)
-    implementation(libs.ktor.server.cio)
+    implementation(libs.ktor.server.netty)
     implementation("io.ktor:ktor-io:3.5.2")
     implementation(libs.zxing.core)
     implementation(libs.libtorrent4j)
     implementation(libs.libtorrent4j.android.arm64)
+    implementation(libs.ffmpeg.kit.https)
+    implementation(libs.smart.exception.java)
+
+    coreLibraryDesugaring(libs.desugar.jdk.libs.nio)
 
     testImplementation(libs.junit)
 }
