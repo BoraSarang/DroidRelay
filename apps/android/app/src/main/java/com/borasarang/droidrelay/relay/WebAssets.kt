@@ -660,18 +660,35 @@ function videoErr(msg){
 }
 function analyzeVideo(){
   var v=document.getElementById('vurl').value.trim();
-  if(!v){videoErr('스트림 URL(HLS/DASH)을 입력해 주세요');return;}
+  if(!v){videoErr('스트림/동영상 URL을 입력해 주세요');return;}
   var area=document.getElementById('videoArea');
-  area.innerHTML='<div class="info">스트림 주소 확인 중… (페이지 스니핑)</div>';
+  area.innerHTML='<div class="info">주소 확인 중… (동영상/스트림 스니핑)</div>';
   fetch('/api/video/analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:v})}).then(function(r){
     if(!r.ok)return r.text().then(function(t){throw new Error(t);});
     return r.json();
   }).then(function(j){
     __videoState=j;
-    var h='<div class="vcard" style="margin-top:8px"><div class="name">'+esc(j.title)+'</div>'
-      +'<div class="meta">'+(j.direct?'직접 스트림 주소':'페이지에서 스트림 감지')+'</div>'
-      +'<div class="meta" style="word-break:break-all;color:#8FD8FF">'+esc(j.streamUrl)+'</div>'
-      +'<div style="margin-top:12px"><button onclick="createVideo(\''+v.replace(/\\/g,'\\\\').replace(/'/g,"\\'")+'\')">다운로드 (원본 그대로)</button></div>';
+    var kindTxt=j.kind==='mp4'?'MP4 직접 동영상':j.kind==='direct'||j.direct?'직접 스트림 주소':'페이지에서 동영상/스트림 감지';
+    var h='<div class="vcard" style="margin-top:8px"><div class="name">'+esc(j.title||v)+'</div>'
+      +'<div class="meta">'+kindTxt+'</div>'
+      +'<div class="meta" style="word-break:break-all;color:#8FD8FF">'+esc(j.streamUrl)+'</div>';
+    var qs=j.qualities||[];
+    if(qs.length>1){
+      h+='<div class="meta" style="margin-top:8px;color:#8FD8FF">해상도 선택</div>';
+      h+='<div style="margin:6px 0;display:flex;flex-wrap:wrap;gap:6px">';
+      for(var i=0;i<qs.length;i++){
+        var sel=i===0?' checked':'';
+        h+='<label style="display:inline-flex;align-items:center;gap:4px;padding:4px 8px;border:1px solid #22345A;border-radius:8px;font-size:12px">'
+          +'<input type="radio" name="vq" value="'+i+'"'+sel+' onchange="window.__videoQIdx=this.value">'+esc(qs[i].label)+'</label>';
+      }
+      h+='</div>';
+      window.__videoQIdx=0;
+    }else{
+      window.__videoQIdx=-1;
+    }
+    h+='<div class="meta" style="margin-top:8px">파일명</div>';
+    h+='<input id="vname" type="text" value="'+esc((j.title||'video').replace(/[\\/:*?"<>|]/g,'_').slice(0,60))+'.mp4" style="width:100%;margin:4px 0 12px;box-sizing:border-box">';
+    h+='<div style="margin-top:6px"><button onclick="createVideo(\''+v.replace(/\\/g,'\\\\').replace(/'/g,"\\'")+'\')">▶ 다운로드</button></div>';
     h+='</div>';
     area.innerHTML=h;
     refresh();
@@ -679,9 +696,31 @@ function analyzeVideo(){
     videoErr('분석 실패: '+(e.message||e));
   });
 }
+function currentVideoUrl(){
+  var j=__videoState||{};if(!j)return'';
+  var idx=window.__videoQIdx;
+  var qs=j.qualities||[];
+  if(qs.length>1&&idx>=0&&idx<qs.length)return qs[idx].url||j.streamUrl||'';
+  return j.streamUrl||'';
+}
+function retryVideo(v){
+  // FAILED video 잡 재시도 — 원본 url로 재분석+재다운로드 (VideoApi.create가 재분석 포함)
+  var area=document.getElementById('videoArea');
+  if(area)area.innerHTML='<div class="info">재다운로드 시작 중…</div>';
+  fetch('/api/video/create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:v,streamUrl:'',filename:''})}).then(function(r){
+    if(!r.ok)return r.text().then(function(t){throw new Error(t);});
+    return r.json();
+  }).then(function(){
+    if(area){area.innerHTML='<div class="info" style="color:#69E29B">✓ 재다운로드 시작됨 — 목록에서 확인</div>';setTimeout(function(){area.innerHTML='';},3000);}
+    refresh();
+  }).catch(function(e){
+    if(area)videoErr('재시도 실패: '+(e.message||e));
+  });
+}
 function createVideo(v){
   var j=__videoState||{};
-  var body={url:v,streamUrl:(j.streamUrl||'')};
+  var nameEl=document.getElementById('vname');
+  var body={url:v,streamUrl:currentVideoUrl(),filename:(nameEl?nameEl.value.trim():'')};
   var area=document.getElementById('videoArea');
   area.innerHTML='<div class="info">다운로드 시작 중…</div>';
   fetch('/api/video/create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(function(r){
@@ -719,6 +758,7 @@ function render(jobs){
     if(j.type!=='video'&&j.state==='RUNNING')pause='<button class="ghost" onclick="act(\''+j.id+'\',\'pause\')">일시정지</button>';
     if(j.type==='video'&&j.state==='RUNNING')pause='<span class="eta" style="align-self:center">FFmpeg → 삭제로 취소</span>';
     if(j.type!=='video'&&(j.state==='PAUSED'||j.state==='FAILED'))pause='<button class="ghost" onclick="act(\''+j.id+'\',\'resume\')">재개</button>';
+    if(j.type==='video'&&j.state==='FAILED')pause='<button class="ghost" onclick="retryVideo(\''+esc(j.url).replace(/\\/g,'\\\\').replace(/'/g,"\\'")+'\')">재시도</button>';
     var cancel='<button class="ghost" onclick="if(confirm(\'이 항목을 삭제하시겠습니까?\'))delJob(\''+j.id+'\')">삭제</button>';
     h+='<div class="card" draggable="true" data-id="'+j.id+'">'
       +'<div style="flex:1;min-width:0;padding:14px">'

@@ -181,6 +181,18 @@ T-001~T-008 전부 완료 (커밋 7574486).
 | T-855 | 웨일 "안전하지 않은 다운로드" 회피 — mkcert 자체 서명 인증서 + Ktor 엔진 **CIO→Netty 전환**(CIO는 HTTPS 미지원)+ HTTPS 8443 이중 커넥터. 웹 다운로드 링크를 `https://<host>:8443` 절대 경로로 전환, `/dl-file`에 nosniff·cache-control 헤더 추가. HTTP/HTTPS 동일 바이트(MD5 일치) 검증, 맥은 최초 1회 TLS 경고 후 정상 사용(CA 등록은 선택·미사용) | ✅ |
 | T-856 | HTTP→HTTPS 리다이렉트(307) — LAN 클라이언트의 `http://…:8080` 접속을 `https://…:8443`로 이동. loopback(localhost/127.0.0.1/자기 IP)은 예외(터널 tailscaled·앱 자체 점검 보호). 맥에서 307→HTTPS follow 200 + ISO 전체 수신, 기기 loopback 200 확인 | ✅ |
 
+## v0.13 (2026-08-28) — 비디오 다운로드 개선 (재요청 · MP4 직접 · 해상도/파일명)
+> 유튜브 제거 후 남은 스트림 기능을 사용자 요구 3종으로 개선(PLAN_v0.13_stream_download.md). PageKit(네이버 상품 MP4 직접·토렌트씨 스트림 파싱) 동작을 OkHttp 정규식 기반으로 구현.
+
+| T-번호 | 내용 | 상태 |
+|--------|------|------|
+| T-885 | PLAN v0.13 작성 + TODO 등록 | ✅ |
+| T-886 | StreamDetector — MP4 직접(.mp4/임베디드 src/og:video/인라인 JS file 키) + m3u8/mpd 마스터 매니페스트 variant(해상도) 파싱(순수 함수, TDD) + Found.kind/qualities | ✅ |
+| T-887 | video 재요청 — 재시도는 UI(웹 retryVideo·앱 JobCard)에서 VideoApi.create(url) 재호출(재분석, 부분 재개 불가) + E-AND-VID-0205 | ✅ |
+| T-888 | API(analyze qualities / create variantUrl·filename) + 웹 UI(WebAssets 해상도 선택·파일명·FAILED video 재시도 버튼) | ✅ |
+| T-889 | 앱 Compose UI(DownloadsScreen 해상도 선택·파일명 입력·JobCard video 재시도 분기) | ✅ |
+| T-890 | 검증(ktlint·assembleDebug·testDebugUnitTest·node --check) + 실기기 E2E(네이버 MP4·토렌트씨 스트림해상도·재시도) + CHANGELOG/error_message_ko.json/세션 로그 + 커밋 | |
+
 ## v0.12.2 (2026-08-28) — YouTube/yt-dlp 지원 전면 제거
 > yt-dlp 방식은 유튜브 PoToken/봇가드 등 정책 변화로 막힐 위험이 커 **완전 폐기** — 폰은 외부 서버 없이 스트림(m3u8/mpd) 다운로드로 독립 동작.
 

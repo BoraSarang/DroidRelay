@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.13.0] - 2026-08-28
+
+### Added [android+server] — 비디오 다운로드 개선 (MP4 직접 · 해상도 선택 · 재요청)
+- **MP4 직접 다운로드**: `.mp4/.webm/.mov` 직접 URL 및 웹페이지 임베디드 동영상 스니핑(정규식) 지원. `StreamDetector.kindOf` = `stream`|`mp4`|`page`, `Found(kind, qualities)` 추가
+- **해상도 선택**: HLS 마스터(`#EXT-X-STREAM-INF:RESOLUTION=`)·DASH(`Representation` width/height) 매니페스트를 GET해 variant(해상도) 목록 파싱 — `parseHlsMaster`/`parseDashManifest` 순수 함수(TDD, 신규 `StreamDetectorTest` 8건 GREEN). 스트림 인식 시에만 라디오 해상도 선택 제공(MP4는 파일명만)
+- **파일명 변경**: `create` 시 `filename` 지정 가능. 웹 `#vname` input·앱 `OutlinedTextField`로 편집
+- **재요청(재시도)**: FAILED video 잡에서 `VideoApi.create(url)` 재호출로 재분석→재다운로드(부분 재개 불가). 웹 `retryVideo`·앱 `JobCard` video 분기 구현
+- **에러코드**: `E-AND-VID-0205`(비디오 재시도 실패) 추가 — `error_message_ko.json` 반영
+- **직접 주소 flow 강화**: `fetch`에 브라우저 헤더(Referer·Sec-Fetch-*·Accept-Language 등) 보강 — 직접 m3u8/mpd·접근 가능한 페이지의 봇 차단 일부 통과. `E-AND-VID-0200` 403 안내 문구를 Cloudflare/봇 차단 안내로 명확화
+  - 참고: Cloudflare Turnstile(토렌트씨)처럼 JS 챌린지를 요구하는 사이트는 OkHttp로 원천 불가 — 브라우저에서 m3u8/mpd 주소를 직접 복사해 입력해야 함
+
 ## [0.12.2] - 2026-08-28
 
 ### Removed [android+server] — YouTube/yt-dlp 지원 전면 제거

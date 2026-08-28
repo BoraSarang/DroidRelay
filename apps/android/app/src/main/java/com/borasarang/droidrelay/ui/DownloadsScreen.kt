@@ -40,6 +40,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -269,7 +270,7 @@ private fun AddRow() {
     }
 }
 
-/** 🎬 비디오 — 스트림(m3u8/mpd) URL 분석 → 다운로드 */
+/** 🎬 비디오 — 동영상(mp4)/스트림(m3u8/mpd) URL 분석 → 해상도·파일명 선택 → 다운로드 */
 @Composable
 private fun VideoAddRow(onDlStarted: () -> Unit) {
     val ctx = LocalContext.current
@@ -280,16 +281,22 @@ private fun VideoAddRow(onDlStarted: () -> Unit) {
     var starting by remember { mutableStateOf(false) }
     var result by remember { mutableStateOf<JSONObject?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
+    var fileName by remember { mutableStateOf("") }
+    var qIndex by remember { mutableIntStateOf(0) }
 
     fun analyze() {
         val u = url.trim()
         if (u.isBlank() || analyzing) return
         DebugLogger.i("UI Video", "[FEATURE] 분석 요청 url=${u.take(90)}")
-        analyzing = true; result = null; error = null
+        analyzing = true; result = null; error = null; qIndex = 0
         scope.launch {
             try {
-                result = VideoApi.analyze(u)
-                DebugLogger.i("UI Video", "분석 성공 kind=${result?.optString("kind") ?: "stream"}")
+                val r = VideoApi.analyze(u)
+                result = r
+                fileName = (r.optString("title").ifBlank { "video" }
+                    .replace(Regex("[\\\\/:*?\"<>|\\s]+"), "_")
+                    .trim('.', '_', ' ').take(60)).plus(".mp4")
+                DebugLogger.i("UI Video", "분석 성공 kind=${r.optString("kind") ?: "stream"} qualities=${r.optJSONArray("qualities")?.length() ?: 0}")
             } catch (e: VideoException) {
                 error = "${e.code}: ${e.message}"
                 DebugLogger.w("UI Video", "분석 실패 ${e.code}: ${e.message}")
@@ -307,11 +314,16 @@ private fun VideoAddRow(onDlStarted: () -> Unit) {
         starting = true; error = null
         scope.launch {
             try {
-                val streamUrl = r.optString("streamUrl").ifBlank { null }
-                VideoApi.create(ctx, u, streamUrl, null)
-                DebugLogger.i("UI Video", "다운로드 시작 url=${u.take(90)}")
+                val qs = r.optJSONArray("qualities")
+                val streamUrl = if (qs != null && qs.length() > 1 && qIndex in 0 until qs.length()) {
+                    qs.getJSONObject(qIndex).optString("url").ifBlank { r.optString("streamUrl") }
+                } else {
+                    r.optString("streamUrl")
+                }.ifBlank { null }
+                VideoApi.create(ctx, u, streamUrl, fileName.trim().ifBlank { null })
+                DebugLogger.i("UI Video", "다운로드 시작 url=${u.take(90)} q=$qIndex file=${fileName.trim()}")
                 onDlStarted()
-                result = null; url = ""
+                result = null; url = ""; fileName = ""
             } catch (e: VideoException) {
                 error = "${e.code}: ${e.message}"
                 DebugLogger.w("UI Video", "다운로드 시작 실패 ${e.code}: ${e.message}")
@@ -358,16 +370,60 @@ private fun VideoAddRow(onDlStarted: () -> Unit) {
             result?.let { r ->
                 Spacer(Modifier.height(10.dp))
                 Column(Modifier.fillMaxWidth().padding(start = 2.dp)) {
+                    val kindTxt = when (r.optString("kind")) {
+                        "mp4" -> "MP4 직접 동영상"
+                        "stream" -> "스트림 (m3u8/mpd)"
+                        else -> "웹페이지"
+                    }
                     Text(r.optString("title").ifBlank { url }, color = cs.onSurface, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(kindTxt, color = cs.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
                     Text(r.optString("streamUrl"), color = cs.onSurfaceVariant, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Spacer(Modifier.height(6.dp))
+
+                    val qs = r.optJSONArray("qualities")
+                    if (qs != null && qs.length() > 1) {
+                        Spacer(Modifier.height(8.dp))
+                        Text("해상도 선택", color = cs.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
+                        Spacer(Modifier.height(4.dp))
+                        for (idx in 0 until qs.length()) {
+                            val q = qs.getJSONObject(idx)
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.combinedClickable(onClick = { qIndex = idx }),
+                            ) {
+                                RadioButton(
+                                    selected = qIndex == idx,
+                                    onClick = { qIndex = idx },
+                                )
+                                Text(q.optString("label"), color = cs.onSurface, style = MaterialTheme.typography.bodySmall)
+                            }
+                        }
+                    }
+
+                    Spacer(Modifier.height(8.dp))
+                    Text("파일명", color = cs.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
+                    Spacer(Modifier.height(4.dp))
+                    OutlinedTextField(
+                        value = fileName,
+                        onValueChange = { fileName = it },
+                        singleLine = true,
+                        shape = MaterialTheme.shapes.small,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = cs.primary,
+                            unfocusedBorderColor = cs.outlineVariant,
+                            focusedTextColor = cs.onSurface,
+                            unfocusedTextColor = cs.onSurface,
+                            cursorColor = cs.primary,
+                        ),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Spacer(Modifier.height(8.dp))
                     Button(
                         onClick = { start() },
                         enabled = !starting,
                         shape = MaterialTheme.shapes.small,
                         modifier = Modifier.fillMaxWidth(),
                     ) {
-                        Text(if (starting) "시작 중..." else "▶ 다운로드 (원본 그대로)")
+                        Text(if (starting) "시작 중..." else "▶ 다운로드")
                     }
                 }
             }
@@ -377,7 +433,9 @@ private fun VideoAddRow(onDlStarted: () -> Unit) {
 
 @Composable
 private fun JobCard(job: Job) {
-    val engine = RelayApp.get(LocalContext.current)
+    val ctx = LocalContext.current
+    val engine = RelayApp.get(ctx)
+    val scope = rememberCoroutineScope()
     val cs = MaterialTheme.colorScheme
     val now = System.currentTimeMillis()
 
@@ -434,9 +492,26 @@ private fun JobCard(job: Job) {
                                 engine.pause(job.id)
                             }) { Icon(Icons.Filled.Pause, "일시정지", tint = cs.onSurfaceVariant) }
                             JobState.PAUSED, JobState.FAILED -> IconButton(onClick = {
-                                DebugLogger.i("UI", "재개 버튼 id=${job.id}")
-                                engine.resume(job.id)
-                            }) { Icon(Icons.Filled.PlayArrow, "재개", tint = cs.primary) }
+                                if (job.type == "video") {
+                                    // video 잡은 DownloadEngine 미소관 — 원본 url로 재분석+재다운로드 (부분 재개 불가)
+                                    DebugLogger.i("UI", "비디오 재시도 버튼 id=${job.id}")
+                                    JobsRepository.update(job.id) { it.copy(state = JobState.QUEUED, errorCode = null, errorMessage = "재다운로드 준비 중…") }
+                                    scope.launch {
+                                        try {
+                                            VideoApi.create(ctx, job.url, null, null)
+                                        } catch (e: VideoException) {
+                                            JobsRepository.update(job.id) { it.copy(state = JobState.FAILED, errorCode = e.code, errorMessage = "${e.code}: ${e.message}") }
+                                            DebugLogger.w("UI Video", "재시도 실패 ${e.code}: ${e.message}")
+                                        } catch (e: Exception) {
+                                            JobsRepository.update(job.id) { it.copy(state = JobState.FAILED, errorMessage = e.message ?: "재시도 실패") }
+                                            DebugLogger.w("UI Video", "재시도 오류: ${e.message}")
+                                        }
+                                    }
+                                } else {
+                                    DebugLogger.i("UI", "재개 버튼 id=${job.id}")
+                                    engine.resume(job.id)
+                                }
+                            }) { Icon(Icons.Filled.PlayArrow, if (job.type == "video") "재시도" else "재개", tint = cs.primary) }
                             else -> IconButton(onClick = {
                                 DebugLogger.i("UI", "삭제 버튼 id=${job.id}")
                                 engine.cancel(job.id)

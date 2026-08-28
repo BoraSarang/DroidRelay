@@ -13,15 +13,25 @@ import org.json.JSONObject
 object VideoApi {
     private const val TAG = "VideoApi"
 
-    /** 분석 — 스트림(m3u8/mpd) 전용. 실패 시 VideoException. */
+    /** 분석 — 스트림(m3u8/mpd)/동영상(mp4) 전용. 실패 시 VideoException. */
     suspend fun analyze(url: String): JSONObject = withContext(Dispatchers.IO) {
         DebugLogger.i(TAG, "[FEATURE] 분석 시작 url=${url.take(90)}")
         val d = StreamDetector.analyze(url)
         JSONObject().apply {
-            put("kind", "stream")
+            put("kind", d.kind)
             put("title", d.title)
             put("streamUrl", d.url)
             put("direct", d.isDirect)
+            val q = org.json.JSONArray().apply {
+                d.qualities.forEach { qu ->
+                    put(JSONObject().apply {
+                        put("label", qu.label)
+                        put("url", qu.url)
+                        put("protocol", qu.protocol)
+                    })
+                }
+            }
+            put("qualities", q)
         }
     }
 
