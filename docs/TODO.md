@@ -205,6 +205,7 @@ T-001~T-008 전부 완료 (커밋 7574486).
 | T-895 | 검증 — ktlint + testDebugUnitTest 10건 GREEN + assembleDebug + WebAssets JS node --check + 실기기 E2E 2회 완주 + 문서/세션 로그 + 커밋 | ✅ |
 | T-896 | 모바일 대응 — @media(max-width:640px) 미디어 쿼리 추가: wrap min-width 해제, 정보바 세로, 카드 액션 아래 재배치, 보관함 tree 숨김, 설정 사이드바→상단 가로 스크롤 칩, 입력 행 wrap | ✅ |
 | T-897 | 모바일 후속 — 보관함/휴지통 가로 100%(`.storage-main width:100%`), 설정 메뉴 오른쪽 여백(`.settings-nav padding/border-box`), 카드 액션 삐져나감(`.card-acts box-sizing:border-box`), 서브타이틀 문구 축약, 폴링 GET(`/api/info`,`/api/jobs`,`/api/torrents`,`/api/guard/status`) 디버그 로그 억제(`pollExempt`) | ✅ |
+| T-898 | 공개 배포 — 릴리즈 keystore+keystore.properties(gitignore)+build.gradle signingConfig 연결, versionName 0.13.3, 서명 APK 빌드+실기기 설치(서명 SHA-256 `2f1dc84a…` 확인), README+GitHub Pages 랜딩(docs/index.html), main merge+tag v0.13.3+gh release | ✅ |
 
 ## v0.12.2 (2026-08-28) — YouTube/yt-dlp 지원 전면 제거
 > yt-dlp 방식은 유튜브 PoToken/봇가드 등 정책 변화로 막힐 위험이 커 **완전 폐기** — 폰은 외부 서버 없이 스트림(m3u8/mpd) 다운로드로 독립 동작.

@@ -28,6 +28,14 @@
 - **검증**: `assembleDebug` 성공 + 실기기 재설치. agent-browser(iPhone 14, 390px)로 다운로드/토렌트 카드 `.card-acts` 수용 확인. 설정 `.settings-nav` 우측 여백 확보
 - **문서갱신**: TODO T-897, CHANGELOG v0.13.3
 
+## v0.13.3 공개 배포 (릴리즈)
+- **GitHub Release + 랜딩 + README**: 첫 공개 배포. `github.com/BoraSarang/DroidRelay`(public) — README.md + GitHub Pages 랜딩 `docs/index.html`(순수 단일 HTML, 다크 테마) 작성
+- **릴리즈 서명 체계 도입**: `keytool`(AS JBR)로 신규 릴리즈 keystore `apps/android/keystore/droidrelay-release.jks` 생성(SHA-256 `2f1dc84a…`) + `keystore.properties`(gitignore). `build.gradle.kts` `signingConfigs.release` + `buildTypes.release.signingConfig` 연결, 비밀번호는 `keystore.properties`에서 Properties 로드(하드코딩 금지)
+- **버전 정리**: `versionName` 0.13.0→**0.13.3** (versionCode 13)
+- **보안**: `.gitignore`에 `*.jks`/`*.keystore`/`keystore.properties` 추가 — 키 커밋 방지. git check-ignore로 확인
+- **실기기 설치**: debug v0.13.0→릴리즈 v0.13.3 전환. 서명 불일치(`INSTALL_FAILED_UPDATE_INCOMPATIBLE`) → `adb uninstall`(데이터 삭제, 사용자 승인) 후 `adb install` 성공. `apksigner verify`로 릴리즈 서명(SHA-256 `2f1dc84a…`) 확인
+- **문서갱신**: CHANGELOG v0.13.3 릴리즈 섹션, AGENTS.android.md 배포절차, 세션 로그
+
 ## 핵심 기술 결정 — 진행률 신호 (회귀 발견)
 - FFmpegKit `LogCallback`은 HLS `Opening '...ts'` 로그를 **불안정 전달**: `한글테스트`(직접 미디어 m3u8)는 64/64 전달됐지만 동일 URL `최종확인`은 2/64에서 정체. bytes는 커지는데 segmentsDone이 안 오름 → 로그 기반 세그먼트%는 신뢰 불가
 - **해결**: FFmpeg argv에 `-progress <file>` 추가 → `pollProgress`가 1초마다 파일의 `out_time_us`(µs)를 읽고 `totalDurationMs`(미디어 플레이리스트 `#EXTINF` 합)로 나눠 % 계산. `out_time`은 FFmpeg 자체 출력이라 단조·신뢰성 확보

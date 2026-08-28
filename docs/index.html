@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="DroidRelay — 휴대폰이 직접 다운로드하는 내장 웹 서버 앱. 외부 서버 없이 스트림(m3u8/mpd)·영상·토렌트를 폰에서 직접 받습니다.">
+<meta name="theme-color" content="#0b0f14">
+<title>DroidRelay — 폰이 직접 다운로드하는 내장 웹 서버 앱</title>
+<style>
+  :root{
+    --bg:#0b0f14; --bg2:#11161d; --card:#151b24; --line:#242e3c;
+    --txt:#e8edf4; --muted:#9aa7b8; --accent:#4f8cff; --accent2:#38d39f;
+    --radius:16px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Apple SD Gothic Neo","Noto Sans KR",sans-serif;
+    background:linear-gradient(160deg,#0b0f14 0%,#0e1420 55%,#0b1119 100%);
+    color:var(--txt);line-height:1.6;-webkit-font-smoothing:antialiased}
+  a{color:var(--accent);text-decoration:none}
+  a:hover{text-decoration:underline}
+  .wrap{max-width:1080px;margin:0 auto;padding:0 24px}
+
+  /* NAV */
+  nav{position:sticky;top:0;z-index:50;background:rgba(11,15,20,.75);backdrop-filter:blur(12px);
+    border-bottom:1px solid var(--line)}
+  .nav-inner{max-width:1080px;margin:0 auto;padding:14px 24px;display:flex;align-items:center;justify-content:space-between}
+  .logo{display:flex;align-items:center;gap:10px;font-weight:700;font-size:17px}
+  .logo .dot{width:22px;height:22px;border-radius:6px;background:linear-gradient(135deg,var(--accent),var(--accent2));display:grid;place-items:center;font-size:13px}
+  .nav-links{display:flex;gap:22px;font-size:14px;color:var(--muted)}
+  .nav-links a{color:var(--muted)}
+  .nav-links a:hover{color:var(--txt)}
+  .btn{padding:8px 16px;border-radius:10px;font-size:14px;font-weight:600;border:1px solid var(--line);
+    background:rgba(255,255,255,.04);color:var(--txt);cursor:pointer;transition:.2s}
+  .btn:hover{background:rgba(255,255,255,.09);text-decoration:none}
+  .btn-primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  .btn-primary:hover{background:#3f7cf0}
+
+  /* HERO */
+  header{padding:96px 0 64px;text-align:center;position:relative;overflow:hidden}
+  header .glow{position:absolute;top:-140px;left:50%;transform:translateX(-50%);width:720px;height:360px;
+    background:radial-gradient(closest-side,rgba(79,140,255,.28),transparent);pointer-events:none;filter:blur(10px)}
+  .badge{display:inline-flex;align-items:center;gap:8px;font-size:13px;color:var(--muted);
+    border:1px solid var(--line);padding:6px 14px;border-radius:999px;margin-bottom:28px}
+  .badge .pulse{width:8px;height:8px;border-radius:50%;background:var(--accent2);box-shadow:0 0 0 0 rgba(56,211,159,.6);animation:pulse 2s infinite}
+  @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(56,211,159,.55)}70%{box-shadow:0 0 0 10px rgba(56,211,159,0)}100%{box-shadow:0 0 0 0 rgba(56,211,159,0)}}
+  h1{font-size:clamp(34px,6vw,58px);font-weight:800;letter-spacing:-.02em;margin-bottom:20px}
+  h1 .grad{background:linear-gradient(90deg,var(--accent),var(--accent2));-webkit-background-clip:text;background-clip:text;color:transparent}
+  .sub{font-size:clamp(16px,2.4vw,20px);color:var(--muted);max-width:640px;margin:0 auto 36px}
+  .hero-actions{display:flex;gap:14px;justify-content:center;flex-wrap:wrap}
+  .hero-meta{margin-top:28px;font-size:13px;color:var(--muted)}
+  .hero-meta code{background:var(--card);border:1px solid var(--line);padding:2px 8px;border-radius:6px;font-size:12px}
+
+  /* FEATURES */
+  section{padding:64px 0}
+  .sec-title{font-size:clamp(24px,4vw,34px);font-weight:800;text-align:center;margin-bottom:12px}
+  .sec-sub{text-align:center;color:var(--muted);font-size:15px;max-width:560px;margin:0 auto 44px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:18px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:26px;transition:.25s}
+  .card:hover{transform:translateY(-4px);border-color:var(--accent)}
+  .card .ico{font-size:28px;margin-bottom:14px}
+  .card h3{font-size:18px;margin-bottom:8px}
+  .card p{color:var(--muted);font-size:14px}
+
+  /* HOW */
+  .steps{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:18px;counter-reset:step}
+  .step{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:26px}
+  .step .n{width:34px;height:34px;border-radius:10px;background:linear-gradient(135deg,var(--accent),var(--accent2));
+    display:grid;place-items:center;font-weight:800;font-size:16px;color:#fff;margin-bottom:16px}
+  .step h3{font-size:17px;margin-bottom:6px}
+  .step p{color:var(--muted);font-size:14px}
+  .step code{background:#0e1420;border:1px solid var(--line);padding:2px 6px;border-radius:5px;font-size:12px}
+
+  /* TERMINAL */
+  .term{background:#0e1420;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;max-width:720px;margin:0 auto}
+  .term-head{padding:12px 18px;border-bottom:1px solid var(--line);display:flex;gap:8px;align-items:center}
+  .term-head .c{width:11px;height:11px;border-radius:50%}
+  .c.r{background:#ff5f57}.c.y{background:#febc2e}.c.g{background:#28c840}
+  .term-body{padding:20px 24px;font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;font-size:13px;color:#b9e6c9;white-space:pre-wrap;overflow-x:auto}
+  .term-body .cmt{color:#6b7889}.term-body .dim{color:#8aa0b5}
+
+  /* DOWNLOAD */
+  .dl{text-align:center;background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:52px 30px;position:relative;overflow:hidden}
+  .dl .glow{position:absolute;inset:0;background:radial-gradient(closest-side,rgba(79,140,255,.18),transparent);pointer-events:none}
+  .dl h2{font-size:clamp(24px,4vw,32px);margin-bottom:12px}
+  .dl p{color:var(--muted);max-width:520px;margin:0 auto 30px}
+
+  footer{padding:40px 0;border-top:1px solid var(--line);text-align:center;color:var(--muted);font-size:13px}
+  footer .row{display:flex;gap:20px;justify-content:center;flex-wrap:wrap;margin-bottom:14px}
+  @media(max-width:640px){ header{padding:72px 0 48px}.wrap{padding:0 16px}}
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="nav-inner">
+    <div class="logo"><span class="dot">📡</span> DroidRelay</div>
+    <div class="nav-links">
+      <a href="#features">기능</a>
+      <a href="#how">사용법</a>
+      <a href="https://github.com/BoraSarang/DroidRelay">GitHub</a>
+    </div>
+  </div>
+</nav>
+
+<header>
+  <div class="glow"></div>
+  <div class="wrap" style="position:relative">
+    <div class="badge"><span class="pulse"></span> 외부 서버 없이 · 폰이 직접 다운로드</div>
+    <h1>폰이 직접 받아내는<br><span class="grad">내장 웹 서버 다운로드 앱</span></h1>
+    <p class="sub">중간 서버 없이 Android 기기 안에서 동작. 브라우저로 URL만 등록하면 스트림(m3u8/mpd)·영상·토렌트를 폰이 직접 이어받기로 받아 보관함에 저장합니다.</p>
+    <div class="hero-actions">
+      <a class="btn btn-primary" href="#download">APK 받기</a>
+      <a class="btn" href="https://github.com/BoraSarang/DroidRelay">GitHub 보기</a>
+    </div>
+    <div class="hero-meta">
+      네이티브 <code>Kotlin + Compose</code> · 내장 서버 <code>port 8080</code>
+    </div>
+  </div>
+</header>
+
+<section id="features">
+  <div class="wrap">
+    <h2 class="sec-title">간단하지만 강력한 다운로드 도구</h2>
+    <p class="sec-sub">폰의 대역폭을 그대로 활용해, 꺼져도 멈추지 않고 이어받습니다.</p>
+    <div class="grid">
+      <div class="card"><div class="ico">🎬</div><h3>스트림 다운로드</h3><p>m3u8(HLS)·MPD(DASH) 직접 주소 및 웹페이지 임베디드 영상 스니핑. 해상도 선택부터 진행률 표시까지.</p></div>
+      <div class="card"><div class="ico">📹</div><h3>직접 영상</h3><p>`.mp4/.webm/.mov` 직접 URL을 원본 그대로 보관함에 저장합니다.</p></div>
+      <div class="card"><div class="ico">🧲</div><h3>토렌트</h3><p>magnet·`.torrent` 지원. 시드/피어/속도 모니터링과 보관함 자동 이동.</p></div>
+      <div class="card"><div class="ico">🕸</div><h3>내장 웹 서버</h3><p>폰 안에서 웹 대시보드를 제공. 같은 네트워크 브라우저에서 접속해 조작합니다.</p></div>
+      <div class="card"><div class="ico">🔄</div><h3>이어받기</h3><p>네트워크가 단절돼도 다시 연결해 Range 기반 이어받기로 안전하게 완료합니다.</p></div>
+      <div class="card"><div class="ico">📊</div><h3>실시간 진행률</h3><p>FFmpeg <code>-progress</code> 기반으로 1초 단위 정확한 진행률·속도·예상시간을 표시합니다.</p></div>
+      <div class="card"><div class="ico">🔐</div><h3>보안</h3><p>WebAuth(HTTP Basic)·허용 IP 화이트리스트·HTTPS 옵션으로 웹 UI를 보호합니다.</p></div>
+      <div class="card"><div class="ico">🧠</div><h3>스마트 가드</h3><p>발열/배터리/저장공간 임계에 따라 다운로드를 자동 제한해 폰을 보호합니다.</p></div>
+      <div class="card"><div class="ico">🗓</div><h3>스케줄·RSS·웹훅</h3><p>크론 예약, RSS 자동 다운로드, 완료/실패 알림 웹훅까지 지원합니다.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="how">
+  <div class="wrap">
+    <h2 class="sec-title">3단계로 시작</h2>
+    <p class="sec-sub">별도 서버 없이, 폰 하나로 끝납니다.</p>
+    <div class="steps">
+      <div class="step"><div class="n">1</div><h3>APK 설치</h3><p>Releases에서 릴리즈 APK를 받아 폰에 설치합니다.</p></div>
+      <div class="step"><div class="n">2</div><h3>서버 시작</h3><p>앱에서 내장 서버를 켭니다 (기본 포트 <code>8080</code>).</p></div>
+      <div class="step"><div class="n">3</div><h3>웹 UI 접속</h3><p>같은 네트워크의 브라우저에서 <code>http://폰-IP:8080</code> 으로 접속해 URL을 등록합니다.</p></div>
+    </div>
+
+    <div class="term" style="margin-top:40px">
+      <div class="term-head"><span class="c r"></span><span class="c y"></span><span class="c g"></span></div>
+      <div class="term-body"><span class="cmt"># USB 연결한 맥/PC에서 폰의 웹 UI 열기</span>
+$ adb reverse tcp:8080 tcp:8080
+$ open http://localhost:8080
+
+<span class="cmt"># 폰 핫스팟 IP는 swlan0 인터페이스</span>
+<span class="dim">http://192.168.x.x:8080   ← 브라우저에서 접속</span></div>
+    </div>
+  </div>
+</section>
+
+<section id="download">
+  <div class="wrap">
+    <div class="dl">
+      <div class="glow"></div>
+      <div style="position:relative">
+        <h2>최신 릴리즈 받기</h2>
+        <p>v0.13.3 — 스트림 진행률·해상도 선택·모바일 웹 UI 개선. 서명된 APK를 GitHub Releases에서 내려받으세요.</p>
+        <a class="btn btn-primary" href="https://github.com/BoraSarang/DroidRelay/releases">📦 GitHub Releases</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div class="row">
+      <a href="https://github.com/BoraSarang/DroidRelay">GitHub</a>
+      <a href="https://github.com/BoraSarang/DroidRelay/releases">Releases</a>
+      <a href="https://github.com/BoraSarang/DroidRelay/blob/main/README.md">README</a>
+    </div>
+    <p>DroidRelay · 네이티브 오픈소스 다운로드 앱 · © BoRaSaRang</p>
+  </div>
+</footer>
+
+</body>
+</html>

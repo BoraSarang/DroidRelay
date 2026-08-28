@@ -2,6 +2,12 @@
 
 ## [0.13.3] - 2026-08-28
 
+### Release — 공개 배포 시작
+- **첫 공개 GitHub Release** (v0.13.3): README + GitHub Pages 랜딩(docs/index.html) 추가
+- **릴리즈 서명 체계 도입**: 신규 릴리즈 keystore(`apps/android/keystore/droidrelay-release.jks`, gitignore) + `keystore.properties`(gitignore) → `build.gradle.kts` `signingConfigs.release` 연결. 실기기 `R5CT215F4QK`에 서명 릴리즈 v0.13.3 설치·서명(SHA-256 `2f1dc84a…`) 확인
+- **버전 정리**: `versionName` 0.13.0 → **0.13.3** (versionCode 13 유지)
+- **보안**: `.gitignore`에 `*.jks`·`*.keystore`·`keystore.properties` 추가 — 서명 키 커밋 방지
+
 ### Fixed [web] — 모바일 레이아웃 후속
 - **보관함/휴지통 가로 100%**: `.storage-main{width:100%}` — flex column에서 `.storage-main`이 명시 폭 없이 일부만 채워 비어 보이던 문제 해결
 - **설정 메뉴 오른쪽 여백**: `.settings-nav`에 `padding:0 12px` + `box-sizing:border-box` — 12개 칩이 가로 스크롤될 때 우측이 화면 가장자리에 붙던 문제 해결

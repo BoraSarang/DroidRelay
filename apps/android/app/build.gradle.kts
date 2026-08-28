@@ -4,6 +4,15 @@ plugins {
     alias(libs.plugins.ktlint)
 }
 
+import java.util.Properties
+
+val keystorePropsFile = rootProject.file("keystore.properties")
+val keystoreProps = Properties().apply {
+    if (keystorePropsFile.exists()) {
+        keystorePropsFile.inputStream().use { load(it) }
+    }
+}
+
 android {
     namespace = "com.borasarang.droidrelay"
     compileSdk = 36
@@ -13,12 +22,26 @@ android {
         minSdk = 26
         targetSdk = 36
         versionCode = 13
-        versionName = "0.13.0"
+        versionName = "0.13.3"
+    }
+
+    signingConfigs {
+        create("release") {
+            if (keystorePropsFile.exists()) {
+                storeFile = rootProject.file(keystoreProps["storeFile"] as String)
+                storePassword = keystoreProps["storePassword"] as String
+                keyAlias = keystoreProps["keyAlias"] as String
+                keyPassword = keystoreProps["keyPassword"] as String
+            }
+        }
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
+            if (keystorePropsFile.exists()) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
     compileOptions {
