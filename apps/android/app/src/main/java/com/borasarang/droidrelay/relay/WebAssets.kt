@@ -162,6 +162,28 @@ object WebAssets {
   .settings-nav-item.active{background:#2F80ED;color:#fff;font-weight:600}
   .settings-content{flex:1;min-width:0;display:none}
   .settings-content.active{display:block}
+  /* ── 모바일 대응 (640px 이하) ── */
+  @media (max-width:640px){
+    .wrap{min-width:0;padding:12px}
+    h1{font-size:18px}
+    .info{flex-direction:column;align-items:stretch;gap:8px}
+    .info-left,.info-right{flex-wrap:wrap;gap:8px 14px;white-space:normal;overflow:visible}
+    .card{flex-direction:column}
+    .card-acts{width:100%;flex-direction:row;gap:6px;padding:0 14px 14px}
+    .card-acts .ghost,.card-acts .btn-dl{flex:1;width:auto;padding:8px 0}
+    #panel-storage>div{flex-direction:column}
+    #treePanel{display:none}
+    .settings-layout{flex-direction:column}
+    .settings-nav{width:100%;display:flex;flex-wrap:nowrap;overflow-x:auto;gap:6px;padding-bottom:6px;-webkit-overflow-scrolling:touch}
+    .settings-nav .settings-nav-title{display:none}
+    .settings-nav .settings-nav-item{flex-shrink:0;white-space:nowrap}
+    .settings-content{width:100%}
+    .si{min-width:0}
+    .row,.row-torrent{flex-wrap:wrap}
+    .row input,.row-torrent input{flex:1 1 100%}
+    .row button,.row-torrent button{flex-shrink:0}
+    .tabs .tab{padding:9px 2px;font-size:13px}
+  }
 </style></head><body>
 <div class="wrap">
   <h1>📡 DroidRelay</h1>
@@ -1086,8 +1108,8 @@ function renderTrash(items){
       +'<div style="min-width:0;flex:1"><div class="name">'+esc(f.name)+'</div>'
       +'<div class="file-meta">'+(isDir?'폴더':fmt(f.size))+(dateStr?' · '+dateStr:'')+'</div></div>'
       +'<div class="acts">'
-      +'<button class="ghost sm" onclick="restoreItem(this.closest(\'.file-row\').dataset.name)">♻️ 복구</button>'
-      +'<button class="ghost sm" style="color:#FF8A93" onclick="purgeItem(this.closest(\'.file-row\').dataset.name)">🔥 영구삭제</button>'
+      +'<button class="ghost sm" style="width:auto;padding:5px 10px" onclick="restoreItem(this.closest(\'.file-row\').dataset.name)">♻️ 복구</button>'
+      +'<button class="ghost sm" style="width:auto;padding:5px 10px;color:#FF8A93" onclick="purgeItem(this.closest(\'.file-row\').dataset.name)">🔥 영구삭제</button>'
       +'</div></div>';
   });
   el.innerHTML=h;
@@ -1099,23 +1121,31 @@ function restoreItem(name){
     if(d.error){alert(d.error)}else{showDlToast('복구됨: '+name+' → 보관함 루트')}
     refreshStorage()}).catch(function(e){alert(e)});
 }
+var __popupOk=null;
 function makeOverlay(){var o=document.createElement('div');o.className='overlay';o.id='popupOverlay';o.onclick=function(e){if(e.target===o)closePopup();};document.body.appendChild(o);return o;}
-function closePopup(){var o=document.getElementById('popupOverlay');if(o)o.remove();return false;}
+function closePopup(){var o=document.getElementById('popupOverlay');if(o)o.remove();__popupOk=null;return false;}
+document.addEventListener('keydown',function(e){
+  if(!document.getElementById('popupOverlay'))return;
+  if(e.key==='Enter'&&__popupOk){e.preventDefault();e.stopPropagation();var f=__popupOk;__popupOk=null;f();}
+  else if(e.key==='Escape')closePopup();
+});
 function confirmPopup(title,msg,onOk,danger){
   makeOverlay().innerHTML='<div class="popup"><h3>'+esc(title)+'</h3><p class="msg">'+esc(msg)+'</p><div class="pbtns">'
-    +'<button onclick="closePopup()">취소</button>'
-    +'<button class="'+(danger?'danger':'ok')+'" id="popupOk" autofocus>확인</button></div></div>';
+    +'<button type="button" onclick="closePopup()">취소</button>'
+    +'<button type="button" class="'+(danger?'danger':'ok')+'" id="popupOk" autofocus>확인</button></div></div>';
   document.getElementById('popupOk').onclick=function(){closePopup();if(onOk)onOk();};
+  __popupOk=function(){closePopup();if(onOk)onOk();};
   return false;
 }
 function promptPopup(title,placeholder,initial,onOk){
   makeOverlay().innerHTML='<div class="popup"><h3>'+esc(title)+'</h3>'
     +'<input id="popupInput" type="text" placeholder="'+esc(placeholder||'')+'" value="'+esc(initial||'')+'" maxlength="80">'
-    +'<div class="pbtns"><button onclick="closePopup()">취소</button>'
-    +'<button class="ok" id="popupOk">확인</button></div></div>';
+    +'<div class="pbtns"><button type="button" onclick="closePopup()">취소</button>'
+    +'<button type="button" class="ok" id="popupOk">확인</button></div></div>';
   function go(){var v=document.getElementById('popupInput').value.trim();if(!v){return;}closePopup();onOk(v);}
   document.getElementById('popupOk').onclick=go;
-  document.getElementById('popupInput').onkeydown=function(e){if(e.key==='Enter')go();if(e.key==='Escape')closePopup();};
+  document.getElementById('popupInput').onkeydown=function(e){if(e.key==='Enter'){e.preventDefault();e.stopPropagation();go();}if(e.key==='Escape')closePopup();};
+  __popupOk=go;
   setTimeout(function(){var i=document.getElementById('popupInput');if(i){i.focus();i.select();}},10);
   return false;
 }

@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.13.2] - 2026-08-28
+
+### Added [web] — 모바일 대응
+- **`@media (max-width:640px)` 미디어 쿼리 추가** — CSS 기반으로 모바일 레이아웃 재배치 (HTML/JS 변경 없음):
+  - `.wrap` `min-width:480px` 해제 → 가로 스크롤 제거
+  - 정보바 `.info` 세로 접기 + 좌/우 항목 wrap
+  - 다운로드/토렌트 카드 `.card` 세로 + `.card-acts`(112px 고정) 해제, 버튼 카드 아래 가로 배치
+  - 보관함 `#treePanel` 숨김 → 경로 이동만으로 탐색 (데스크톱은 유지)
+  - 설정 `settings-nav`(140px 사이드바) → 상단 가로 스크롤 칩, 콘텐츠 전체 폭
+  - 입력 행(`.row`/`.row-torrent`) wrap + 입력 전폭
+
+### Verified (E2E)
+- `assembleDebug` 성공, 실기기 서버 응답에 `@media(max-width:640px)` 반영 확인. 모바일 4탭·보관함·설정 시각 검증은 폰 뷰포트에서 권장
+
 ## [0.13.1] - 2026-08-28
 
 ### Added [android+web] — 스트림 진행률 · 배지 정렬 · 한글 파일명 · 팝업 5종

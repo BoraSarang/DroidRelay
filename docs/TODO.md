@@ -203,6 +203,7 @@ T-001~T-008 전부 완료 (커밋 7574486).
 | T-893 | 파일명 한글 깨짐 — safeFilename 한글 보존 회귀 테스트 + 실기기 `한글파일명_테스트.mp4` JSON 보존 확인(회귀 테스트로 확정) | ✅ |
 | T-894 | confirm/prompt 제거 → 팝업 레이어 + 폴더/파일 rename 팝업 — makeOverlay/confirmPopup/promptPopup/delJobConfirm, 웹 9곳 confirm/prompt 제거 | ✅ |
 | T-895 | 검증 — ktlint + testDebugUnitTest 10건 GREEN + assembleDebug + WebAssets JS node --check + 실기기 E2E 2회 완주 + 문서/세션 로그 + 커밋 | ✅ |
+| T-896 | 모바일 대응 — @media(max-width:640px) 미디어 쿼리 추가: wrap min-width 해제, 정보바 세로, 카드 액션 아래 재배치, 보관함 tree 숨김, 설정 사이드바→상단 가로 스크롤 칩, 입력 행 wrap | ✅ |
 
 ## v0.12.2 (2026-08-28) — YouTube/yt-dlp 지원 전면 제거
 > yt-dlp 방식은 유튜브 PoToken/봇가드 등 정책 변화로 막힐 위험이 커 **완전 폐기** — 폰은 외부 서버 없이 스트림(m3u8/mpd) 다운로드로 독립 동작.
