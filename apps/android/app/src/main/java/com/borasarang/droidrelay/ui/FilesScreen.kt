@@ -31,8 +31,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -58,7 +56,11 @@ private data class StorageItem(
     val isDir: Boolean,
     val size: Long = 0,
     val count: Int = 0,
+    val modified: Long = 0,
 )
+
+private fun fmtDateS(ts: Long): String =
+    if (ts <= 0) "" else java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault()).format(java.util.Date(ts))
 
 private fun fmtBytesS(n: Long): String = when {
     n < 1_048_576 -> "${n / 1024} KB"
@@ -69,10 +71,9 @@ private fun fmtBytesS(n: Long): String = when {
 private val DL_ROOT = File("/sdcard/Download/DroidRelay")
 
 @Composable
-fun FilesScreen() {
+fun FilesScreen(onShowSnack: (String) -> Unit = {}) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val snackbarHostState = remember { SnackbarHostState() }
     val cs = MaterialTheme.colorScheme
 
     val currentPath = remember { mutableStateOf("") }
@@ -101,6 +102,7 @@ fun FilesScreen() {
                         isDir = f.isDirectory,
                         size = if (f.isFile) f.length() else 0,
                         count = if (f.isDirectory) (f.listFiles()?.size ?: 0) else 0,
+                        modified = f.lastModified(),
                     )
                 } ?: emptyList()
                 withContext(Dispatchers.Main) {
@@ -115,7 +117,7 @@ fun FilesScreen() {
 
     fun fullPath(name: String) = if (currentPath.value.isEmpty()) name else "${currentPath.value}/$name"
 
-    fun toast(msg: String) { scope.launch { snackbarHostState.showSnackbar(msg) } }
+    fun toast(msg: String) { onShowSnack(msg) }
 
     Column(Modifier.fillMaxSize()) {
         // 상단 브레드크럼
@@ -132,7 +134,7 @@ fun FilesScreen() {
             }
             val parts = currentPath.value.split('/').filter { it.isNotEmpty() }
             Text(
-                "📱 보관함",
+                "보관함",
                 fontWeight = FontWeight.SemiBold,
                 color = cs.onSurface,
                 modifier = Modifier.clickable { currentPath.value = "" },
@@ -183,7 +185,7 @@ fun FilesScreen() {
             items(items.size, key = { items[it].name + items[it].isDir }) { idx ->
                 val item = items[idx]
                 Card(
-                    colors = CardDefaults.cardColors(containerColor = cs.surfaceContainerHigh),
+                    colors = CardDefaults.cardColors(containerColor = cs.surfaceContainer),
                     modifier = Modifier.fillMaxWidth().clickable {
                         if (item.isDir) {
                             currentPath.value = fullPath(item.name)
@@ -201,7 +203,8 @@ fun FilesScreen() {
                         Column(Modifier.weight(1f)) {
                             Text(item.name, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis, color = cs.onSurface)
                             Text(
-                                if (item.isDir) "${item.count}개" else fmtBytesS(item.size),
+                                (if (item.isDir) "${item.count}개" else fmtBytesS(item.size)) +
+                                    (fmtDateS(item.modified).let { if (it.isNotEmpty()) " · $it" else "" }),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = cs.onSurfaceVariant,
                             )
@@ -224,11 +227,18 @@ fun FilesScreen() {
                 }
             }
             if (items.isEmpty()) {
-                item { Text("비어 있습니다", color = cs.onSurfaceVariant, modifier = Modifier.padding(top = 40.dp)) }
+                item {
+                    Column(
+                        Modifier.fillMaxWidth().padding(top = 48.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        Icon(Icons.Filled.InsertDriveFile, null, tint = cs.outline, modifier = Modifier.size(36.dp))
+                        Spacer(Modifier.height(8.dp))
+                        Text("비어 있습니다", color = cs.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
             }
         }
-
-        SnackbarHost(hostState = snackbarHostState)
     }
 
     // 새 폴더 다이얼로그

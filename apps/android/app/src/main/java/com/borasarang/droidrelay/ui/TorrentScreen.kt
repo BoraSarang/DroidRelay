@@ -39,10 +39,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarDuration
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -51,7 +47,6 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -64,15 +59,12 @@ import com.borasarang.droidrelay.relay.RelayApp
 import com.borasarang.droidrelay.relay.TorrentJob
 import com.borasarang.droidrelay.relay.TorrentRepository
 import com.borasarang.droidrelay.relay.TorrentState
-import kotlinx.coroutines.launch
 
 @Composable
-fun TorrentScreen() {
+fun TorrentScreen(onShowSnack: (String) -> Unit = {}) {
     val context = LocalContext.current
     val engine = remember { RelayApp.getTorrent(context) }
     val torrents by TorrentRepository.torrents.collectAsState()
-    val snackbarHostState = remember { SnackbarHostState() }
-    val scope = rememberCoroutineScope()
 
     var showMagnetDialog by remember { mutableStateOf(false) }
     var showDeleteDialog by remember { mutableStateOf<TorrentJob?>(null) }
@@ -85,10 +77,10 @@ fun TorrentScreen() {
                 val bytes = context.contentResolver.openInputStream(it)?.use { s -> s.readBytes() } ?: return@let
                 val filename = it.lastPathSegment?.substringAfterLast('/') ?: "torrent"
                 engine.addTorrentFile(bytes, filename)
-                scope.launch { snackbarHostState.showSnackbar("torrent 파일 추가됨: $filename") }
+                onShowSnack("torrent 파일 추가됨: $filename")
             } catch (e: Exception) {
                 DebugLogger.e("TorrentUI", "torrent 파일 읽기 실패", e)
-                scope.launch { snackbarHostState.showSnackbar("torrent 파일 읽기 실패") }
+                onShowSnack("torrent 파일 읽기 실패")
             }
         }
     }
@@ -100,31 +92,9 @@ fun TorrentScreen() {
         }
     }
 
-    Scaffold(
-        floatingActionButton = {
-            Column {
-                FloatingActionButton(
-                    onClick = { showMagnetDialog = true },
-                    containerColor = MaterialTheme.colorScheme.primaryContainer,
-                ) {
-                    Icon(Icons.Filled.Link, "magnet 추가")
-                }
-                Spacer(Modifier.height(12.dp))
-                FloatingActionButton(
-                    onClick = { filePicker.launch(arrayOf("application/x-bittorrent")) },
-                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                ) {
-                    Icon(Icons.Filled.Add, "파일 추가")
-                }
-            }
-        },
-        snackbarHost = { SnackbarHost(snackbarHostState) },
-    ) { inner ->
+    Box(Modifier.fillMaxSize()) {
         if (torrents.isEmpty()) {
-            Box(
-                Modifier.fillMaxSize().padding(inner),
-                contentAlignment = Alignment.Center,
-            ) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Icon(
                         Icons.Filled.CloudDownload,
@@ -140,7 +110,7 @@ fun TorrentScreen() {
             }
         } else {
             LazyColumn(
-                Modifier.fillMaxSize().padding(inner),
+                Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 items(torrents, key = { it.id }) { job ->
@@ -153,6 +123,25 @@ fun TorrentScreen() {
                         onMoveDown = { engine.reorder(job.id, 1) },
                     )
                 }
+                item { Spacer(Modifier.height(80.dp)) }
+            }
+        }
+
+        Column(
+            Modifier.align(Alignment.BottomEnd).padding(20.dp),
+        ) {
+            FloatingActionButton(
+                onClick = { showMagnetDialog = true },
+                containerColor = MaterialTheme.colorScheme.primaryContainer,
+            ) {
+                Icon(Icons.Filled.Link, "magnet 추가")
+            }
+            Spacer(Modifier.height(12.dp))
+            FloatingActionButton(
+                onClick = { filePicker.launch(arrayOf("application/x-bittorrent")) },
+                containerColor = MaterialTheme.colorScheme.secondaryContainer,
+            ) {
+                Icon(Icons.Filled.Add, "파일 추가")
             }
         }
     }
@@ -162,7 +151,7 @@ fun TorrentScreen() {
             onDismiss = { showMagnetDialog = false },
             onConfirm = { magnet ->
                 engine.addMagnet(magnet)
-                scope.launch { snackbarHostState.showSnackbar("magnet 추가됨") }
+                onShowSnack("magnet 추가됨")
                 showMagnetDialog = false
             },
         )
@@ -249,7 +238,7 @@ private fun TorrentItem(
                                 if (etaParts.isNotEmpty()) {
                                     Spacer(Modifier.height(2.dp))
                                     Text(
-                                        "⏱ ${etaParts.joinToString(" · ")}",
+                                        etaParts.joinToString(" · "),
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )

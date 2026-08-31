@@ -21,8 +21,8 @@ android {
         applicationId = "com.borasarang.droidrelay"
         minSdk = 26
         targetSdk = 36
-        versionCode = 13
-        versionName = "0.13.3"
+        versionCode = 19
+        versionName = "0.16.1"
     }
 
     signingConfigs {

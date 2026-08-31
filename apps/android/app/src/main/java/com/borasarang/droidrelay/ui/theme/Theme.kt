@@ -34,6 +34,13 @@ private val LightScheme = lightColorScheme(
     onBackground = Color(0xFF191C20),
     surface = Color(0xFFF9F9FF),
     onSurface = Color(0xFF191C20),
+    surfaceDim = Color(0xFFD9DDE6),
+    surfaceBright = Color(0xFFF9F9FF),
+    surfaceContainerLowest = Color(0xFFFFFFFF),
+    surfaceContainerLow = Color(0xFFF3F6FC),
+    surfaceContainer = Color(0xFFEDF0F6),
+    surfaceContainerHigh = Color(0xFFE7EAF2),
+    surfaceContainerHighest = Color(0xFFE1E4EC),
     surfaceVariant = Color(0xFFDFE2EB),
     onSurfaceVariant = Color(0xFF43474E),
     outline = Color(0xFF73777F),
@@ -59,6 +66,13 @@ private val DarkScheme = darkColorScheme(
     onBackground = Color(0xFFE2E2E9),
     surface = Color(0xFF10141A),
     onSurface = Color(0xFFE2E2E9),
+    surfaceDim = Color(0xFF10141A),
+    surfaceBright = Color(0xFF363A42),
+    surfaceContainerLowest = Color(0xFF0B0E13),
+    surfaceContainerLow = Color(0xFF181C22),
+    surfaceContainer = Color(0xFF1C2026),
+    surfaceContainerHigh = Color(0xFF262A31),
+    surfaceContainerHighest = Color(0xFF31353D),
     surfaceVariant = Color(0xFF43474E),
     onSurfaceVariant = Color(0xFFC3C6CF),
     outline = Color(0xFF8D9199),
@@ -66,10 +80,10 @@ private val DarkScheme = darkColorScheme(
 )
 
 private val AppShapes = Shapes(
-    extraSmall = RoundedCornerShape(8.dp),
-    small = RoundedCornerShape(12.dp),
-    medium = RoundedCornerShape(14.dp),
-    large = RoundedCornerShape(18.dp),
+    extraSmall = RoundedCornerShape(4.dp),
+    small = RoundedCornerShape(8.dp),
+    medium = RoundedCornerShape(12.dp),
+    large = RoundedCornerShape(16.dp),
     extraLarge = RoundedCornerShape(28.dp),
 )
 
