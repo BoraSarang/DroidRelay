@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -47,7 +48,7 @@ fun SettingsScreen(onPortChanged: (Int) -> Unit) {
     val cs = MaterialTheme.colorScheme
 
     Column(
-        modifier = Modifier.verticalScroll(rememberScrollState()),
+        modifier = Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(bottom = 32.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
 
@@ -175,6 +176,37 @@ fun SettingsScreen(onPortChanged: (Int) -> Unit) {
                 valueRange = 0f..2048f,
             )
             SwitchRow("다운로드 알림 표시", s.notifications) { v -> kotlinx.coroutines.MainScope().launch { repo.setNotifications(v) } }
+
+            Spacer(Modifier.height(12.dp))
+            Text("전역 속도 제한 (다운로드·토렌트 공통)", color = cs.onSurfaceVariant, style = MaterialTheme.typography.labelMedium)
+            val dlMbps = if (s.maxDownloadBps > 0) (s.maxDownloadBps / 1_048_576).toInt().coerceIn(1, 10) else 0
+            SwitchRow(
+                "전역 다운로드 속도 제한",
+                s.maxDownloadBps > 0,
+            ) { on -> kotlinx.coroutines.MainScope().launch { repo.setMaxDownloadBps(if (on) 3L * 1_048_576 else 0L) } }
+            if (dlMbps > 0) {
+                Text("${dlMbps} Mbps", color = cs.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
+                Slider(
+                    value = dlMbps.toFloat(),
+                    onValueChange = { v -> kotlinx.coroutines.MainScope().launch { repo.setMaxDownloadBps(v.roundToInt().toLong() * 1_048_576) } },
+                    valueRange = 1f..10f,
+                    steps = 8,
+                )
+            }
+            val ulMbps = if (s.maxUploadBps > 0) (s.maxUploadBps / 1_048_576).toInt().coerceIn(1, 10) else 0
+            SwitchRow(
+                "전역 업로드 속도 제한",
+                s.maxUploadBps > 0,
+            ) { on -> kotlinx.coroutines.MainScope().launch { repo.setMaxUploadBps(if (on) 3L * 1_048_576 else 0L) } }
+            if (ulMbps > 0) {
+                Text("${ulMbps} Mbps", color = cs.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
+                Slider(
+                    value = ulMbps.toFloat(),
+                    onValueChange = { v -> kotlinx.coroutines.MainScope().launch { repo.setMaxUploadBps(v.roundToInt().toLong() * 1_048_576) } },
+                    valueRange = 1f..10f,
+                    steps = 8,
+                )
+            }
         }
 
         HorizontalDivider(color = cs.outlineVariant)
@@ -321,6 +353,180 @@ fun SettingsScreen(onPortChanged: (Int) -> Unit) {
 
             SwitchRow("DHT (분산 해시 테이블)", s.torrentDhtEnabled) { v -> kotlinx.coroutines.MainScope().launch { repo.setTorrentDhtEnabled(v) } }
             SwitchRow("PEX (피어 교환)", s.torrentPexEnabled) { v -> kotlinx.coroutines.MainScope().launch { repo.setTorrentPexEnabled(v) } }
+
+            Spacer(Modifier.height(16.dp))
+            Text("고급", color = cs.onSurfaceVariant, style = MaterialTheme.typography.labelMedium)
+            SwitchRow("시퀀셜 다운로드 (스트리밍 프리뷰)", s.torrentSequentialDownload) { v ->
+                kotlinx.coroutines.MainScope().launch { repo.setTorrentSequentialDownload(v) }
+            }
+            Text(
+                "첫 조각부터 순서대로 받아 재생 미리보기를 지원합니다",
+                color = cs.onSurfaceVariant,
+                style = MaterialTheme.typography.labelSmall,
+            )
+
+            var seedWait by remember(s.torrentMinSeedWaitSec) { mutableStateOf(s.torrentMinSeedWaitSec.toString()) }
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                OutlinedTextField(
+                    value = seedWait,
+                    onValueChange = { seedWait = it.filter { c -> c.isDigit() } },
+                    label = { Text("시더 부재 대기 (초, 0=끄기)") },
+                    singleLine = true,
+                    shape = MaterialTheme.shapes.small,
+                    modifier = Modifier.weight(1f),
+                )
+                Spacer(Modifier.width(8.dp))
+                Button(onClick = {
+                    val sec = seedWait.toIntOrNull()
+                    if (sec == null || sec !in 0..3600) {
+                        DebugLogger.w("Settings", "시더 대기 무효 값: $seedWait")
+                    } else {
+                        DebugLogger.i("Settings", "시더 대기 → $sec 초")
+                        kotlinx.coroutines.MainScope().launch { repo.setTorrentMinSeedWaitSec(sec) }
+                    }
+                }) { Text("적용") }
+            }
+
+            var listenPort by remember(s.torrentListenPort) { mutableStateOf(s.torrentListenPort.toString()) }
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                OutlinedTextField(
+                    value = listenPort,
+                    onValueChange = { listenPort = it.filter { c -> c.isDigit() } },
+                    label = { Text("리슨 포트") },
+                    singleLine = true,
+                    shape = MaterialTheme.shapes.small,
+                    modifier = Modifier.weight(1f),
+                )
+                Spacer(Modifier.width(8.dp))
+                OutlinedButton(onClick = {
+                    val r = (1024..65535).random()
+                    listenPort = r.toString()
+                    DebugLogger.i("Settings", "리슨 포트 랜덤 → $r")
+                    kotlinx.coroutines.MainScope().launch { repo.setTorrentListenPort(r) }
+                }) { Text("랜덤") }
+                Spacer(Modifier.width(4.dp))
+                Button(onClick = {
+                    val p = listenPort.toIntOrNull()
+                    if (p == null || p !in 1024..65535) {
+                        DebugLogger.w("Settings", "리슨 포트 무효 값: $listenPort")
+                    } else {
+                        DebugLogger.i("Settings", "리슨 포트 → $p")
+                        kotlinx.coroutines.MainScope().launch { repo.setTorrentListenPort(p) }
+                    }
+                }) { Text("적용") }
+            }
+            Text(
+                "변경 시 토렌트 엔진 재시작이 필요합니다",
+                color = cs.onSurfaceVariant,
+                style = MaterialTheme.typography.labelSmall,
+            )
+
+            var savePath by remember(s.torrentSavePath) { mutableStateOf(s.torrentSavePath.ifBlank { "/sdcard/Download/DroidRelay" }) }
+            var pathOk by remember { mutableStateOf<Boolean?>(null) }
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                OutlinedTextField(
+                    value = savePath,
+                    onValueChange = { savePath = it; pathOk = null },
+                    label = { Text("저장 경로") },
+                    singleLine = true,
+                    shape = MaterialTheme.shapes.small,
+                    modifier = Modifier.weight(1f),
+                )
+                Spacer(Modifier.width(8.dp))
+                Button(onClick = {
+                    val dir = java.io.File(savePath)
+                    if (dir.exists() || dir.mkdirs()) {
+                        pathOk = true
+                        DebugLogger.i("Settings", "토렌트 저장 경로 → $savePath")
+                        kotlinx.coroutines.MainScope().launch { repo.setTorrentSavePath(savePath.trimEnd('/')) }
+                    } else {
+                        pathOk = false
+                        DebugLogger.w("Settings", "토렌트 저장 경로 사용 불가: $savePath")
+                    }
+                }) { Text("적용") }
+            }
+            pathOk?.let { ok ->
+                Text(
+                    if (ok) "저장 경로를 사용할 수 있습니다" else "저장 경로를 사용할 수 없습니다",
+                    color = if (ok) cs.primary else cs.error,
+                    style = MaterialTheme.typography.labelSmall,
+                )
+            }
+        }
+
+        HorizontalDivider(color = cs.outlineVariant)
+
+        // ── 가드 보호 ──
+        SettingSection("가드 보호") {
+            SwitchRow("가드 데몬 활성화", s.guardEnabled) { v ->
+                kotlinx.coroutines.MainScope().launch { repo.setGuardEnabled(v) }
+            }
+            Text(
+                "열·배터리·스토리지 임계치 초과 시 다운로드를 자동 일시정지합니다",
+                color = cs.onSurfaceVariant,
+                style = MaterialTheme.typography.labelSmall,
+            )
+
+            Text("열 제한: ${s.guardThermalLimit}°C", color = cs.onSurface)
+            Slider(
+                value = s.guardThermalLimit.toFloat(),
+                onValueChange = { v -> kotlinx.coroutines.MainScope().launch { repo.setGuardThermalLimit(v.roundToInt()) } },
+                valueRange = 50f..70f,
+                steps = 19,
+            )
+
+            Text("배터리 제한: ${s.guardBatteryLimit}%", color = cs.onSurface)
+            Slider(
+                value = s.guardBatteryLimit.toFloat(),
+                onValueChange = { v -> kotlinx.coroutines.MainScope().launch { repo.setGuardBatteryLimit((v / 5).roundToInt() * 5) } },
+                valueRange = 5f..50f,
+                steps = 8,
+            )
+
+            Text("스토리지 제한: ${s.guardStorageLimit}%", color = cs.onSurface)
+            Slider(
+                value = s.guardStorageLimit.toFloat(),
+                onValueChange = { v -> kotlinx.coroutines.MainScope().launch { repo.setGuardStorageLimit(v.roundToInt()) } },
+                valueRange = 50f..99f,
+                steps = 48,
+            )
+
+            var wd by remember(s.watchdogIntervalSec) { mutableStateOf(s.watchdogIntervalSec.toString()) }
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                OutlinedTextField(
+                    value = wd,
+                    onValueChange = { wd = it.filter { c -> c.isDigit() } },
+                    label = { Text("헬스체크 주기 (초)") },
+                    singleLine = true,
+                    shape = MaterialTheme.shapes.small,
+                    modifier = Modifier.weight(1f),
+                )
+                Spacer(Modifier.width(8.dp))
+                Button(onClick = {
+                    val sec = wd.toIntOrNull()
+                    if (sec == null || sec !in 15..3600) {
+                        DebugLogger.w("Settings", "watchdog 주기 무효 값: $wd")
+                    } else {
+                        DebugLogger.i("Settings", "watchdog 주기 → $sec 초")
+                        kotlinx.coroutines.MainScope().launch { repo.setWatchdogIntervalSec(sec) }
+                    }
+                }) { Text("적용") }
+            }
+            Text(
+                "서버가 응답하지 않으면 자동으로 재시작해 복구합니다",
+                color = cs.onSurfaceVariant,
+                style = MaterialTheme.typography.labelSmall,
+            )
+
+            SwitchRow(
+                "HTTP → HTTPS 강제 리다이렉트",
+                s.forceHttpsRedirect,
+            ) { v -> kotlinx.coroutines.MainScope().launch { repo.setForceHttpsRedirect(v) } }
+            Text(
+                "켜면 웨일/사파리에서 HTTPS 인증서 신뢰가 필요할 수 있습니다",
+                color = cs.onSurfaceVariant,
+                style = MaterialTheme.typography.labelSmall,
+            )
         }
 
         HorizontalDivider(color = cs.outlineVariant)
