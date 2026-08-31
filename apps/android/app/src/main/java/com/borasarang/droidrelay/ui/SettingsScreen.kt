@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -18,6 +19,7 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Button
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -30,11 +32,15 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.borasarang.droidrelay.relay.AccessScope
+import com.borasarang.droidrelay.relay.CronParser
+import com.borasarang.droidrelay.relay.DebridProvider
 import com.borasarang.droidrelay.relay.DebugLogger
+import com.borasarang.droidrelay.relay.RelayApp
 import com.borasarang.droidrelay.relay.RelayService
 import com.borasarang.droidrelay.relay.ServerState
 import com.borasarang.droidrelay.relay.SettingsRepository
 import com.borasarang.droidrelay.relay.ThemeMode
+import com.borasarang.droidrelay.relay.TunnelProvider
 import com.borasarang.droidrelay.relay.lanAddress
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
@@ -531,6 +537,195 @@ fun SettingsScreen(onPortChanged: (Int) -> Unit) {
 
         HorizontalDivider(color = cs.outlineVariant)
 
+        // ── 스케줄 ──
+        SettingSection("스케줄") {
+            SwitchRow("예약 다운로드 활성화", s.scheduleEnabled) { v ->
+                kotlinx.coroutines.MainScope().launch { repo.setScheduleEnabled(v) }
+            }
+            Text(
+                "Cron 표현식으로 다운로드 시간대를 예약합니다",
+                color = cs.onSurfaceVariant,
+                style = MaterialTheme.typography.labelSmall,
+            )
+            var cron by remember(s.scheduleCron) { mutableStateOf(s.scheduleCron) }
+            var cronValid by remember(s.scheduleCron) { mutableStateOf(CronParser.isValid(s.scheduleCron)) }
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                OutlinedTextField(
+                    value = cron,
+                    onValueChange = { cron = it; cronValid = CronParser.isValid(it) },
+                    label = { Text("Cron (예: 0 2 * * *)") },
+                    singleLine = true,
+                    shape = MaterialTheme.shapes.small,
+                    modifier = Modifier.weight(1f),
+                )
+                Spacer(Modifier.width(8.dp))
+                Button(onClick = {
+                    if (cronValid) {
+                        DebugLogger.i("Settings", "스케줄 cron → $cron")
+                        kotlinx.coroutines.MainScope().launch { repo.setScheduleCron(cron) }
+                    } else {
+                        DebugLogger.w("Settings", "Cron 형식 무효: $cron (E-AND-VALID-0001)")
+                    }
+                }) { Text("적용") }
+            }
+            Text(
+                if (cronValid) "유효한 Cron 표현식입니다" else "Cron 형식이 올바르지 않습니다",
+                color = if (cronValid) cs.primary else cs.error,
+                style = MaterialTheme.typography.labelSmall,
+            )
+            SwitchRow("Wi-Fi 연결 시에만", s.scheduleWifiOnly) { v ->
+                kotlinx.coroutines.MainScope().launch { repo.setScheduleWifiOnly(v) }
+            }
+            SwitchRow("충전 중에만", s.scheduleChargingOnly) { v ->
+                kotlinx.coroutines.MainScope().launch { repo.setScheduleChargingOnly(v) }
+            }
+            Text("최소 배터리: ${s.scheduleBatteryMin}%", color = cs.onSurface)
+            Slider(
+                value = s.scheduleBatteryMin.toFloat(),
+                onValueChange = { v -> kotlinx.coroutines.MainScope().launch { repo.setScheduleBatteryMin(v.roundToInt()) } },
+                valueRange = 5f..100f,
+                steps = 18,
+            )
+        }
+
+        HorizontalDivider(color = cs.outlineVariant)
+
+        // ── Debrid ──
+        SettingSection("Debrid") {
+            SwitchRow("클라우드 다운로드 활성화", s.debridEnabled) { v ->
+                kotlinx.coroutines.MainScope().launch { repo.setDebridEnabled(v) }
+            }
+            Text(
+                "토렌트/대용량 링크를 제공자 클라우드에서 언리스트링크하여 받습니다",
+                color = cs.onSurfaceVariant,
+                style = MaterialTheme.typography.labelSmall,
+            )
+            Text("제공자", color = cs.onSurfaceVariant, style = MaterialTheme.typography.labelMedium)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                DebridProvider.entries.forEach { provider ->
+                    androidx.compose.material3.FilterChip(
+                        selected = s.debridProvider == provider.name,
+                        onClick = {
+                            DebugLogger.i("Settings", "Debrid 제공자 → ${provider.name}")
+                            kotlinx.coroutines.MainScope().launch { repo.setDebridProvider(provider.name) }
+                        },
+                        label = { Text(provider.displayName) },
+                    )
+                }
+            }
+            var apiKey by remember(s.debridApiKey) { mutableStateOf(s.debridApiKey) }
+            OutlinedTextField(
+                value = apiKey,
+                onValueChange = { apiKey = it },
+                label = { Text("API 키") },
+                singleLine = true,
+                shape = MaterialTheme.shapes.small,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(Modifier.height(6.dp))
+            Button(onClick = {
+                DebugLogger.i("Settings", "Debrid API 키 저장 (${apiKey.length}자)")
+                kotlinx.coroutines.MainScope().launch { repo.setDebridApiKey(apiKey.trim()) }
+            }) { Text("저장") }
+        }
+
+        HorizontalDivider(color = cs.outlineVariant)
+
+        // ── 터널 ──
+        SettingSection("터널") {
+            SwitchRow("터널 사용", s.tunnelEnabled) { v ->
+                kotlinx.coroutines.MainScope().launch { repo.setTunnelEnabled(v) }
+            }
+            Text(
+                "Tailscale/Cloudflare Tunnel로 외부 네트워크에서 접속 가능하게 합니다",
+                color = cs.onSurfaceVariant,
+                style = MaterialTheme.typography.labelSmall,
+            )
+            Text("제공자", color = cs.onSurfaceVariant, style = MaterialTheme.typography.labelMedium)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TunnelProvider.entries.forEach { provider ->
+                    androidx.compose.material3.FilterChip(
+                        selected = s.tunnelProvider == provider.name,
+                        onClick = {
+                            DebugLogger.i("Settings", "터널 제공자 → ${provider.name}")
+                            kotlinx.coroutines.MainScope().launch { repo.setTunnelProvider(provider.name) }
+                        },
+                        label = { Text(provider.displayName) },
+                    )
+                }
+            }
+        }
+
+        HorizontalDivider(color = cs.outlineVariant)
+
+        // ── MCP 서버 권한 ──
+        SettingSection("MCP 서버 권한") {
+            SwitchRow("프라이버시 모드", s.mcpPrivacyMode) { v ->
+                kotlinx.coroutines.MainScope().launch { repo.setMcpPrivacyMode(v) }
+            }
+            Text(
+                "MCP 클라이언트가 명령 실행 시 상세 내용을 표시합니다",
+                color = cs.onSurfaceVariant,
+                style = MaterialTheme.typography.labelSmall,
+            )
+            val mcpTools = listOf(
+                "file_list" to "file_list — 보관함 파일 목록",
+                "file_read" to "file_read — 파일 내용 읽기",
+                "download_add" to "download_add — 다운로드 추가",
+                "download_list" to "download_list — 다운로드 목록",
+                "download_control" to "download_control — 다운로드 제어",
+            )
+            mcpTools.forEach { (name, label) ->
+                SwitchRow(label, name !in s.mcpToolsDisabled) { enabled ->
+                    kotlinx.coroutines.MainScope().launch { repo.setMcpToolDisabled(name, !enabled) }
+                }
+            }
+        }
+
+        HorizontalDivider(color = cs.outlineVariant)
+
+        // ── 기본값 복원 ──
+        var resetCategory by remember { mutableStateOf<String?>(null) }
+        SettingSection("기본값 복원") {
+            Text(
+                "설정을 기본값으로 되돌립니다. 복원 후 즉시 적용됩니다.",
+                color = cs.onSurfaceVariant,
+                style = MaterialTheme.typography.labelSmall,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = { resetCategory = "download" }) { Text("다운로드") }
+                OutlinedButton(onClick = { resetCategory = "torrent" }) { Text("토렌트") }
+                Button(onClick = { resetCategory = "all" }) { Text("전체 초기화") }
+            }
+        }
+
+        resetCategory?.let { cat ->
+            AlertDialog(
+                onDismissRequest = { resetCategory = null },
+                title = { Text(if (cat == "all") "전체 초기화" else "기본값 복원") },
+                text = {
+                    Text(
+                        when (cat) {
+                            "all" -> "모든 설정을 기본값으로 되돌립니다. 계속할까요?"
+                            "download" -> "다운로드 설정(동시 수·속도·알림)을 기본값으로 되돌립니다. 계속할까요?"
+                            else -> "토렌트 설정(속도·활성 수·포트·저장 경로)을 기본값으로 되돌립니다. 계속할까요?"
+                        },
+                    )
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        resetSettings(ctx, repo, cat)
+                        resetCategory = null
+                    }) { Text("복원", color = cs.error) }
+                },
+                dismissButton = {
+                    TextButton(onClick = { resetCategory = null }) { Text("취소") }
+                },
+            )
+        }
+
+        HorizontalDivider(color = cs.outlineVariant)
+
         // ── 앱 정보 ──
         val appVersion = remember {
             runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName }.getOrNull() ?: "?"
@@ -576,5 +771,49 @@ private fun SwitchRow(label: String, checked: Boolean, onChange: (Boolean) -> Un
             DebugLogger.i("Settings", "$label → $it")
             onChange(it)
         })
+    }
+}
+
+private fun resetSettings(ctx: android.content.Context, repo: SettingsRepository, category: String) {
+    DebugLogger.w("Settings", "설정 기본값 복원 진행 category=$category")
+    when (category) {
+        "download" -> kotlinx.coroutines.MainScope().launch {
+            repo.setConcurrency(2)
+            repo.setSpeedLimit(0)
+            repo.setNotifications(true)
+            RelayApp.get(ctx).applySettings(repo.firstBlocking())
+        }
+        "torrent" -> kotlinx.coroutines.MainScope().launch {
+            repo.setTorrentUploadLimit(512)
+            repo.setTorrentDownloadLimit(0)
+            repo.setTorrentMaxActive(3)
+            repo.setTorrentSeedRatio(2.0f)
+            repo.setTorrentDhtEnabled(true)
+            repo.setTorrentPexEnabled(true)
+            val randomPort = (49152 + (Math.random() * 16384).toInt()).coerceIn(49152, 65535)
+            repo.setTorrentListenPort(randomPort)
+            repo.setTorrentSavePath("/sdcard/Download/DroidRelay")
+            RelayApp.getTorrent(ctx).applySettings(repo.firstBlocking())
+        }
+        "all" -> {
+            kotlinx.coroutines.MainScope().launch {
+                repo.setConcurrency(2)
+                repo.setSpeedLimit(0)
+                repo.setNotifications(true)
+                RelayApp.get(ctx).applySettings(repo.firstBlocking())
+            }
+            kotlinx.coroutines.MainScope().launch {
+                repo.setTorrentUploadLimit(512)
+                repo.setTorrentDownloadLimit(0)
+                repo.setTorrentMaxActive(3)
+                repo.setTorrentSeedRatio(2.0f)
+                repo.setTorrentDhtEnabled(true)
+                repo.setTorrentPexEnabled(true)
+                val randomPort = (49152 + (Math.random() * 16384).toInt()).coerceIn(49152, 65535)
+                repo.setTorrentListenPort(randomPort)
+                repo.setTorrentSavePath("/sdcard/Download/DroidRelay")
+                RelayApp.getTorrent(ctx).applySettings(repo.firstBlocking())
+            }
+        }
     }
 }
