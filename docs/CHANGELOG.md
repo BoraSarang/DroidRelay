@@ -1,5 +1,69 @@
 # Changelog
 
+## [0.16.1] - 2026-08-31
+
+### Changed [android] — MD3 디자인 전면 정돈 (PLAN_v0.16_settings-mirror_android.md)
+- **TopAppBar 도입**: `RootApp`에 탭 타이틀 + 우상단 **디버그 패널 아이콘(BugReport)** 추가, 하단 탭 라벨 한글화("Torrent"→"토렌트")
+- **디버그 패널 이전**: DownloadsScreen의 "📡 DroidRelay + 제목 5연속 탭" 숨김 진입 제거 → `RootApp`의 `ModalBottomSheet`로 이동, `ui/DebugPanel.kt` 공용화(다중 선택 복사/전체 복사/비우기 동일)
+- **다운로드**: 중첩 `LazyColumn`(Column+하단 리스트) 제거 → **단일 LazyColumn**(서버카드→URL→비디오→작업 목록→빈 상태 아이콘 안내), 비디오 잡에 `VideoLibrary` 아이콘, ⚡/⏱ 이모지 제거
+- **Torrent**: 중첩 `Scaffold` 제거 → `Box`+하단 우측 FAB(스크롤 끝에 80dp 마진), 스낵바를 Root 콜백(`onShowSnack`)으로 이관, ⏱ 제거
+- **보관함**: 헤더 이모지 제거, 목록 카드 색 `surfaceContainerHigh`→`surfaceContainer` 통일(강조 카드만 high 유지), 스낵바 콜백 이관, 빈 상태 아이콘 정돈
+- **Theme.kt**: `surfaceContainer*` 표면 토큰 Light/Dark 명시 지정, 셰이프 MD3 기본값(4/8/12/16/28) 정렬 — Material You(dynamicColor)는 기기 테마 따라감 유지
+- **버전**: versionCode 18 → **19**, versionName **0.16.1**, 릴리즈 서명 APK `R5CT215F4QK` 실기기 인플레이스 설치(성능/캐시 영향 없음, UI 개편)
+
+## [0.16.0] - 2026-08-31
+
+### Added [android] — 웹 설정 미러 1차: 전역 속도 제한 · 토렌트 고급 · 가드 (PLAN_v0.16_settings-mirror_android.md)
+- 웹 대시보드 설정 탭에만 있고 앱에 없던 항목을 앱 설정으로 이전(백엔드 필드/setter는 기존 완비, UI만 추가)
+- **전역 속도 제한**('다운로드' 섹션): 다운로드/업로드 Mbps 각각 스위치+슬라이더(1~10) → `setMaxDownloadBps/setMaxUploadBps`(1_048_576 단위, 0=무제한)
+- **토렌트 고급**('Torrent' 섹션): 시퀀셜 다운로드 스위치, 시더 부재 대기(0~3600초), 리슨 포트(1024~65535, 랜덤 버튼), 저장 경로(존재/생성 확인) → 각 setter
+- **가드 보호**(신규 섹션): 활성화 스위치, 임계값 슬라이더(열 50~70°C / 배터리 5~50% / 스토리지 50~99%), watchdog 주기(15~3600초), HTTP→HTTPS 강제 스위치
+- **버전**: versionCode 17 → **18**, versionName **0.16.0**, 릴리즈 서명 APK `R5CT215F4QK` 실기기 인플레이스 설치(성능/캐시 영향 없음)
+
+## [0.15.1] - 2026-08-31
+
+### Fixed [web] — 비디오 분석 주소 초기화 · 업로드 대상 라벨 제거 · 분석 카드 UX 압축
+- **비디오 분석 주소 초기화**: 분석 후 다운로드(추가)/재시도 성공 시 `#vurl` 주소 입력란이 남아있던 문제 → `clearVideoUrlInput()`로 초기화(+ `__videoState`/해상도 선택 리셋)
+- **업로드 대상 라벨 제거**: 파일 올리기 버튼 옆 항상 표시되던 "대상: 📁 폴더명"(`#uploadTargetLabel`) 요소·갱신 코드 삭제 — 파일 올리기는 항상 현재 폴더로 동작해 정보가 상태 표시와 중복되고, 폴더명이 길면 지저분했음
+- **분석 카드 UX 압축**: 스트림 주소를 화면에 길게 표시하던 meta 제거 → **📋 주소 복사** 버튼 하나로 대체(`copyVideoUrl`, execCommand + clipboard 폴백), 해상도 선택 radio → `<select>`(큰 목록도 한 줄), 파일명·복사·다운로드를 **한 줄 flex** 배치로 간결화
+- **0206 차단 안내 1회·단문화**: `E-AND-VID-0206`(브라우저 외 접근 차단)이 **빨간 실패 메시지 + 💡 안내 2개로 중복 출력**되던 문제 → `showVideoBlocked()`로 💡 안내 **1개만** 표시. 문구를 `"💡 해당 사이트는 폰/앱(비브라우저) 접근을 차단하고 있습니다."`로 단축하고, analyze/create/retry 전 경로에 동일 적용. `StreamDetector.fetch`의 예외 메시지·`error_message_ko.json`도 같은 짧은 문구로 통일
+- **버전**: versionCode 16 → **17**, versionName **0.15.1**, 릴리즈 서명 APK `R5CT215F4QK` 실기기 인플레이스 업데이트
+
+## [0.15.0] - 2026-08-31
+
+### Fixed [android+web] — 비디오 분석 403 조기 노출 + fetch 최적화 (PLAN_v0.15_analyze-403_android.md)
+- **원인**: `StreamDetector.fetch`는 403을 `VideoException`으로 던지지만 **직접 m3u8/mpd 분석 경로의 `parseManifestVariants`/`resolveSegmentsCount`/`mediaDurationMsFromUrl`이 예외를 `catch`로 삼켜** "분석 성공"처럼 표시. 이후 `VideoApi.create`가 같은 403 URL을 4~5회 재fetch하며 조용히 실패 → FFmpeg로 보내 "다운로드 실패(E-AND-VID-0202)"만 노출되어 원인 불명의 혼동을 유발 (wowstream2.cloud m3u8 진단에서 확인)
+- **해결**: `parseManifest()` 신설 — 매니페스트 **fetch 1회**(마스터면 첫 variant 1회 추가)로 variant/세그먼트 개수/총 재생시간을 계측하고 실패를 그대로 전파. `analyze` 직접/페이지 경로에 적용, `Found.durationMs` 추가, fetch 403은 새 코드 **`E-AND-VID-0206`**(브라우저 외 접근 차단 안내)으로 변경
+- **create 재사용**: 다운로드 대상이 분석 대상과 동일하면 재fetch 없이 계측값 재사용 — 403 사이트는 분석 단계에서 즉시 실패(조용한 3회 실패 제거), 정상 사이트도 요청 수 감소
+- **웹**: analyze 오류 시 0206이면 차단 원인/대안(브라우저에서 m3u8 직접 복사 or PageKit) 안내 박스 표시
+- **테스트**: `ManifestFetchTest` 신규 3건 — JDK 내장 HttpServer 스텁으로 403 전파(0206)·미디어 플레이리스트 계측·마스터 첫 variant 팔로우 검증
+- **버전**: versionCode 15 → **16**, versionName **0.15.0**, 릴리즈 서명 APK `R5CT215F4QK` 실기기 인플레이스 업데이트
+
+## [0.14.1] - 2026-08-31
+
+### Fixed [android+web] — 보관함(웹) 다운로드 비영문 파일명 깨짐
+- **원인**: `/dl-file`(RelayServer.kt)과 `serveFile`이 `Content-Disposition: attachment; filename="${file.name}"`으로 **비ASCII(한글/일본어/중국어) 파일명을 raw로 헤더에 삽입** — HTTP 헤더는 ASCII 계열이라 브라우저가 인코딩 정보 없이 바이트를 해석, 웨일(Chromium)에서 저장 파일명이 다르게 나옴
+- **해결**: RFC 6266 준수 `DispositionHeader.make()` 추가 — `attachment; filename="<ASCII percent-encoded>"; filename*=UTF-8''<percent-encoded>` 형태로 `/dl-file`·`serveFile`에 적용. 최신 브라우저는 `filename*`에서 원본 복원, 구형 fallback은 ASCII 안전
+- **웹 보강**: `<a download="파일명">`에 실제 파일명 힌트 추가 + `dlBase` 하드코딩(`https://host:8443`) → **현재 프로토콜 따라 자동 선택**(HTTP 폴백 모드 `forceHttpsRedirect=false`에서도 다운로드가 자체서명 인증서로 막히는 별개 문제 동시 해결)
+- **테스트**: `ContentDispositionTest` 신규 4건(한글/일본어/중국어/이모지/특수문자) — 결과 ASCII-only + `filename*` percent-decode 시 원본 복원 확인
+- **버전**: versionCode 14 → **15**, versionName 0.14.1, 릴리즈 서명 APK `R5CT215F4QK` 실기기 인플레이스 업데이트
+
+## [0.14.0] - 2026-08-31
+
+### Added [android] — 안정성 7개 이슈 (PLAN_v0.14_stability_android.md)
+- **부팅 자동시작 + watchdog**: `BootReceiver`(BOOT_COMPLETED → `autoStart` 확인 후 RelayService.start) + 서버 헬스체크(`isHealthy()` 127.0.0.1/api/info) 1분 주기 실패 시 `restart()` — 24시간 연속 동작 문제 해소. 주기 `watchdogIntervalSec`(기본 60, 15~3600)으로 설정 가능
+- **토렌트 교차 매핑 레이스**: 받는 중 동일 마그넷 추가 시 `FETCHING_METADATA` 영구잔류 → `addMagnet` 중복 가드 + `findJobIdForNewTorrent`가 `infoHash==hash && FETCHING_METADATA` 정확 일치 우선(빈 hash FIFO 폴백) + `/api/torrents/add` 중복 시 409 + 웹 alert
+- **속도제한 오버플로우**: `applySpeedLimit`/`applyRateLimits`/`applySettings`의 `*1024 .toInt()` Long→Int 오버플로우 → `coerceIn(0, Int.MAX_VALUE.toLong())` (설정 시 무기한 다운로드 제한 미반영 증상 해소)
+- **시더 부재 자동 중단**: 웹 토렌트 상세 피어 행에 `progress` %(100%면 초록·굵게 "시더") 표시 + `torrentMinSeedWaitSec`(기본 0=꺼짐) 경과 후 `pause()` — 씨앗 없는 개인 시더 토렌트가 무한 업로드로 배터리 소모하는 문제
+- **업로드 진행률**: `uploadFiles`를 XHR + `xhr.upload.onprogress`로 전환(진행률 바 + 완료/실패 toast), multipart→**raw-upload 스트리밍**(`X-File-Name`/`X-File-Path` encodeURIComponent) + 웹 `#uploadTargetLabel`(대상 폴더)·`#uploadProgressLabel`
+- **폴더 날짜 표시**: `/api/storage`의 `modified`를 웹 보관함(`count개 · 날짜`)·앱 FilesScreen 메타 텍스트로 표시
+
+### Fixed [android] — 웨일(Whale) HTTPS 접속 불가
+- **증상**: iPad 사파리는 경고 후 접속(GitHub Pages와 다른 엔드포인트), **웨일은 접속 불가**
+- **원인**: HTTP→HTTPS 강제 301 리다이렉트 + **mkcert 자체서명 인증서** — Chromium(웨일/크롬)은 `NET::ERR_CERT_AUTHORITY_INVALID`로 하드 차단
+- **해결**: `forceHttpsRedirect`(기본 **false**) 신규 설정 — 꺼짐이면 LAN HTTP를 그대로 서빙(자체서명 미신뢰 브라우저 호환), 켜짐이면 기존 301→HTTPS(8443). 리다이렉트 대상 호스트도 `lanAddress()`(핫스팟 swlan0) 우선 보정
+- **버전**: versionCode 13→14, versionName 0.13.3→0.14.0, 릴리즈 서명 v0.14.0 실기기 재설치
+
 ## [0.13.3] - 2026-08-28
 
 ### Release — 공개 배포 시작
