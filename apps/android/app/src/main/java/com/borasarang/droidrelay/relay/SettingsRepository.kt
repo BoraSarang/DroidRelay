@@ -76,6 +76,9 @@ data class AppSettings(
     val scheduleWifiOnly: Boolean = true,
     val scheduleChargingOnly: Boolean = false,
     val scheduleBatteryMin: Int = 30,
+    val watchdogIntervalSec: Int = 60,
+    val torrentMinSeedWaitSec: Int = 0,
+    val forceHttpsRedirect: Boolean = false,
 )
 
 private val Context.settingsDataStore by preferencesDataStore("droidrelay_settings")
@@ -140,6 +143,9 @@ class SettingsRepository(private val context: Context) {
         val SCHED_WIFI = booleanPreferencesKey("sched_wifi_only")
         val SCHED_CHARGING = booleanPreferencesKey("sched_charging_only")
         val SCHED_BATTERY_MIN = intPreferencesKey("sched_battery_min")
+        val WATCHDOG_INTERVAL_SEC = intPreferencesKey("watchdog_interval_sec")
+        val TORRENT_MIN_SEED_WAIT_SEC = intPreferencesKey("torrent_min_seed_wait_sec")
+        val FORCE_HTTPS_REDIRECT = booleanPreferencesKey("force_https_redirect")
     }
 
     val settings: Flow<AppSettings> = context.settingsDataStore.data.map { p ->
@@ -188,6 +194,9 @@ class SettingsRepository(private val context: Context) {
             scheduleWifiOnly = p[Keys.SCHED_WIFI] ?: true,
             scheduleChargingOnly = p[Keys.SCHED_CHARGING] ?: false,
             scheduleBatteryMin = (p[Keys.SCHED_BATTERY_MIN] ?: 30).coerceIn(5, 100),
+            watchdogIntervalSec = (p[Keys.WATCHDOG_INTERVAL_SEC] ?: 60).coerceIn(15, 3600),
+            torrentMinSeedWaitSec = (p[Keys.TORRENT_MIN_SEED_WAIT_SEC] ?: 0).coerceAtLeast(0),
+            forceHttpsRedirect = p[Keys.FORCE_HTTPS_REDIRECT] ?: false,
         )
     }
 
@@ -227,6 +236,15 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun setMaxUploadBps(bps: Long) =
         context.settingsDataStore.edit { it[Keys.MAX_UPLOAD_BPS] = bps.coerceAtLeast(0) }
+
+    suspend fun setWatchdogIntervalSec(sec: Int) =
+        context.settingsDataStore.edit { it[Keys.WATCHDOG_INTERVAL_SEC] = sec.coerceIn(15, 3600) }
+
+    suspend fun setTorrentMinSeedWaitSec(sec: Int) =
+        context.settingsDataStore.edit { it[Keys.TORRENT_MIN_SEED_WAIT_SEC] = sec.coerceAtLeast(0) }
+
+    suspend fun setForceHttpsRedirect(b: Boolean) =
+        context.settingsDataStore.edit { it[Keys.FORCE_HTTPS_REDIRECT] = b }
 
     suspend fun addAllowedIp(ip: String) =
         context.settingsDataStore.edit { it[Keys.ALLOWED_IPS] = (it[Keys.ALLOWED_IPS] ?: emptySet()) + ip }

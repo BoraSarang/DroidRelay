@@ -132,6 +132,45 @@ class RelayService : Service() {
             }
         }
 
+        // ② watchdog — 서버 헬스체크 주기 수행 (이슈 1의 24시간 안정성)
+        scope.launch {
+            var lastInterval = -1
+            var healthyCount = 0
+            settingsRepo.settings.collectLatest { s ->
+                val intervalMs = s.watchdogIntervalSec * 1000L
+                while (true) {
+                    delay(intervalMs)
+                    if (s.watchdogIntervalSec != lastInterval) {
+                        lastInterval = s.watchdogIntervalSec
+                        DebugLogger.i(TAG, "watchdog 주기 ${s.watchdogIntervalSec}초 시작")
+                    }
+                    val current = server
+                    if (current == null) {
+                        // 서버가 아예 없으면 새로 기동
+                        DebugLogger.w(TAG, "watchdog: 서버가 없음 → 기동 시도")
+                        healthyCount = 0
+                        runCatching {
+                            val s2 = settingsRepo.firstBlocking()
+                            server = RelayServer(applicationContext, s2.port).also { it.updateSettings(s2); it.start() }
+                            val url = lanAddress()?.let { "http://$it:${s2.port}" }
+                            settingsRepo.updateServerState(ServerState(running = true, port = s2.port, url = url))
+                        }.onFailure { e ->
+                            DebugLogger.e(TAG, "watchdog 서버 기동 실패: ${e.message}")
+                        }
+                        continue
+                    }
+                    if (current.isHealthy()) {
+                        healthyCount++
+                        if (healthyCount == 1) DebugLogger.d(TAG, "watchdog: 서버 정상")
+                    } else {
+                        healthyCount = 0
+                        DebugLogger.w(TAG, "watchdog: 서버 무응답 → 재시작")
+                        current.restart()
+                    }
+                }
+            }
+        }
+
         // ② 작업 상태 → 완료/실패 알림 + 진행바 갱신 (T-105)
         scope.launch {
             var lastNotifUpdate = 0L

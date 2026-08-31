@@ -202,6 +202,36 @@ class RelayServer(
         DebugLogger.i("Server", "서버 정지")
     }
 
+    /** 서버가 실제로 요청을 응답하는지 루프백 헬스체크 (watchdog용) */
+    fun isHealthy(timeoutMs: Int = 1500): Boolean {
+        if (server == null) return false
+        return try {
+            val conn = java.net.URL("http://127.0.0.1:$port/api/info").openConnection() as java.net.HttpURLConnection
+            conn.connectTimeout = timeoutMs
+            conn.readTimeout = timeoutMs
+            conn.requestMethod = "GET"
+            val code = conn.responseCode
+            conn.disconnect()
+            code in 200..399
+        } catch (e: Exception) {
+            DebugLogger.d("Server", "헬스체크 실패: ${e.message}")
+            false
+        }
+    }
+
+    /** watchdog용 재시작 — 현재 서버를 내리고 새로 띄운다. */
+    fun restart() {
+        DebugLogger.i("Server", "watchdog 재시작 시작")
+        stop()
+        runCatching {
+            server = createServer().also { it.start(wait = false) }
+            DebugLogger.i("Server", "watchdog 재시작 완료 http://0.0.0.0:$port")
+        }.onFailure { e ->
+            DebugLogger.e("Server", "watchdog 재시작 실패 ${e.message}")
+            server = null
+        }
+    }
+
     /** HTTP + HTTPS(TLS) 이중 커넥터 생성. 인증서는 assets/certs/server.p12 (mkcert 로컬 CA 서명) */
     private fun createServer(): EmbeddedServer<NettyApplicationEngine, NettyApplicationEngine.Configuration> {
         val keystore = context.assets.open(KEY_STORE_ASSET).use { stream ->
@@ -270,8 +300,14 @@ private fun Application.relayRoutes(context: Context, serverRef: RelayServer) {
         // loopback(localhost/127.0.0.1/자기 IP)은 예외 — 터널(tailscaled)과 앱 자체 점검이 https 인증서를 신뢰하지 않으므로
         runCatching {
             val remoteHost = call.request.origin.remoteHost
-            if (call.request.local.scheme != "https" && !isLocalHost(remoteHost)) {
-                val targetHost = call.request.local.localHost.ifEmpty { lanAddress() ?: "" }
+            // forceHttpsRedirect=false(기본)면 LAN HTTP를 그대로 서빙(자체서명 인증서 미신뢰 브라우저 호환).
+            // true면 HTTPS(8443)로 강제 이동.
+            if (call.request.local.scheme != "https" && !isLocalHost(remoteHost) && s.forceHttpsRedirect) {
+                // 리다이렉트 대상은 실제 클라이언트가 접근 가능한 LAN IP(핫스팟 우선)로 고정.
+                // call.request.local.localHost는 바인드 주소(0.0.0.0)나 VPN 인터페이스 IP를 줄 수 있어
+                // iPad 등이 접속 불가한 IP로 유도될 수 있음 → lanAddress() 우선, 실패 시 localHost 폴백.
+                val targetHost = lanAddress()?.takeIf { it.isNotEmpty() }
+                    ?: call.request.local.localHost.ifEmpty { "" }
                 if (targetHost.isNotEmpty()) {
                     val target = "https://$targetHost:${RelayServer.HTTPS_PORT}${call.request.local.uri}"
                     DebugLogger.d("Security", "HTTP→HTTPS 리다이렉트 $remoteHost → $target")
@@ -446,6 +482,7 @@ private fun Application.relayRoutes(context: Context, serverRef: RelayServer) {
                     put("torrentListenPort", s.torrentListenPort)
                     put("torrentSavePath", s.torrentSavePath)
                     put("torrentSequentialDownload", s.torrentSequentialDownload)
+                    put("torrentMinSeedWaitSec", s.torrentMinSeedWaitSec)
                 }.toString(),
                 ContentType.Application.Json
             )
@@ -464,6 +501,7 @@ private fun Application.relayRoutes(context: Context, serverRef: RelayServer) {
             json?.optInt("torrentListenPort", -1)?.let { if (it >= 1024) repo.setTorrentListenPort(it) }
             json?.optString("torrentSavePath", "")?.let { if (it.isNotBlank()) repo.setTorrentSavePath(it) }
             if (json?.has("torrentSequentialDownload") == true) json?.optBoolean("torrentSequentialDownload")?.let { repo.setTorrentSequentialDownload(it) }
+            json?.optInt("torrentMinSeedWaitSec", -1)?.let { if (it >= 0) repo.setTorrentMinSeedWaitSec(it) }
             // 엔진에 즉시 반영
             RelayApp.getTorrent(context).applySettings(repo.firstBlocking())
             serverRef.settings = repo.firstBlocking()
@@ -727,6 +765,8 @@ private fun Application.relayRoutes(context: Context, serverRef: RelayServer) {
                     put("guardThermalLimit", s.guardThermalLimit)
                     put("guardBatteryLimit", s.guardBatteryLimit)
                     put("guardStorageLimit", s.guardStorageLimit)
+                    put("watchdogIntervalSec", s.watchdogIntervalSec)
+                    put("forceHttpsRedirect", s.forceHttpsRedirect)
                 }.toString(),
                 ContentType.Application.Json
             )
@@ -740,6 +780,8 @@ private fun Application.relayRoutes(context: Context, serverRef: RelayServer) {
             json?.optInt("guardThermalLimit", -1)?.let { if (it in 50..70) repo.setGuardThermalLimit(it) }
             json?.optInt("guardBatteryLimit", -1)?.let { if (it in 5..50) repo.setGuardBatteryLimit(it) }
             json?.optInt("guardStorageLimit", -1)?.let { if (it in 50..99) repo.setGuardStorageLimit(it) }
+            json?.optInt("watchdogIntervalSec", -1)?.let { if (it in 15..3600) repo.setWatchdogIntervalSec(it) }
+            if (json?.has("forceHttpsRedirect") == true) json?.optBoolean("forceHttpsRedirect")?.let { repo.setForceHttpsRedirect(it) }
             serverRef.settings = repo.firstBlocking()
             call.respondText("""{"ok":true}""", ContentType.Application.Json)
         }
@@ -1168,13 +1210,24 @@ private fun Application.relayRoutes(context: Context, serverRef: RelayServer) {
 
                 when {
                     magnet.startsWith("magnet:") -> {
-                        val job = RelayApp.getTorrent(context).addMagnet(magnet)
-                        DebugLogger.i("Http", "torrent magnet 추가 id=${job.id}")
-                        call.respondText(
-                            JSONObject().put("id", job.id).toString(),
-                            ContentType.Application.Json,
-                            HttpStatusCode.Created,
-                        )
+                        // 중복 가드: 이미 동일 infohash가 있으면 409 (이슈 2 — 같은 토렌트로 표시 문제)
+                        val eng = RelayApp.getTorrent(context)
+                        if (eng.isDuplicateMagnet(magnet)) {
+                            DebugLogger.w("Http", "torrent 중복 magnet 추가 시도 → 거부")
+                            call.respondText(
+                                JSONObject().put("error", "이미 다운로드 중인 토렌트입니다").toString(),
+                                ContentType.Application.Json,
+                                HttpStatusCode.Conflict,
+                            )
+                        } else {
+                            val job = eng.addMagnet(magnet)
+                            DebugLogger.i("Http", "torrent magnet 추가 id=${job.id}")
+                            call.respondText(
+                                JSONObject().put("id", job.id).toString(),
+                                ContentType.Application.Json,
+                                HttpStatusCode.Created,
+                            )
+                        }
                     }
                     torrentFile.isNotEmpty() -> {
                         val bytes = java.util.Base64.getDecoder().decode(torrentFile)
@@ -1500,8 +1553,8 @@ private fun Application.relayRoutes(context: Context, serverRef: RelayServer) {
         // Raw binary 업로드 — multipart 없이 스트리밍 (대용량 파일 지원)
         post("/api/storage/raw-upload") {
             try {
-                val fileName = call.request.headers["X-File-Name"] ?: "upload"
-                val subPath = call.request.headers["X-File-Path"] ?: ""
+                val fileName = runCatching { java.net.URLDecoder.decode(call.request.headers["X-File-Name"] ?: "upload", "UTF-8") }.getOrDefault("upload")
+                val subPath = runCatching { java.net.URLDecoder.decode(call.request.headers["X-File-Path"] ?: "", "UTF-8") }.getOrDefault("")
                 val dir = storageFile(subPath)
                 if (dir == null) { call.respondErr("잘못된 경로"); return@post }
                 dir.mkdirs()
@@ -1518,7 +1571,7 @@ private fun Application.relayRoutes(context: Context, serverRef: RelayServer) {
                         if (n > 0) fos.write(buf, 0, n)
                     }
                 }
-                DebugLogger.i("Http", "업로드 완료 ${file.name} (${file.length()}B)")
+                DebugLogger.i("Http", "업로드 완료 ${file.name} → ${file.path.removePrefix(dlRootCanonical.path)} (${file.length()}B)")
                 call.respondOk()
             } catch (e: Exception) {
                 DebugLogger.e("Http", "업로드 실패", e)
@@ -1594,7 +1647,7 @@ private fun Application.relayRoutes(context: Context, serverRef: RelayServer) {
                 call.respondText("404 없음", ContentType.Text.Plain, HttpStatusCode.NotFound)
             } else {
                 DebugLogger.i("Http", "파일 다운로드 요청 name=$name")
-                call.response.header(HttpHeaders.ContentDisposition, "attachment; filename=\"${file.name}\"")
+                call.response.header(HttpHeaders.ContentDisposition, DispositionHeader.make(file.name))
                 call.response.header("X-Content-Type-Options", "nosniff")
                 call.response.header(HttpHeaders.CacheControl, "no-store, must-revalidate")
                 call.respondBytesWriter(contentType = ContentType.Application.OctetStream, contentLength = file.length()) {
@@ -1750,7 +1803,7 @@ private suspend fun ApplicationCall.serveFile(file: File, jobId: String) {
     }
 
     val length = range.to - range.from + 1L
-    response.header(HttpHeaders.ContentDisposition, "attachment; filename=\"${file.name}\"")
+    response.header(HttpHeaders.ContentDisposition, DispositionHeader.make(file.name))
     if (range.partial) {
         response.status(HttpStatusCode.PartialContent)
         response.header(HttpHeaders.ContentRange, "bytes ${range.from}-${range.to}/$total")
@@ -1776,6 +1829,14 @@ private suspend fun ApplicationCall.serveFile(file: File, jobId: String) {
         "전송 종료 id=$jobId '${file.name}' ${fmt(length)} " +
             "(${if (range.partial) "206 부분" else "200 전체"}) 소요=${System.currentTimeMillis() - t0}ms",
     )
+}
+
+/** RFC 6266 — 비ASCII(한글/일본어/중국어) 파일명은 filename*=UTF-8''<percent-encoded>로 전달 */
+internal object DispositionHeader {
+    fun make(name: String): String {
+        val enc = java.net.URLEncoder.encode(name, "UTF-8").replace("+", "%20")
+        return "attachment; filename=\"$enc\"; filename*=UTF-8''$enc"
+    }
 }
 
 internal object RangeParser {

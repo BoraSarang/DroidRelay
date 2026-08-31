@@ -21,6 +21,9 @@ import org.libtorrent4j.TorrentFlags
 import org.libtorrent4j.alerts.Alert
 import org.libtorrent4j.alerts.AlertType
 
+/** magnet URI의 SHA-1 infohash(hex 40자) 그룹 캡처 */
+private val magnetHexRegex = Regex("urn:btih:([0-9a-fA-F]{40})")
+
 class TorrentEngine(
     private val context: Context,
     private val settings: SettingsRepository,
@@ -36,6 +39,9 @@ class TorrentEngine(
     @Volatile private var latestUploadKbps: Long = 0L
     @Volatile private var latestDownloadKbps: Long = 0L
     @Volatile private var latestSequentialDownload: Boolean = false
+    @Volatile private var torrentMinSeedWaitSec: Int = 0
+    /** id → 시더 부재 대기 시작 시각(ms). 0이면 미측정 */
+    private val seedWaitSince = ConcurrentHashMap<String, Long>()
     private var lastPersistAt = 0L
     private var lastSavedSnapshot: List<TorrentJob>? = null
     private fun persistNow() {
@@ -154,10 +160,20 @@ class TorrentEngine(
     }
 
     fun addMagnet(magnet: String): TorrentJob {
+        val hash = magnetInfoHash(magnet)
+        // 중복 가드: 같은 infohash가 이미 활성/완료 상태면 새 job을 만들지 않고 기존을 반환
+        // (libtorrent는 동일 infohash download를 조용히 무시 → 새 job이 FETCHING_METADATA에 갇힘)
+        if (hash != null) {
+            val existing = TorrentRepository.all().find { it.infoHash.isNotEmpty() && it.infoHash == hash }
+            if (existing != null) {
+                DebugLogger.i(TAG, "중복 magnet 감지 (${hash}) → 기존 id=${existing.id} 반환")
+                return existing
+            }
+        }
         val id = TorrentRepository.newId()
         val job = TorrentJob(
             id = id,
-            infoHash = "",
+            infoHash = hash ?: "",
             name = "추출 중...",
             magnet = magnet,
             state = TorrentState.FETCHING_METADATA,
@@ -166,7 +182,7 @@ class TorrentEngine(
         )
         TorrentRepository.add(job)
         persistNow()
-        DebugLogger.i(TAG, "magnet 추가 id=$id")
+        DebugLogger.i(TAG, "magnet 추가 id=$id hash=${hash ?: "-"}")
 
         scope.launch {
             try {
@@ -181,6 +197,17 @@ class TorrentEngine(
             }
         }
         return job
+    }
+
+    /** magnet의 infohash가 이미 다운로드 중(활성/완료)인지 중복 여부 — 라우트에서 선검사용 */
+    fun isDuplicateMagnet(magnet: String): Boolean {
+        val hash = magnetInfoHash(magnet) ?: return false
+        return TorrentRepository.all().any { it.infoHash.isNotEmpty() && it.infoHash == hash }
+    }
+
+    /** magnet URI에서 infohash(SHA-1 hex 40자) 추출. 없거나 base32면 null. */
+    private fun magnetInfoHash(magnet: String): String? {
+        return magnetHexRegex.find(magnet)?.groupValues?.get(1)
     }
 
     fun addTorrentFile(bytes: ByteArray, filename: String): TorrentJob {
@@ -349,8 +376,8 @@ class TorrentEngine(
      */
     private fun applyRateLimits() {
         val session = session ?: return
-        val upBps = if (latestUploadKbps <= 0) 1024 else (latestUploadKbps * 1024).toInt().coerceAtLeast(1)
-        val downBps = if (latestDownloadKbps <= 0) 0 else (latestDownloadKbps * 1024).toInt()
+        val upBps = if (latestUploadKbps <= 0) 1024 else (latestUploadKbps * 1024).coerceIn(1, Int.MAX_VALUE.toLong()).toInt()
+        val downBps = if (latestDownloadKbps <= 0) 0 else (latestDownloadKbps * 1024).coerceIn(0, Int.MAX_VALUE.toLong()).toInt()
         try {
             session.uploadRateLimit(upBps)
             session.downloadRateLimit(downBps)
@@ -365,8 +392,9 @@ class TorrentEngine(
     /** 전역 속도 제한 (웹/앱에서 즉시 적용) — BPS 단위 */
     fun applySpeedLimit(downloadBps: Long, uploadBps: Long) {
         val session = session ?: return
-        val upBps = if (uploadBps <= 0) 1024 else uploadBps.toInt().coerceAtLeast(1)
-        val downBps = if (downloadBps <= 0) 0 else downloadBps.toInt()
+        // Long → Int 오버플로우 방지 (libtorrent는 Int BPS)
+        val upBps = if (uploadBps <= 0) 1024 else uploadBps.coerceIn(1, Int.MAX_VALUE.toLong()).toInt()
+        val downBps = if (downloadBps <= 0) 0 else downloadBps.coerceIn(0, Int.MAX_VALUE.toLong()).toInt()
         try {
             session.uploadRateLimit(upBps)
             session.downloadRateLimit(downBps)
@@ -422,13 +450,16 @@ class TorrentEngine(
         }
 
         // 속도 제한도 함께 적용
-        val upBps = if (s.torrentUploadLimit <= 0) 1024 else (s.torrentUploadLimit * 1024).toInt().coerceAtLeast(1)
-        val downBps = if (s.torrentDownloadLimit <= 0) 0 else (s.torrentDownloadLimit * 1024).toInt()
+        val upBps = if (s.torrentUploadLimit <= 0) 1024 else (s.torrentUploadLimit * 1024).coerceIn(1, Int.MAX_VALUE.toLong()).toInt()
+        val downBps = if (s.torrentDownloadLimit <= 0) 0 else (s.torrentDownloadLimit * 1024).coerceIn(0, Int.MAX_VALUE.toLong()).toInt()
         try {
             session.uploadRateLimit(upBps)
             session.downloadRateLimit(downBps)
         } catch (e: Exception) { DebugLogger.e(TAG, "토렌트 속도 제한 적용 실패", e) }
         DebugLogger.i(TAG, "토렌트 설정 적용 maxActive=${s.torrentMaxActive} up=${if(s.torrentUploadLimit<=0) "끔" else "${s.torrentUploadLimit}KB/s"} down=${if(s.torrentDownloadLimit<=0) "무제한" else "${s.torrentDownloadLimit}KB/s"}")
+
+        // 시더 부재 자동 중단 대기 시간 (0 = 꺼짐)
+        torrentMinSeedWaitSec = s.torrentMinSeedWaitSec
     }
 
     private fun handleAlert(alert: Alert<*>) {
@@ -512,9 +543,13 @@ class TorrentEngine(
     private fun findJobIdForNewTorrent(hash: String): String? {
         // 이미 매핑된 경우
         hashToId[hash]?.let { return it }
-        // infoHash가 비어있는 가장 최근 torrent에 매핑
+        // addMagnet이 미리 infoHash를 주입한 job과 정확히 일치하는 것 우선 매핑 (교차 매핑 방지)
+        TorrentRepository.all()
+            .firstOrNull { it.infoHash == hash && it.state == TorrentState.FETCHING_METADATA }
+            ?.let { return it.id }
+        // infoHash가 비어있는 가장 오래된 미매핑 torrent (해시 파싱 실패 폴백, FIFO)
         val candidates = TorrentRepository.all().filter { it.infoHash.isEmpty() && it.state == TorrentState.FETCHING_METADATA }
-        return candidates.maxByOrNull { it.id }?.id
+        return candidates.minByOrNull { it.id }?.id
     }
 
     private fun startStatusPolling() {
@@ -568,6 +603,24 @@ class TorrentEngine(
                                 seeds = status.listSeeds(),
                                 peers = status.listPeers(),
                             )
+                        }
+
+                        // 시더 부재 자동 중단 (이슈 4) — 설정 토글 시에만 동작
+                        val seedLimit = torrentMinSeedWaitSec
+                        if (seedLimit > 0 && state == TorrentState.DOWNLOADING && status.progress() < 1f) {
+                            if (status.listSeeds() > 0) {
+                                seedWaitSince.remove(id)
+                            } else {
+                                val waitSince = seedWaitSince[id] ?: System.currentTimeMillis().also { seedWaitSince[id] = it }
+                                val waitedSec = (System.currentTimeMillis() - waitSince) / 1000
+                                if (waitedSec >= seedLimit) {
+                                    seedWaitSince.remove(id)
+                                    DebugLogger.w(TAG, "시더 부재 ${waitedSec}초(제한 ${seedLimit}초) → 자동 일시정지 id=$id")
+                                    pause(id)
+                                }
+                            }
+                        } else {
+                            seedWaitSince.remove(id)
                         }
                     }
                     invalidIds.forEach { id ->

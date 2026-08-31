@@ -26,6 +26,7 @@
 - 맥/iPad는 S22 Wi-Fi 핫스팟 경유 인터넷 → 셀룰러 대역폭 낮음(~400KB/s)·단절 잦음
 - 서버 포트 8080 고정(E-AND-DOWN-1004), 폰 핫스팟 IP는 `swlan0` 인터페이스
 - 대용량 다운로드는 반드시 DroidRelay 앱 경유(폰 LTE 직접 + Range 이어받기)
+- **HTTPS 접속(v0.14)**: 자체서명 인증서(8443)는 사파리만 경고 후 진행, 웨일/크롬은 하드 차단 → `forceHttpsRedirect`(기본 false)면 LAN HTTP(8080) 폴백. 다운로드 링크(dlBase)는 접속 프로토콜을 따름(HTTP=8080/HTTPS=8443)
 
 ## 금지 사항
 - Flutter/RN 등 크로스플랫폼 도입 (AGENTS.md 네이티브 원칙)
