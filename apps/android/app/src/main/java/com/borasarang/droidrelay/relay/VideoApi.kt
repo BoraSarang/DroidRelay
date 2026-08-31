@@ -46,10 +46,14 @@ object VideoApi {
         val vm = RelayApp.getVideo(context)
         val found = StreamDetector.analyze(url)
         val stream = streamUrl?.ifBlank { found.url } ?: found.url
-        // 실제 다운로드할 스트림(m3u8) 기준 세그먼트 전체 개수 — 마스터면 첫 variant 팔로우, 아니면 검출값
-        val segments = StreamDetector.resolveSegmentsCount(stream).let { if (it > 0) it else found.segmentsTotal }
-        // HLS 총 재생 시간(ms) — -progress 기반 진행률의 분모 (비디오 전용, 측정 불가 시 0)
-        val durationMs = StreamDetector.mediaDurationMsFromUrl(stream)
+        // 분석 대상과 다운로드 대상이 같으면 재fetch 없이 계측값 재사용(403 사이트는 분석 단계에서 이미 즉시 실패)
+        val m = if (stream == found.url) {
+            StreamDetector.ManifestResult(emptyList(), found.segmentsTotal, found.durationMs)
+        } else {
+            StreamDetector.parseManifest(stream)
+        }
+        val segments = m.segments
+        val durationMs = m.durationMs
         val outName = VideoDownloadManager.safeFilename(filename, "mp4")
         val argv = listOf(
             "-i", stream, "-c", "copy", "-movflags", "+faststart",
