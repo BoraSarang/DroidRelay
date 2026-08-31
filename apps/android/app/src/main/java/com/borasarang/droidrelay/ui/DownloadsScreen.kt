@@ -4,13 +4,20 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.graphics.Bitmap
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -53,6 +60,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -79,52 +88,101 @@ import org.json.JSONObject
 @Composable
 fun DownloadsScreen(onCopyAddress: (String) -> Unit) {
     val jobs by JobsRepository.jobs.collectAsState()
+    val qr = remember { qrBitmap("http://${lanAddress()}:${RelayService.PORT}") }
+    var qrFull by remember { mutableStateOf(false) }
+    val qrScale by animateFloatAsState(if (qrFull) 1f else 0.85f, animationSpec = tween(180), label = "qrScale")
 
-    LazyColumn(
-        modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        item { ServerCard(onCopyAddress) }
-        item { AddRow() }
-        item { VideoAddRow(onDlStarted = { }) }
-        item {
-            Text(
-                "작업 목록 (${jobs.size})",
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                style = MaterialTheme.typography.labelMedium,
-                modifier = Modifier.padding(top = 8.dp),
-            )
-        }
-        if (jobs.isEmpty()) {
+    Box(Modifier.fillMaxSize()) {
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            item { ServerCard(onCopyAddress, qr, onQrClick = { qrFull = true }) }
+            item { AddRow() }
+            item { VideoAddRow(onDlStarted = { }) }
             item {
-                Column(
-                    Modifier.fillMaxWidth().padding(vertical = 40.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
+                Text(
+                    "작업 목록 (${jobs.size})",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.labelMedium,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+            }
+            if (jobs.isEmpty()) {
+                item {
+                    Column(
+                        Modifier.fillMaxWidth().padding(vertical = 40.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        Icon(
+                            Icons.Filled.Download,
+                            contentDescription = null,
+                            modifier = Modifier.size(40.dp),
+                            tint = MaterialTheme.colorScheme.outline,
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            "다운로드한 작업이 없습니다",
+                            color = MaterialTheme.colorScheme.outline,
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    }
+                }
+            } else {
+                items(jobs, key = { it.id }) { JobCard(it) }
+            }
+            item { Spacer(Modifier.height(24.dp)) }
+        }
+
+        if (qrFull) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.6f))
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = { qrFull = false },
+                    ),
+                contentAlignment = Alignment.Center,
+            ) {
+                val cs = MaterialTheme.colorScheme
+                Card(
+                    shape = MaterialTheme.shapes.large,
+                    colors = CardDefaults.cardColors(containerColor = cs.surface),
                 ) {
-                    Icon(
-                        Icons.Filled.Download,
-                        contentDescription = null,
-                        modifier = Modifier.size(40.dp),
-                        tint = MaterialTheme.colorScheme.outline,
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        "다운로드한 작업이 없습니다",
-                        color = MaterialTheme.colorScheme.outline,
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
+                    Box(Modifier.padding(16.dp)) {
+                        qr?.let {
+                            Image(
+                                bitmap = it.asImageBitmap(),
+                                contentDescription = "접속 주소 QR 코드 (확대)",
+                                modifier = Modifier
+                                    .fillMaxWidth(0.8f)
+                                    .aspectRatio(1f)
+                                    .scale(qrScale)
+                                    .clickable(
+                                        interactionSource = remember { MutableInteractionSource() },
+                                        indication = null,
+                                        onClick = { qrFull = false },
+                                    ),
+                            )
+                        }
+                        IconButton(
+                            onClick = { qrFull = false },
+                            modifier = Modifier.align(Alignment.TopEnd),
+                        ) {
+                            Icon(Icons.Filled.Close, contentDescription = "닫기", tint = cs.onSurfaceVariant)
+                        }
+                    }
                 }
             }
-        } else {
-            items(jobs, key = { it.id }) { JobCard(it) }
         }
-        item { Spacer(Modifier.height(24.dp)) }
     }
 }
 
 /** 서버 주소·QR·저장공간 카드 + 네트워크 타입 + 공유 */
 @Composable
-private fun ServerCard(onCopyAddress: (String) -> Unit) {
+private fun ServerCard(onCopyAddress: (String) -> Unit, qr: Bitmap?, onQrClick: () -> Unit) {
     val ctx = LocalContext.current
     val engine = remember { RelayApp.get(ctx) }
     val ip = remember { lanAddress() }
@@ -182,7 +240,7 @@ private fun ServerCard(onCopyAddress: (String) -> Unit) {
                                 addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
                             }
                             // QR 비트맵을 jpg로 저장 후 공유
-                            qrBitmap(addr)?.let { bmp ->
+                            qr?.let { bmp ->
                                 val file = java.io.File(ctx.cacheDir, "droidrelay_qr.jpg")
                                 file.outputStream().use { bmp.compress(android.graphics.Bitmap.CompressFormat.JPEG, 90, it) }
                                 val uri = androidx.core.content.FileProvider.getUriForFile(
@@ -195,8 +253,12 @@ private fun ServerCard(onCopyAddress: (String) -> Unit) {
                         }) { Text("공유") }
                     }
                 }
-                qrBitmap(addr)?.let { bmp ->
-                    Image(bitmap = bmp.asImageBitmap(), contentDescription = "QR", modifier = Modifier.size(96.dp))
+                qr?.let { bmp ->
+                    Image(
+                        bitmap = bmp.asImageBitmap(),
+                        contentDescription = "QR",
+                        modifier = Modifier.size(96.dp).clickable(onClick = onQrClick),
+                    )
                 }
             }
 
