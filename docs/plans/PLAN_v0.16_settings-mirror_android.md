@@ -2,7 +2,7 @@
 
 - **날짜**: 2026-08-31
 - **플랫폼**: Android (`apps/android/app`)
-- **관련 docs**: `docs/TODO.md`(T-916~T-921), `docs/CHANGELOG.md`
+- **관련 docs**: `docs/TODO.md`(T-916~T-927), `docs/CHANGELOG.md`
 
 ## 목표
 1. 웹 대시보드 설정 탭에만 있고 앱 설정에 없는 항목을 앱으로 미러링(1차: 전역 속도 제한·토렌트 고급·가드).
@@ -40,10 +40,19 @@
 - `FilesScreen.kt`: "📱 보관함" 이모지 제거, 카드색 `surfaceContainerHigh`→`surfaceContainer` 통일, 스낵 콜백 이관, 빈 상태 정돈
 - `SettingsScreen.kt`: Root 패딩 이관에 따른 수평 패딩 추가
 
+## v0.16.2 — 앱 설정 미러 2차 (스케줄/Debrid/터널/MCP/기본값 복원)
+백엔드 필드/setter/HTTP 라우트(`/api/settings/{schedule,debrid,tunnel,mcp,reset}`)는 완비. UI만 추가.
+
+- **스케줄**: 활성화 Switch, Cron 입력+적용(`CronParser.isValid` 유효성). Wi-Fi/충전 중만 Switch, 최소 배터리 Slider(5~100)
+- **Debrid**: 활성화 Switch, 제공자 FilterChip 3종(`DebridProvider.entries`), API 키 저장 → `setDebrid*`
+- **터널**: 활성화 Switch, 제공자 FilterChip 2종(`TunnelProvider.entries`)
+- **MCP 서버 권한**: 프라이버시 Switch + 도구 5종 활성화(file_list/file_read/download_add/download_list/download_control) → `setMcpToolDisabled`
+- **기본값 복원**: 다운로드/토렌트/전체 버튼 → 경고 AlertDialog → 서버 `/api/settings/reset`과 동일 조합 + `RelayApp.applySettings` 즉시 적용
+
 ## 검증
 - `:app:testDebugUnitTest` GREEN / `ktlintCheck` GREEN(우회 플래그) / `:app:assembleRelease` GREEN
-- 실기기 `R5CT215F4QK` 인플레이스 설치: v0.16.0(versionCode 18) → v0.16.1(versionCode 19) 확인
+- 실기기 `R5CT215F4QK` 인플레이스 설치: v0.16.0(VC18) → v0.16.1(VC19) → v0.16.2(VC20) 확인
 - DebugPanel 확인(ERROR 0)은 **사용자 직접**
 
 ## 진행 이력
-- v0.16.0 설치 완료 → v0.16.1 디자인 개편 구현 완료 → 설치 완료. 커밋은 사용자 요청 시 분리(설정/디자인/문서).
+- v0.16.0 설치 완료 → v0.16.1 디자인 개편 구현·설치 완료 → 커밋 5개(`7b03e1e`/`0e560aa`/`f1df586`/`18d98c4`/`7295294`, branch `feat/android-v014-stability`) → **v0.16.2 2차 구현·설치 완료**. 커밋은 사용자 요청 시 진행.

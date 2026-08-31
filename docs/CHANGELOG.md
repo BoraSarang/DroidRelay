@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.16.3] - 2026-08-31
+
+### Added [android] — 다운로드 QR 확대/축소 토글
+- **서버 주소 QR 이미지를 탭하면** 전체 화면 반투명(검정 alpha 0.6) 오버레이에 화면 폭 80% 크기로 **확대 표시**, 오버레이 아무 곳(QR 포함)을 다시 클릭하거나 우상단 **닫기 버튼**을 누르면 사라짐
+- 확대 전환 시 0.85f→1f **scale 모션**(tween 180ms) 적용, 닫기 아이콘은 `Close`
+- **QR 비트맵 1회 캐시 재사용**: `qrBitmap()` 인코딩(512×512, CPU 작업)을 재컴포지션마다 하던 것을 `remember`로 1회만 수행, 축소 이미지(96dp)·공유·확대 오버레이가 같은 비트맵 공유
+- **버전**: versionCode 20 → **21**, versionName **0.16.3**, 릴리즈 서명 APK `R5CT215F4QK` 실기기 인플레이스 설치(성능 영향 없음, 재인코딩 폐기로 오히려 개선)
+
+## [0.16.2] - 2026-08-31
+
+### Added [android] — 웹 설정 미러 2차: 스케줄 · Debrid · 터널 · MCP · 기본값 복원 (PLAN_v0.16_settings-mirror_android.md)
+- 웹 대시보드 설정 탭의 남은 항목을 앱 설정으로 이전(백엔드 필드/setter/라우트 기존 완비, UI만 추가)
+- **스케줄**(신규 섹션): 활성화 스위치, Cron 입력+적용(`CronParser.isValid`로 실시간 유효성 표시), Wi-Fi 연결 시에만/충전 중에만 스위치, 최소 배터리 슬라이더(5~100%)
+- **Debrid**(신규 섹션): 활성화 스위치, 제공자 FilterChip 3종(Real-Debrid/AllDebrid/Premiumize), API 키 저장
+- **터널**(신규 섹션): 활성화 스위치, 제공자 FilterChip 2종(Tailscale/Cloudflare Tunnel)
+- **MCP 서버 권한**(신규 섹션): 프라이버시 모드 스위치, 도구 5종 활성화 스위치(file_list/file_read/download_add/download_list/download_control → `setMcpToolDisabled`)
+- **기본값 복원**(신규 섹션): 다운로드/토렌트/전체 초기화 버튼 → **경고 AlertDialog 확인 후** 서버 `/api/settings/reset`과 동일한 조합 실행(다운로드: 동시2·속도해제·알림On; 토렌트: 업로드512·다운무제한·활성3·ratio2.0·DHT/PEX On·랜덤 포트 49152~65535·저장경로 기본) + RelayApp 엔진 즉시적용
+- **버전**: versionCode 19 → **20**, versionName **0.16.2**, 릴리즈 서명 APK `R5CT215F4QK` 실기기 인플레이스 설치(성능/캐시 영향 없음, 설정 UI 추가)
+
 ## [0.16.1] - 2026-08-31
 
 ### Changed [android] — MD3 디자인 전면 정돈 (PLAN_v0.16_settings-mirror_android.md)

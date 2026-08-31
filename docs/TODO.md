@@ -293,5 +293,12 @@ T-001~T-008 전부 완료 (커밋 7574486).
 | T-919 | **가드 섹션** — 활성화 switch + 열/배터리/스토리지 임계 슬라이더 + watchdog 주기(초) + HTTP→HTTPS 강제 switch | ✅ |
 | T-920 | v0.16.0 검증(unit/ktlint/assembleRelease) + 실기기 인플레이스 설치 | ✅ |
 | T-921 | v0.16.1 MD3 디자인 개편 — TopAppBar 도입·디버그 패널 이전·다운로드 단일 LazyColumn·Torrent 중첩 Scaffold 제거·카드색 통일·이모지→아이콘·Theme 표면 토큰·공용 DebugPanel | ✅ |
+| T-922 | **웹 설정 미러 2차 — 스케줄** — 활성화 스위치 + Cron 입력+적용(`CronParser.isValid` 유효성 표시) + Wi-Fi/충전 중만 스위치 + 최소 배터리 슬라이더(5~100) → `setSchedule*` | ✅ |
+| T-923 | **2차 — Debrid** — 활성화 스위치 + 제공자 FilterChip(REALDEBRID/ALLDEBRID/PREMIUMIZE) + API 키 저장 → `setDebrid*` | ✅ |
+| T-924 | **2차 — 터널** — 활성화 스위치 + 제공자 FilterChip(TAILSCALE/CLOUDFLARE) → `setTunnelEnabled/setTunnelProvider` | ✅ |
+| T-925 | **2차 — MCP** — 프라이버시 스위치 + 도구 5종 활성화(file_list/file_read/download_add/download_list/download_control) → `setMcpPrivacyMode/setMcpToolDisabled` | ✅ |
+| T-926 | **2차 — 기본값 복원** — 다운로드/토렌트/전체 버튼 + 경고 AlertDialog → 서버 reset과 동일 조합 + RelayApp 즉시적용 | ✅ |
+| T-927 | v0.16.2(versionCode 20) 검증(unit/ktlint/assembleRelease) + 실기기 인플레이스 설치 + CHANGELOG/TODO 갱신 | ✅ |
+| T-928 | **다운로드 QR 확대/축소 토글** — QR 탭 → 전체 화면 반투명 오버레이에 확대 표시(scale 모션), 화면 아무 곳/닫기 버튼 재클릭 시 축소. qr 비트맵 1회 캐시 재사용 | ✅ |
 
 > v0.16.0(설정 1차)·v0.16.1(디자인 개편) 실기기 **직접 확인 대기**(사용자). 이후 **2차 확장** 예약: 스케줄(ScheduleRepository) / Debrid / 터널 / MCP / 기본값 복원. RSS CRUD는 별도 저장소(2차와 분리 검토).

@@ -1,14 +1,15 @@
-# 세션 로그 2026-08-31 (Android) — 웹 설정 미러 1차 + MD3 디자인 개편 (v0.16.x)
+# 세션 로그 2026-08-31 (Android) — 웹 설정 미러 1차+2차 + MD3 디자인 개편 (v0.16.x)
 
 ## 세션 요약
-- **무엇을/플랫폼**: [ANDROID] 웹 대시보드에만 있던 설정을 앱에 미러링 **v0.16.0**(전역 속도 제한·토렌트 고급 4종·가드 보호 — 백엔드 setter는 기존 완비, UI만 추가) → 이어서 **MD3 디자인 개편 v0.16.1**(TopAppBar 도입·디버그 패널 Root 이전·Downloads 단일 LazyColumn·Torrent 중첩 Scaffold 제거·카드색 통일·이모지 제거·Theme 표면 토큰/셰이프 정렬). 1차 완료 후 **2차(스케줄/Debrid/터널/MCP/기본값 복원) 확장 예약**, RSS는 별도 저장소로 분리 검토.
-- **빌드**: BUILD SUCCESSFUL — `testDebugUnitTest` GREEN, `ktlintCheck` GREEN(`-x :app:ktlintKotlinScriptCheck -x :app:runKtlintCheckOverKotlinScripts`), `assembleRelease` OK. 실기기 `R5CT215F4QK`에 v0.16.0(18)→v0.16.1(19) 인플레이스 `adb install -r` Success, `dumpsys`로 versionCode=19/versionName=0.16.1 확인.
-- **PERF/CACHE**: 해당 없음(UI+설정만, 성능 예산 영향 없음). dynamicColor(Material You)는 "기기 테마 따라감 유지".
-- **남은TODO**: ① v0.16.x 실기기 동작 확인(설정 저장·디자인) — **사용자 직접** ② 2차 설정(스케줄/Debrid/터널/MCP/기본값 복원, RSS는 분리) ③ git 커밋 분리(v0.14~v0.16 변경이 미커밋으로 main에 누적 — 사용자 요청 시) ④ AGENTS.android.md 재검토.
-- **전달로그**: 설정 미러의 저장 단위는 Mbps×1_048_576(bps, 웹과 동일), 0=무제한. `torrentListenPort` 변경은 토렌트 엔진 재시작 필요(Text). 파일 저장 경로는 `File.exists/mkdirs`로 테스트. 디버그 진입을 "5연속 탭"에서 topBar 아이콘으로 변경 — 기존 규칙 10.2(다중 선택 복사)는 `ui/DebugPanel.kt`로 이전 유지.
-- **문서갱신**: docs/TODO.md T-916~T-921 ✅ + 2차 예약 메모, `docs/plans/PLAN_v0.16_settings-mirror_android.md` 생성, CHANGELOG v0.16.0/0.16.1 기재, 세션 로그 갱신.
+- **무엇을/플랫폼**: [ANDROID] 웹 대시보드에만 있던 설정을 앱에 미러링 **v0.16.0**(전역 속도 제한·토렌트 고급 4종·가드 보호) → **MD3 디자인 개편 v0.16.1** → **2차 v0.16.2**(스케줄 Cron+유효성/Debrid/터널/MCP 도구 5종/기본값 복원 AlertDialog) → **v0.16.3 다운로드 QR 확대/축소 토글**(QR 탭 → 반투명 오버레이 확대 + scale 모션, 재클릭/닫기 버튼으로 축소, QR 비트맵 1회 캐시 재사용). RSS는 별도 저장소로 분리 검토.
+- **빌드**: BUILD SUCCESSFUL — `testDebugUnitTest` GREEN, `ktlintCheck` GREEN(`-x` 우회 플래그), `assembleRelease` OK. 실기기 `R5CT215F4QK` 인플레이스 v0.16.0(18)→v0.16.1(19)→v0.16.2(20)→**v0.16.3(21)**, `dumpsys` versionName **0.16.3** 확인.
+- **PERF/CACHE**: QR 인코딩(512×512)을 재컴포지션마다 하던 것을 `remember` 1회로 캐시(축소/공유/확대 공유) — UI 추가지만 오히려 CPU 절감.
+- **남은TODO**: ① v0.16.3 실기기 동작 확인(QR 확대 토글·신규 설정 섹션) — **사용자 직접** ② git 커밋(v0.16.2·v0.16.3 포함, 경고: 루트에 `--viewport` PNG untracked 존재 — 제외 필요) + push(목적지 확인 필요) ③ AGENTS.android.md 재검토.
+- **전달로그**: 설정 저장 단위 Mbps×1_048_576(0=무제한). `torrentListenPort` 변경은 토렌트 엔진 재시작 필요. 디버그 진입은 5연속 탭 → topBar 아이콘. Cron 유효성은 `CronParser.isValid`. 기본값 복원은 파괴적 동작이라 AlertDialog 확인 필수. QR은 `DownloadsScreen`에서 `remember`로 비트맵 1회 생성해 ServerCard·공유·오버레이가 공유.
+- **문서갱신**: docs/TODO.md T-916~**T-928** ✅, `docs/plans/PLAN_v0.16_settings-mirror_android.md`, CHANGELOG v0.16.0~**v0.16.3** 기재, 세션 로그 갱신.
+- **커밋**: v0.16.0~0.16.1 **커밋 5개 완료**(branch `feat/android-v014-stability`). **v0.16.2·v0.16.3 미커밋** (사용자 요청 시).
 - **큐상태**: 없음.
-- **E2E**: 단위테스트 GREEN(신규 테스트 없음, UI 개편). 실기기 마무리 확인은 사용자 담당.
+- **E2E**: 단위테스트 GREEN(신규 테스트 없음, 설정 UI만). 실기기 마무리 확인은 사용자 담당.
 
 ---
 
