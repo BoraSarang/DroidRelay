@@ -1,5 +1,10 @@
 package com.borasarang.droidrelay.ui
 
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.os.PowerManager
+import android.provider.Settings
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -21,6 +26,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -29,8 +35,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import com.borasarang.droidrelay.relay.AccessScope
 import com.borasarang.droidrelay.relay.CronParser
 import com.borasarang.droidrelay.relay.DebridProvider
@@ -124,6 +133,62 @@ fun SettingsScreen(onPortChanged: (Int) -> Unit) {
 
             // Line 3: 자동 시작
             SwitchRow("앱 실행 시 서버 자동 시작", s.autoStart) { v -> kotlinx.coroutines.MainScope().launch { repo.setAutoStart(v) } }
+
+            // Line 4: 배터리 최적화 예외 (백그라운드 안정성)
+            val pm = ctx.getSystemService(Context.POWER_SERVICE) as PowerManager
+            var batteryUnrestricted by remember { mutableStateOf(pm.isIgnoringBatteryOptimizations(ctx.packageName)) }
+            val lifecycle = LocalLifecycleOwner.current.lifecycle
+            DisposableEffect(lifecycle) {
+                val observer = LifecycleEventObserver { _, event ->
+                    if (event == Lifecycle.Event.ON_RESUME) {
+                        batteryUnrestricted = pm.isIgnoringBatteryOptimizations(ctx.packageName)
+                        DebugLogger.i("Settings", "배터리 예외 상태 갱신: $batteryUnrestricted")
+                    }
+                }
+                lifecycle.addObserver(observer)
+                onDispose { lifecycle.removeObserver(observer) }
+            }
+            Spacer(Modifier.height(12.dp))
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    if (batteryUnrestricted) "배터리 최적화 예외: 허용됨" else "배터리 최적화 예외: 미허용",
+                    color = if (batteryUnrestricted) cs.primary else cs.error,
+                    style = MaterialTheme.typography.labelMedium,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            if (!batteryUnrestricted) {
+                Text(
+                    "백그라운드에서 안정적으로 동작하려면 '배터리 사용 제한 없음' 설정이 필요합니다",
+                    color = cs.onSurfaceVariant,
+                    style = MaterialTheme.typography.labelSmall,
+                )
+                OutlinedButton(onClick = {
+                    runCatching {
+                        ctx.startActivity(
+                            Intent(
+                                Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                                Uri.parse("package:${ctx.packageName}"),
+                            ),
+                        )
+                    }.onFailure {
+                        DebugLogger.w("Settings", "배터리 예외 요청 실패: ${it.message}")
+                    }
+                }) { Text("배터리 무제한 허용 요청") }
+            } else {
+                OutlinedButton(onClick = {
+                    runCatching {
+                        ctx.startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+                    }.onFailure {
+                        DebugLogger.w("Settings", "배터리 최적화 설정 화면 열기 실패: ${it.message}")
+                    }
+                }) { Text("배터리 무제한 해제") }
+                Text(
+                    "해제 화면에서 DroidRelay를 눌러 '최적화'로 바꾸면 원복됩니다",
+                    color = cs.onSurfaceVariant,
+                    style = MaterialTheme.typography.labelSmall,
+                )
+            }
         }
 
         HorizontalDivider(color = cs.outlineVariant)
