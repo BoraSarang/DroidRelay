@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.16.5] - 2026-09-05
+
+### Fixed [android] — v0.16.4 방어 코드의 한계 극복: FGS 5초 의무 타임아웃 크래시 + 배터리 UI 개선
+- **발견(v0.16.4 재현 테스트 후 실사용 70분 만에 크래시)**: `MainActivity.onCreate`의 `startForegroundService()` 호출에 대해 서비스 생성 시점 `startForeground()`가 **백그라운드 시작 제한으로 DENIED**되면, v0.16.4처럼 try-catch로 `ForegroundServiceStartNotAllowedException`을 삼켜도 **시스템의 5초 `startForeground()` 의무 타이머는 취소되지 않음** → 이후 `ForegroundServiceDidNotStartInTimeException`(스택 `MainActivity.kt:69 → RelayService.start`)으로 앱 전체가 강제 종료. `dumpsys activity services`에서 `infoAllowStartForeground=[code:DENIED]`, `isForeground=false`인 좀비 ServiceRecord로 확정
+- **근본 수정**: `startForegroundService()`의 5초 의무 타이머 자체를 회피 — `RelayService.start()`는 **일반 `startService()`를 기본**으로 사용하고, `onStartCommand` 첫 줄에서 `startInForeground()`로 **기회적 FGS 승격**(허용 시 알림 복구, 거부 시 백그라운드로 무해하게 동작). `service.onCreate`에서도 채널 생성보다 FGS 승격을 먼저 실행(5초 창 최대 확보). 백그라운드 start가 제한되는 경우만(IllegalStateException) `startForegroundService`로 재시도
+- **배터리 UI 개선**: 허용 상태 시 "배터리 무제한 **해제**" 버튼 추가(`ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS`), 설정 화면에 `LifecycleEventObserver`(ON_RESUME)로 `isIgnoringBatteryOptimizations` **재조회 → 시스템 화면에서 돌아오면 상태/버튼 즉시 갱신**
+- **검증**: 빌드 3종 GREEN → `R5CT215F4QK` 설치(versionCode 23). 배터리 whitelist 허용 확인(`dumpsys deviceidle whitelist`), 배터리 예외 허용 UI로 최적화 예외 상태 표시
+- **버전**: versionCode 22 → **23**, versionName **0.16.5**
+
+## [0.16.4] - 2026-09-05
+
+### Fixed [android] — FGS 크래시 루프(백그라운드 사망) + 배터리 최적화 예외 유도
+- **원인(로그 확정)**: 프로세스가 시스템(삼성/Android 16 배터리 최적화)에 강제 종료되면 `START_STICKY`로 `RelayService`가 재생성 → `onCreate`의 `startForeground()`가 **백그라운드 FGS 시작 제한(`ForegroundServiceStartNotAllowedException`)에 걸려 예외 미처리로 프로세스 즉시 사망 → 무한 재시작 루프**. 실기기 logcat: 09:19/13:32(서비스 재시작)·13:42(활동 시작) 크래시 확인
+- **수정**: `startInForeground()`를 try-catch로 방어 → FGS 시작 거부 시에도 **백그라운드로 계속 구동**(크래시 루프 중단, `[W] FGS 시작 거부 — 백그라운드 모드로 계속 동작: ... (E-AND-SRV-0101)`). `onStartCommand`에서 매 실행 시 `startInForeground()` 재시도(사용자 재진입/재시작 시 알림 복구, `isForeground` 플래그). `RelayService.start()`의 `startForegroundService` 호출도 try-catch + `startService` fallback(`E-AND-SRV-0102`)
+- **배터리 최적화 예외 유도**: 설정 화면 '서버' 섹션에 상태 표시(허용됨/미허용) + 미허용 시 "**배터리 무제한 허용 요청**" 버튼(`ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`). `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` 권한 추가 — 삼성/Android 16에서 밤새 안정 동작의 전제
+- **검증**: 빌드 3종 GREEN → `R5CT215F4QK` 설치(versionCode 22) → **`adb shell am crash` 재현 테스트**: 강제 크래시 후 1초 만에 시스템이 `for service`로 재생성, 크래시 없이 전 프로세스에서 `onCreate` 완료 → 생존 확인(이전엔 재시작 시 재사망)
+- **버전**: versionCode 21 → **22**, versionName **0.16.4**
+
 ## [0.16.3] - 2026-08-31
 
 ### Added [android] — 다운로드 QR 확대/축소 토글

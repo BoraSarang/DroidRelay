@@ -300,5 +300,6 @@ T-001~T-008 전부 완료 (커밋 7574486).
 | T-926 | **2차 — 기본값 복원** — 다운로드/토렌트/전체 버튼 + 경고 AlertDialog → 서버 reset과 동일 조합 + RelayApp 즉시적용 | ✅ |
 | T-927 | v0.16.2(versionCode 20) 검증(unit/ktlint/assembleRelease) + 실기기 인플레이스 설치 + CHANGELOG/TODO 갱신 | ✅ |
 | T-928 | **다운로드 QR 확대/축소 토글** — QR 탭 → 전체 화면 반투명 오버레이에 확대 표시(scale 모션), 화면 아무 곳/닫기 버튼 재클릭 시 축소. qr 비트맵 1회 캐시 재사용 | ✅ |
+| T-929 | **FGS 크래시 루프 수정(v0.16.4)** — 백그라운드 재시작 시 `ForegroundServiceStartNotAllowedException` → `startInForeground()` try-catch + onStartCommand 재시도 + start() 안전화. 배터리 최적화 예외 UI(상태+무제한 허용 요청 버튼) 추가 | ✅ |
 
 > v0.16.0(설정 1차)·v0.16.1(디자인 개편) 실기기 **직접 확인 대기**(사용자). 이후 **2차 확장** 예약: 스케줄(ScheduleRepository) / Debrid / 터널 / MCP / 기본값 복원. RSS CRUD는 별도 저장소(2차와 분리 검토).
