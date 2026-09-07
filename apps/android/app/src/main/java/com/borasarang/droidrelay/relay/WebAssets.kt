@@ -902,8 +902,10 @@ function updateInfoBar(){
     left+='<span class="info-item speed">총 속도 <b>'+spd(totalSpeed+tDown)+'</b></span>';
     if(tUp>0)left+='<span class="info-item speed" style="color:#f96">▲ '+spd(tUp)+'</span>';
     if(tActive.length>0)left+='<span class="info-item">토렌트 <b>'+tActive.length+'</b>건</span>';
+    document.title='DroidRelay : '+spd(totalSpeed+tDown)+(tUp>0?' ▲'+spd(tUp):'');
   }else{
     left+='<span class="info-item idle">대기중...</span>';
+    document.title='DroidRelay';
   }
   left+='</div>';
   var info=window.__info;
