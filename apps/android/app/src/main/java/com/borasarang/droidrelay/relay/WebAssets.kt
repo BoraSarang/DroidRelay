@@ -65,6 +65,7 @@ object WebAssets {
   .tab.active{background:#2F80ED;border-color:#2F80ED;color:#fff}
   .panel{display:none}.panel.active{display:block}
   .file-icon{font-size:20px;margin-right:8px;flex-shrink:0}
+  .file-thumb{width:40px;height:40px;object-fit:cover;border-radius:8px;margin-right:8px;flex:none;background:#0A1428}
   .file-meta{color:#8FA3BF;font-size:12px;margin-top:2px}
   input[type=file]{display:none}
   .breadcrumb{display:flex;align-items:center;gap:4px;margin-bottom:12px;color:#8FA3BF;font-size:13px;flex-wrap:wrap}
@@ -233,6 +234,11 @@ object WebAssets {
     <div class="drop-zone" id="torrentDrop">
       또는 .torrent 파일을 여기에 드래그하세요
     </div>
+    <div class="row-torrent" style="margin-top:8px">
+      <input id="tsearch" placeholder="토렌트 검색 (설정에서 Jackett/Prowlarr 입력)" style="flex:1">
+      <button onclick="searchTorrents()">검색</button>
+    </div>
+    <div id="searchResults"></div>
     <div id="torrentInfo" style="padding:10px 16px;font-size:13px;color:#66788C;border-bottom:1px solid #E3E8EF"></div>
     <div id="torrentList"></div>
     <div class="empty" id="torrentEmpty">토렌트 작업이 없습니다</div>
@@ -390,6 +396,10 @@ object WebAssets {
                 <input type="range" id="torrentSeedRatio" min="0" max="10" value="2" step="0.1">
                 <span id="torrentSeedRatioLabel">2.0</span>
               </div>
+              <div class="sb">받은 양 대비 업로드 비율 도달 시 자동 일시정지 · 0 = 제한 없음</div>
+            </div>
+            <div class="si">
+              <button class="ghost sm" onclick="minimizeUpload()">⬇ 업로드 최소화 (비율 0.5 + 업로드 32KB/s + DHT 끔)</button>
             </div>
           </div>
           <div class="ti">고급</div>
@@ -399,6 +409,7 @@ object WebAssets {
             <div class="ck"><input type="checkbox" id="torrentSequentialDownload"><label for="torrentSequentialDownload">시퀀셜 다운로드 (스트리밍 프리뷰)</label></div>
           </div>
           <div class="sb" style="margin-top:4px">시퀀셜: 첫 번째 조각부터 순서대로 다운로드하여 재생 미리보기 지원</div>
+          <div class="sb" style="margin-top:4px">PEX: libtorrent에 on/off API가 없어 항상 켜짐. 피어 탐색용으로 트래픽은 미미합니다</div>
           <div class="ti">시더 부재 자동 중단</div>
           <div class="si">
             <div class="sl">시더 부재 시 대기 (초)</div>
@@ -419,6 +430,14 @@ object WebAssets {
             <button class="ghost sm" onclick="testPath()">테스트</button>
           </div>
           <div id="pathTestResult" class="sb"></div>
+          <div class="ti">토렌트 검색 (Jackett/Prowlarr)</div>
+          <div class="ck"><input type="checkbox" id="searchEnabled"><label for="searchEnabled">검색 사용</label></div>
+          <div class="fp" style="margin-top:6px">
+            <input type="text" id="searchUrl" placeholder="http://서버:9117">
+            <input type="text" id="searchApiKey" placeholder="API 키" style="max-width:180px">
+            <button class="ghost sm" onclick="saveSearchSettings()">저장</button>
+          </div>
+          <div class="sb" style="margin-top:4px">Torznab 경로(/api/v2.0/...)는 자동 추가. 토렌트 탭 검색창이 활성화됩니다</div>
         </div>
       </div>
 
@@ -965,6 +984,33 @@ function playMedia(key,name){
     +'<video controls autoplay preload="metadata" src="'+url+'"></video>'
     +'<div class="pbtns"><button type="button" onclick="closePopup()">닫기</button></div></div>';
 }
+// 만료 공유 링크 발급 (T-951)
+function shareFile(key){
+  var o=makeOverlay();
+  o.innerHTML='<div class="popup"><h3>공유 링크</h3>'
+    +'<p class="msg">링크 유지 시간을 선택해 주세요 (만료 후 자동 무효)</p>'
+    +'<select id="shareHours" style="width:100%;box-sizing:border-box;padding:9px 10px;border-radius:8px;border:1px solid #2A3B5C;background:#101E3A;color:#E8F0FF;font-size:14px;margin:0 0 14px;outline:none">'
+    +'<option value="1">1시간</option>'
+    +'<option value="6">6시간</option>'
+    +'<option value="24" selected>24시간 (1일)</option>'
+    +'<option value="72">72시간 (3일)</option>'
+    +'<option value="168">168시간 (7일)</option>'
+    +'<option value="720">720시간 (30일)</option>'
+    +'</select>'
+    +'<div class="pbtns"><button type="button" onclick="closePopup()">취소</button>'
+    +'<button type="button" class="ok" id="shareOk">발급</button></div></div>';
+  document.getElementById('shareOk').onclick=function(){
+    var h=parseInt(document.getElementById('shareHours').value,10);
+    closePopup();
+    apiPost('/api/share',{path:key,hours:h}).then(function(d){
+      if(d&&d.url){
+        var abs=location.protocol+'//'+location.hostname+':'+location.port+d.url;
+        promptPopup('공유 링크 발급됨 ('+h+'시간 유효)','복사해서 공유하세요',abs,function(){});
+      }else alert('발급 실패: '+((d&&d.error)||''));
+    }).catch(function(){alert('발급 실패');});
+  };
+}
+function isThumbable(name){return /\.(mp4|mkv|webm|mov|avi|m4v|ogv|ts)$/i.test(name||'');}
 function renderStorage(items){  if(dragActive())return;
   var el=document.getElementById('fileList');document.getElementById('fileEmpty').style.display=items.length?'none':'block';
   document.getElementById('storageListTitle').textContent='📄 폴더 내용';
@@ -976,6 +1022,7 @@ var dlBase=location.protocol+'//'+location.hostname+':'+location.port;
       var cls=(selItem&&selItem.name===f.name)?'file-row selected':'file-row';
       var dateStr=f.modified?new Date(f.modified).toLocaleDateString('ko-KR',{year:'numeric',month:'2-digit',day:'2-digit'}):'';
       h+='<div class="'+cls+'" draggable="true" data-type="'+f.type+'" data-key="'+esc(key)+'" data-name="'+esc(f.name)+'">'
+        +(isThumbable(f.name)&&!isDir?'<img class="file-thumb" loading="lazy" src="'+dlBase+'/thumb/'+encodeURIComponent(key)+'" onerror="this.remove()" alt="">':'')
         +'<span class="file-icon">'+fileIcon(f.name,isDir)+'</span>'
         +'<div style="min-width:0;flex:1"><div class="name">'+esc(f.name)+'</div>'
         +'<div class="file-meta">'+(isDir
@@ -985,6 +1032,7 @@ var dlBase=location.protocol+'//'+location.hostname+':'+location.port;
       if(!isDir){
         if(isPlayable(f.name))h+='<button class="ghost sm" data-play="'+esc(key)+'" data-name="'+esc(f.name)+'" onclick="event.stopPropagation();playMedia(this.dataset.play,this.dataset.name)">▶</button>';
         h+='<a class="btn-dl" href="'+dlBase+'/dl-file/'+encodeURIComponent(key)+'" download="'+esc(f.name)+'" onclick="event.stopPropagation();showDlToast()">📥</a>';
+        h+='<button class="ghost sm" data-share="'+esc(key)+'" onclick="event.stopPropagation();shareFile(this.dataset.share)">🔗</button>';
       }else{
         h+='<a class="btn-dl" href="'+dlBase+'/dl-folder/'+encodeURIComponent(key)+'" download="'+esc(f.name)+'.zip" onclick="event.stopPropagation();showDlToast()">📦</a>';
       }
@@ -1354,6 +1402,31 @@ function uploadTorrent(input){
 function act(id,a){fetch('/api/jobs/'+id+'/'+a,{method:'POST'}).then(refresh);}
 function delJob(id){fetch('/api/jobs/'+id,{method:'DELETE'}).then(refresh);}
 function torrentAct(id,a){fetch('/api/torrents/'+id+'/'+a,{method:'POST'}).then(refresh);}
+function searchTorrents(){
+  var q=document.getElementById('tsearch').value.trim();if(!q)return;
+  document.getElementById('searchResults').innerHTML='<div style="padding:8px 16px;color:#8FA3BF">검색 중...</div>';
+  fetch('/api/search?q='+encodeURIComponent(q)).then(function(r){return r.json();}).then(function(d){
+    var el=document.getElementById('searchResults');
+    if(d&&d.error){el.innerHTML='<div style="padding:8px 16px;color:#FF8A93">'+esc(d.error)+'</div>';return;}
+    if(!d||!d.length){el.innerHTML='<div style="padding:8px 16px;color:#8FA3BF">결과 없음</div>';return;}
+    var h='';
+    d.forEach(function(r,i){
+      h+='<div class="card" style="margin:8px 16px"><div style="min-width:0;flex:1"><div class="name">'+esc(r.title)+'</div>'
+        +'<div class="file-meta">'+fmt(r.size||0)+' · 시드 '+(r.seeders||0)+' · '+(r.indexer||'')+'</div></div>'
+        +'<div class="card-acts"><button class="btn-dl" onclick="addSearchResult('+i+')">받기</button></div></div>';
+    });
+    el.innerHTML=h;
+    window.__searchResults=d;
+  }).catch(function(e){document.getElementById('searchResults').innerHTML='<div style="padding:8px 16px;color:#FF8A93">검색 실패</div>';});
+}
+function addSearchResult(i){
+  var r=(window.__searchResults||[])[i];if(!r)return;
+  var body=r.magnet?{magnet:r.magnet}:{torrentUrl:r.url};
+  fetch('/api/torrents/add',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
+  .then(function(res){if(!res.ok)return res.text().then(function(t){throw t});return res.json()})
+  .then(function(){showDlToast('토렌트 추가됨');refresh()})
+  .catch(function(e){alert('추가 실패: '+e)});
+}
 function torrentDel(id){fetch('/api/torrents/'+id,{method:'DELETE'}).then(refresh);}
 function torrentDelConfirm(id){
   var t=null;
@@ -1574,7 +1647,7 @@ function switchTab(t){
   document.getElementById('panel-storage').classList.toggle('active',t==='storage');
   document.getElementById('panel-settings').classList.toggle('active',t==='settings');
   if(t==='storage')refreshStorage();
-  if(t==='settings')loadSettings();
+  if(t==='settings'){loadSettings();loadSearchSettings();}
 }
 
 // ── 설정 사이드바 전환 ──
@@ -1782,9 +1855,37 @@ function saveTorrentSettings(){
     .catch(function(e){alert('저장 실패: '+e);});
 }
 
+function saveSearchSettings(){
+  var body={
+    searchEnabled:document.getElementById('searchEnabled').checked,
+    searchUrl:document.getElementById('searchUrl').value.trim(),
+    searchApiKey:document.getElementById('searchApiKey').value.trim()
+  };
+  apiPost('/api/settings/search',body)
+    .then(function(d){showDlToast(d.ok?'검색 설정 저장됨':'저장 실패');})
+    .catch(function(e){alert('저장 실패: '+e);});
+}
+function loadSearchSettings(){
+  fetch('/api/settings/search').then(function(r){return r.json();}).then(function(s){
+    document.getElementById('searchEnabled').checked=s.searchEnabled===true;
+    document.getElementById('searchUrl').value=s.searchUrl||'';
+    document.getElementById('searchApiKey').value=s.searchApiKey||'';
+  }).catch(function(){});
+}
+
 function randomizePort(){
   var port=49152+Math.floor(Math.random()*16384);
   document.getElementById('torrentListenPort').value=port;
+  saveTorrentSettings();
+}
+
+// 업로드 최소화 프리셋 (T-959)
+function minimizeUpload(){
+  document.getElementById('torrentSeedRatio').value=0.5;
+  document.getElementById('torrentSeedRatioLabel').textContent='0.5';
+  document.getElementById('torrentUploadLimit').value=32;
+  document.getElementById('torrentUploadLabel').textContent='32 KB/s';
+  document.getElementById('torrentDhtEnabled').checked=false;
   saveTorrentSettings();
 }
 

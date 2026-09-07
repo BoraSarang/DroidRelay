@@ -20,6 +20,7 @@ import io.ktor.server.engine.embeddedServer
 import io.ktor.server.engine.sslConnector
 import io.ktor.server.plugins.origin
 import io.ktor.server.request.path
+import io.ktor.server.request.httpMethod
 import io.ktor.server.request.receiveText
 import io.ktor.server.request.receiveMultipart
 import io.ktor.http.content.PartData
@@ -268,6 +269,16 @@ class RelayServer(
     }
 }
 
+/** 게스트 허용 — GET 열람·다운로드만, 설정·디버그·발행·제어 차단 (T-952) */
+private fun isGuestAllowed(method: String, path: String): Boolean {
+    if (method != "GET" && method != "HEAD" && method != "OPTIONS") return false
+    if (path == "/debug" || path.startsWith("/api/debug")) return false
+    if (path.startsWith("/api/settings")) return false
+    if (path.startsWith("/api/share")) return false
+    if (path.startsWith("/mcp")) return false
+    return true
+}
+
 private fun isLocalHost(host: String): Boolean {
     if (host in listOf("127.0.0.1", "::1", "localhost")) return true
     return host == lanAddress()
@@ -359,13 +370,28 @@ private fun Application.relayRoutes(context: Context, serverRef: RelayServer) {
         }
 
         if (s.webAuthEnabled && s.webPassword.isNotEmpty()) {
-            val expected = "Basic " + Base64.getEncoder()
-                .encodeToString("${s.webUser}:${s.webPassword}".toByteArray())
-            if (call.request.headers[HttpHeaders.Authorization] != expected) {
-                DebugLogger.w("Security", "인증 실패 from=$host ${call.request.path()} (E-AND-DOWN-1003)")
-                call.response.header(HttpHeaders.WWWAuthenticate, "Basic realm=\"DroidRelay\"")
-                call.respondText("인증 필요", ContentType.Text.Plain, HttpStatusCode.Unauthorized)
-                finish()
+            // /s/ 공유 링크는 토큰 자체가 권한이라 인증 예외 (T-951)
+            val sharePath = runCatching { call.request.path() }.getOrDefault("")
+            if (!sharePath.startsWith("/s/")) {
+                val auth = call.request.headers[HttpHeaders.Authorization] ?: ""
+                val expected = "Basic " + Base64.getEncoder()
+                    .encodeToString("${s.webUser}:${s.webPassword}".toByteArray())
+                val guestExpected = "Basic " + Base64.getEncoder()
+                    .encodeToString("guest:${s.guestPassword}".toByteArray())
+                val isGuest = s.guestEnabled && s.guestPassword.isNotEmpty() && auth == guestExpected
+                if (auth != expected && !isGuest) {
+                    DebugLogger.w("Security", "인증 실패 from=$host ${call.request.path()} (E-AND-DOWN-1003)")
+                    call.response.header(HttpHeaders.WWWAuthenticate, "Basic realm=\"DroidRelay\"")
+                    call.respondText("인증 필요", ContentType.Text.Plain, HttpStatusCode.Unauthorized)
+                    finish()
+                    return@intercept
+                }
+                // 게스트 읽기전용 — 열람·다운로드 GET만 (T-952)
+                if (isGuest && !isGuestAllowed(call.request.httpMethod.value, call.request.path())) {
+                    DebugLogger.w("Security", "게스트 차단 from=$host ${call.request.httpMethod.value} ${call.request.path()}")
+                    call.respondText("게스트는 읽기 전용입니다", ContentType.Text.Plain, HttpStatusCode.Forbidden)
+                    finish()
+                }
             }
         }
     }
@@ -406,6 +432,8 @@ private fun Application.relayRoutes(context: Context, serverRef: RelayServer) {
         storageRoutes(context, serverRef)
 
         davRoutes(context, serverRef)
+
+        shareRoutes(context, serverRef)
 
         debugRoutes(context, serverRef)
 

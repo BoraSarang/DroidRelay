@@ -12,6 +12,8 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.concurrent.TimeUnit
+import okhttp3.OkHttpClient
+import okhttp3.Request
 import org.libtorrent4j.AlertListener
 import org.libtorrent4j.Sha1Hash
 import org.libtorrent4j.SessionManager
@@ -23,6 +25,12 @@ import org.libtorrent4j.swig.torrent_flags_t
 import org.libtorrent4j.TorrentFlags
 import org.libtorrent4j.alerts.Alert
 import org.libtorrent4j.alerts.AlertType
+
+/** 시드 비율 도달 여부 — 순수 함수 (T-956) */
+internal fun shouldPauseAtRatio(isSeeding: Boolean, uploaded: Long, downloaded: Long, limit: Float): Boolean {
+    if (!isSeeding || limit <= 0 || downloaded <= 0) return false
+    return uploaded.toDouble() / downloaded >= limit
+}
 
 /** magnet URI의 SHA-1 infohash(hex 40자) 그룹 캡처 */
 private val magnetHexRegex = Regex("urn:btih:([0-9a-fA-F]{40})")
@@ -103,6 +111,9 @@ class TorrentEngine(
     @Volatile private var latestDownloadKbps: Long = 0L
     @Volatile private var latestSequentialDownload: Boolean = false
     @Volatile private var torrentMinSeedWaitSec: Int = 0
+    @Volatile private var latestSeedRatio: Float = 2.0f
+    @Volatile private var latestDhtEnabled: Boolean = true
+    @Volatile private var latestSavePath: String = "/sdcard/Download/DroidRelay"
     /** id → 시더 부재 대기 시작 시각(ms). 0이면 미측정 */
     private val seedWaitSince = ConcurrentHashMap<String, Long>()
     private var lastPersistAt = 0L
@@ -128,9 +139,13 @@ class TorrentEngine(
                 latestUploadKbps = s.torrentUploadLimit
                 latestDownloadKbps = s.torrentDownloadLimit
                 latestSequentialDownload = s.torrentSequentialDownload
-                DebugLogger.d(TAG, "설정 반영 업로드=${s.torrentUploadLimit}KB/s 다운로드=${s.torrentDownloadLimit}KB/s 시퀀셜=${s.torrentSequentialDownload}")
+                latestSeedRatio = s.torrentSeedRatio
+                latestDhtEnabled = s.torrentDhtEnabled
+                latestSavePath = s.torrentSavePath.ifBlank { "/sdcard/Download/DroidRelay" }
+                DebugLogger.d(TAG, "설정 반영 업로드=${s.torrentUploadLimit}KB/s 다운로드=${s.torrentDownloadLimit}KB/s 시퀀셜=${s.torrentSequentialDownload} 비율=${s.torrentSeedRatio} DHT=${s.torrentDhtEnabled}")
                 applyRateLimits()
                 applySequentialToAll(s.torrentSequentialDownload)
+                applyDhtEnabled(s.torrentDhtEnabled)
             }
         }
     }
@@ -138,9 +153,9 @@ class TorrentEngine(
     val saveDir: File
         get() = File(context.getExternalFilesDir(null), "torrents").apply { mkdirs() }
 
-    /** 보관함 경로: /sdcard/Download/DroidRelay/ */
+    /** 보관함 경로 — 설정값 (기본 /sdcard/Download/DroidRelay, T-958) */
     private val storageDir: File
-        get() = File("/sdcard/Download/DroidRelay").apply { mkdirs() }
+        get() = File(latestSavePath).apply { mkdirs() }
 
     /** 완료된 토렌트 파일을 보관함으로 이동 */
     private fun moveToStorage(id: String, torrentName: String) {
@@ -196,7 +211,9 @@ class TorrentEngine(
                         .uploadRateLimit(1024)  // 기본 업로드 1KB/s (0=사용안함 → 1KB/s로 완화)
                         .downloadRateLimit(0) // 기본 다운로드 무제한
                     applySettings(sp)
-                    startDht()
+                    // DHT는 설정에 따라 (T-957)
+                    if (settings.firstBlocking().torrentDhtEnabled) startDht()
+                    else DebugLogger.i(TAG, "DHT 끔 (설정)")
                     addListener(object : AlertListener {
                         override fun alert(alert: Alert<*>) {
                             handleAlert(alert)
@@ -211,7 +228,7 @@ class TorrentEngine(
                         }
                     })
                 }
-                DebugLogger.i(TAG, "세션 시작 완료 (DHT 활성화)")
+                DebugLogger.i(TAG, "세션 시작 완료")
                 applyRateLimits()
                 startStatusPolling()
                 restoreTorrents()
@@ -277,6 +294,33 @@ class TorrentEngine(
     fun isDuplicateMagnet(magnet: String): Boolean {
         val hash = magnetInfoHash(magnet) ?: return false
         return TorrentRepository.all().any { it.infoHash.isNotEmpty() && it.infoHash == hash }
+    }
+
+    /** .torrent URL 다운로드 → 파일 추가 (검색 결과 바로 받기, T-950) */
+    fun addTorrentUrl(url: String): TorrentJob {
+        val client = OkHttpClient.Builder()
+            .connectTimeout(15, TimeUnit.SECONDS)
+            .readTimeout(30, TimeUnit.SECONDS)
+            .build()
+        val req = Request.Builder().url(url)
+            .header("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/125.0 Mobile Safari/537.36")
+            .build()
+        val bytes = client.newCall(req).execute().use { resp ->
+            if (resp.code !in 200..299) throw IllegalStateException("HTTP ${resp.code}")
+            resp.body?.bytes() ?: throw IllegalStateException("빈 응답")
+        }
+        if (bytes.size < 8 || bytes.size > 10 * 1_048_576) throw IllegalStateException("torrent 파일 크기 이상 (${bytes.size}B)")
+        val name = url.substringAfterLast('/').substringBefore('?').ifBlank { "search-${System.currentTimeMillis()}.torrent" }
+        return addTorrentFile(bytes, name)
+    }
+
+    /** Torznab 검색 — 설정 미완이면 예외 (T-950) */
+    fun search(q: String): List<TorznabClient.Result> {
+        val s = settings.firstBlocking()
+        if (!s.searchEnabled || s.searchUrl.isBlank() || s.searchApiKey.isBlank()) {
+            throw IllegalStateException("토렌트 검색 미설정 — 설정에서 Jackett/Prowlarr을 입력하세요")
+        }
+        return TorznabClient(context).search(s.searchUrl, s.searchApiKey, q)
     }
 
     /** magnet URI에서 infohash(SHA-1 hex 40자) 추출. 없거나 base32면 null. */
@@ -537,6 +581,25 @@ val th = withGate { session?.find(Sha1Hash.parseHex(expectedHash)) }
         }
     }
 
+    /** DHT on/off 반영 (T-957) */
+    private fun applyDhtEnabled(enabled: Boolean) {
+        try {
+            withGate {
+                val session = session ?: return@withGate
+                val running = runCatching { session.isDhtRunning() }.getOrDefault(true)
+                if (enabled && !running) {
+                    session.startDht()
+                    DebugLogger.i(TAG, "DHT 시작")
+                } else if (!enabled && running) {
+                    session.stopDht()
+                    DebugLogger.i(TAG, "DHT 정지")
+                }
+            }
+        } catch (e: Exception) {
+            DebugLogger.w(TAG, "DHT 전환 실패: ${e.message}")
+        }
+    }
+
     /** 전체 설정 동적 적용 (재시작 불필요) */
     fun applySettings(s: AppSettings) {
         withGate {
@@ -564,6 +627,10 @@ val th = withGate { session?.find(Sha1Hash.parseHex(expectedHash)) }
 
             // 시더 부재 자동 중단 대기 시간 (0 = 꺼짐)
             torrentMinSeedWaitSec = s.torrentMinSeedWaitSec
+            latestSeedRatio = s.torrentSeedRatio
+            latestDhtEnabled = s.torrentDhtEnabled
+            latestSavePath = s.torrentSavePath.ifBlank { "/sdcard/Download/DroidRelay" }
+            applyDhtEnabled(s.torrentDhtEnabled)
         }
     }
 
@@ -704,6 +771,14 @@ val th = withGate { session?.find(Sha1Hash.parseHex(expectedHash)) }
                             return@forEach
                         }
                         val job = TorrentRepository.get(id) ?: return@forEach
+                        // 시드 비율 강제 (T-956) — SEEDING 중 비율 도달 시 자동 일시정지 (0=제한 없음)
+                        val ratioLimit = latestSeedRatio
+                        if (shouldPauseAtRatio(status.isSeeding, status.totalUpload(), status.totalDownload(), ratioLimit)) {
+                            val ratio = status.totalUpload().toDouble() / status.totalDownload()
+                            DebugLogger.i(TAG, "[FEATURE] 시드 비율 도달(${String.format("%.2f", ratio)}≥$ratioLimit) → 자동 일시정지 id=$id")
+                            pause(id)
+                            return@forEach
+                        }
                         if (job.state == TorrentState.PAUSED || job.state == TorrentState.DONE || job.state == TorrentState.FAILED) return@forEach
 
                         val state = when (status.state()) {

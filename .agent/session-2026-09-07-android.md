@@ -29,3 +29,15 @@
 - **T-945/946**: StorageJanitor(쿼터·분류) + 설정 2종 + 완료 후킹 3엔진 + 앱/웹 UI + reset 포함.
 - **T-947**: normalizedUrl/findDuplicateUrl + 409(E-AND-DOWN-1006) + 전 경로 적용.
 - **검증**: unit 4건 GREEN, JS 2블록 OK, assembleDebug 설치. E2E PASS(DAV 206·PROPFIND·설정 roundtrip·409 fragment 정규화). 잔재 정리(잡·파일·휴지통). CHANGELOG 0.19.0(미배포).
+
+## v0.20 완료 (T-949~954)
+- **구현**: ThumbManager+/thumb/·TorznabClient+/api/search+torrentUrl·ShareRepository+/api/share+/s/·게스트(설정+인터셉트+앱UI)·위젯+QS타일(+ServerToggle).
+- **E2E PASS**: files POST 200(선택 유지·다운로드 계속)·공유 전체수명(발급→일치→삭제→404)·썸네일 실패 404·검색 미설정 502·search 설정 조회.
+- **대기**: 진짜 영상 썸네일(토렌트 1% 진행 중)·게스트 매트릭스(웹인증 API 없음, 앱에서 직접)··위젯 탭.
+- CHANGELOG 0.20.0(미배포), TODO 전부 ✅.
+
+## v0.21 완료 (T-955~960)
+- **감사**: 53필드 → 적용 49·데드 4. 잘린 설정 잔재·고아 키 0건.
+- **배선**: 비율 강제(shouldPauseAtRatio 순수함수+테스트 5건)·DHT 토글·저장경로·PEX 문구·프리셋(앱/웹).
+- **E2E**: DHT 정지/시작 로그·roundtrip·토렌트 26% PASS. 사용자 비율 0(제한 없음)·업로드 32는 기존 설정 유지.
+- CHANGELOG 0.21.0(미배포), TODO 전부 ✅.

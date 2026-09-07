@@ -354,6 +354,41 @@ fun SettingsScreen(onPortChanged: (Int) -> Unit) {
                     kotlinx.coroutines.MainScope().launch { repo.setWebAuth(true, user, pass.ifBlank { s.webPassword }) }
                 }) { Text("인증 정보 저장") }
             }
+            Spacer(Modifier.height(12.dp))
+            var guestEnabled by remember(s.guestEnabled) { mutableStateOf(s.guestEnabled) }
+            var guestPass by remember { mutableStateOf("") }
+            SwitchRow("게스트 읽기전용 (열람·다운로드만)", guestEnabled) {
+                guestEnabled = it
+                kotlinx.coroutines.MainScope().launch { repo.setGuestEnabled(it) }
+            }
+            if (guestEnabled) {
+                Text(
+                    "웹 인증이 켜져 있을 때만 유효. 사용자명 guest로 접속, 등록·삭제·설정은 차단됩니다",
+                    color = cs.onSurfaceVariant,
+                    style = MaterialTheme.typography.labelSmall,
+                )
+                Spacer(Modifier.height(6.dp))
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                    OutlinedTextField(
+                        value = guestPass,
+                        onValueChange = { guestPass = it },
+                        label = { Text(if (s.guestPassword.isEmpty()) "게스트 비밀번호" else "게스트 비밀번호 (변경 시 입력)") },
+                        singleLine = true,
+                        shape = MaterialTheme.shapes.small,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Button(onClick = {
+                        if (guestPass.isBlank()) {
+                            DebugLogger.w("Settings", "게스트 비밀번호 비어 있음")
+                        } else {
+                            DebugLogger.i("Settings", "게스트 비밀번호 저장")
+                            kotlinx.coroutines.MainScope().launch { repo.setGuestPassword(guestPass) }
+                            guestPass = ""
+                        }
+                    }) { Text("저장") }
+                }
+            }
             Text(
                 "허용된 기기 IP: ${s.allowedIps.ifEmpty { setOf("(없음 — 신규 접속 시 승인 팝업)") }}",
                 color = cs.onSurfaceVariant,
@@ -426,15 +461,33 @@ fun SettingsScreen(onPortChanged: (Int) -> Unit) {
 
             // 시드 ratio
             Text("최대 시드 ratio: ${String.format("%.1f", s.torrentSeedRatio)}", color = cs.onSurface)
+            Text(
+                "받은 양 대비 업로드 비율 도달 시 자동 일시정지 · 0 = 제한 없음",
+                color = cs.onSurfaceVariant,
+                style = MaterialTheme.typography.labelSmall,
+            )
             Slider(
                 value = s.torrentSeedRatio,
                 onValueChange = { kotlinx.coroutines.MainScope().launch { repo.setTorrentSeedRatio(it) } },
                 valueRange = 0f..10f,
                 steps = 9,
             )
+            OutlinedButton(onClick = {
+                DebugLogger.i("Settings", "업로드 최소화 프리셋 적용")
+                kotlinx.coroutines.MainScope().launch {
+                    repo.setTorrentSeedRatio(0.5f)
+                    repo.setTorrentUploadLimit(32)
+                    repo.setTorrentDhtEnabled(false)
+                }
+            }) { Text("⬇ 업로드 최소화 (비율 0.5 + 업로드 32KB/s + DHT 끔)") }
 
             SwitchRow("DHT (분산 해시 테이블)", s.torrentDhtEnabled) { v -> kotlinx.coroutines.MainScope().launch { repo.setTorrentDhtEnabled(v) } }
             SwitchRow("PEX (피어 교환)", s.torrentPexEnabled) { v -> kotlinx.coroutines.MainScope().launch { repo.setTorrentPexEnabled(v) } }
+            Text(
+                "PEX는 libtorrent에 on/off가 없어 항상 켜짐. 피어 탐색용으로 트래픽은 미미합니다",
+                color = cs.onSurfaceVariant,
+                style = MaterialTheme.typography.labelSmall,
+            )
 
             Spacer(Modifier.height(16.dp))
             Text("고급", color = cs.onSurfaceVariant, style = MaterialTheme.typography.labelMedium)
@@ -533,6 +586,39 @@ fun SettingsScreen(onPortChanged: (Int) -> Unit) {
                     color = if (ok) cs.primary else cs.error,
                     style = MaterialTheme.typography.labelSmall,
                 )
+            }
+
+            Spacer(Modifier.height(8.dp))
+            Text("토렌트 검색 (Jackett/Prowlarr)", color = cs.onSurfaceVariant, style = MaterialTheme.typography.labelMedium)
+            SwitchRow("검색 사용", s.searchEnabled) { v -> kotlinx.coroutines.MainScope().launch { repo.setSearchEnabled(v) } }
+            var searchUrl by remember(s.searchUrl) { mutableStateOf(s.searchUrl) }
+            var searchKey by remember(s.searchApiKey) { mutableStateOf(s.searchApiKey) }
+            OutlinedTextField(
+                value = searchUrl,
+                onValueChange = { searchUrl = it },
+                label = { Text("서버 주소 (예: http://서버:9117)") },
+                singleLine = true,
+                shape = MaterialTheme.shapes.small,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(Modifier.height(4.dp))
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                OutlinedTextField(
+                    value = searchKey,
+                    onValueChange = { searchKey = it },
+                    label = { Text("API 키") },
+                    singleLine = true,
+                    shape = MaterialTheme.shapes.small,
+                    modifier = Modifier.weight(1f),
+                )
+                Spacer(Modifier.width(8.dp))
+                Button(onClick = {
+                    DebugLogger.i("Settings", "토렌트 검색 설정 저장")
+                    kotlinx.coroutines.MainScope().launch {
+                        repo.setSearchUrl(searchUrl)
+                        repo.setSearchApiKey(searchKey)
+                    }
+                }) { Text("저장") }
             }
         }
 

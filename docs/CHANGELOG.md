@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.21.0] - 2026-09-07 (미배포, 디버그 검증 중)
+
+### Fixed [android] — 설정 감사 + 업로드 최소화 (PLAN_v0.21_settings-audit_android)
+- **T-955 감사**: 53필드 전수 — 적용 49, 데드 4(`torrentSavePath`·`torrentSeedRatio`·`torrentDhtEnabled`·`torrentPexEnabled`). 잘린 설정 잔재(유튜브/SHA) 0건, 고아 키 0건
+- **T-956 시드 비율 강제**: SEEDING 중 `totalUpload/totalDownload` 도달 시 자동 일시정지 (`0`=제한 없음)
+- **T-957 DHT 토글**: `start/stopDht` 배선 (기동 분기 + 실행 중 전환)
+- **T-958 저장 경로**: 설정값 사용 (기본 기존 경로)
+- **T-959 PEX 안내 + 프리셋**: "API 없어 항상 켜짐·트래픽 미미" 문구 + "업로드 최소화" 원터치(비율 0.5·업로드 32KB/s·DHT 끔, 앱/웹)
+- **검증**: SeedRatioTest 5건 GREEN + assembleDebug 설치. 실기기 E2E: DHT 정지/시작 로그·설정 roundtrip·토렌트 26% 진행 PASS. 비율 도달 실전은 실사용 관찰
+
+## [0.20.0] - 2026-09-07 (미배포, 디버그 검증 중)
+
+### Added [android] — v0.20 미리보기·검색·공유 (PLAN_v0.20_thumb-search-share_android)
+- **T-949 영상 썸네일**: `ThumbManager`(FFmpeg 10초→1초 프레임, 320px, 300개 캐시) + `GET /thumb/` + 보관함 목록 미리보기(img lazy, 실패 시 제거)
+- **T-950 토렌트 검색**: `TorznabClient`(Torznab XML 파싱·시드순 50건) + `GET /api/search` + `torrentUrl` 바로 받기 + 웹 검색 UI + 앱 검색 UI + Jackett/Prowlarr 설정(앱/웹)
+- **T-951 만료 공유 링크**: `ShareRepository`(영속) + `/api/share` 발급/목록/삭제 + `GET /s/{token}` (BasicAuth 예외, 토큰이 권한). 발급 팝업은 유지시간 셀렉트(1시간~30일)+설명 문구
+- **T-952 게스트 읽기전용**: guest 계정 + GET 열람·다운로드만 허용(설정·발행·제어는 403) — 웹 인증 켜짐 시 유효
+- **T-953 위젯/퀵타일**: 홈 위젯 + QS 타일 서버 토글(`ServerToggle` 공용)
+- **검증**: compile + test GREEN + assembleDebug 설치. 실기기 E2E: files API 200(선택 유지)·공유 발급→다운로드 일치→삭제→404·썸네일 실패경로 404·검색 미설정 502·설정 조회 PASS, 잔재 정리. 진짜 영상 썸네일·게스트 매트릭스·위젯 탭은 실사용 확인 대기
+
 ## [0.19.0] - 2026-09-07 (미배포, 디버그 검증 중)
 
 ### Added [android] — v0.19 외부 재생 + 자동 운영 (PLAN_v0.19_dav-quota_android)
