@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.18.0] - 2026-09-07 (미배포, 디버그 검증 중)
+
+### Added [android] — v0.18 담기↔소비 완성 (PLAN_v0.18_media-share_android)
+- **T-940 브라우저 직접 재생**: `GET /stream/{name...}` Range(206) inline 스트리밍(`serveFile` inline+Content-Type 확장, `StreamContentType` 매핑) + 보관함 재생 가능 파일 ▶ 버튼 + video 오버레이 플레이어
+- **T-941 Share Intent 받기**: `ACTION_SEND text/plain` 인텐트 필터(singleTop) → URL/magnet 추출 → 다운로드/토렌트 등록 + 스낵바 확인
+- **T-942 토렌트 파일 선택**: `TorrentEngine.setFileSelection` + `prioritizeFiles(IGNORE/DEFAULT)` + 재매핑 시 영속 선택 복원 + `POST /api/torrents/{id}/files` + 웹 상세 모달 체크박스(즉시 적용) + 앱 TorrentItem 파일 목록/선택
+- **검증**: compileDebugKotlin + testDebugUnitTest GREEN(`StreamContentTypeTest` 3건) + assembleDebug 설치. 실기기 E2E: `/stream/` Range 206(`Content-Range`+`video/mp4`+inline, 1024B 정확 일치·전체 GET 일치) PASS, Share SEND 필터 `dumpsys` 등록 확인, 파일 선택 API는 live torrent 없어 미실시(재시작 복원 로직은 코드 리뷰). 테스트 파일 업로드→삭제→휴지통 비우기로 정리
+
 ## [0.17.0] - 2026-09-07
 
 ### Added/Fixed [android] — T-937 웹 토렌트 삭제 UX + T-938 폴더 다운로드

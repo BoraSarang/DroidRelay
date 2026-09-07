@@ -16,6 +16,7 @@ import org.libtorrent4j.AlertListener
 import org.libtorrent4j.Sha1Hash
 import org.libtorrent4j.SessionManager
 import org.libtorrent4j.TorrentHandle
+import org.libtorrent4j.Priority
 import org.libtorrent4j.TorrentInfo
 import org.libtorrent4j.TorrentStatus
 import org.libtorrent4j.swig.torrent_flags_t
@@ -59,6 +60,35 @@ class TorrentEngine(
         hashToId.entries.removeIf { it.value == id && it.key != hash }
         handleMap[id] = th
         hashToId[hash] = id
+        // 재매핑(재시작·복원) 시 영속된 파일 선택 복원 (T-942)
+        applyPersistedSelection(id)
+    }
+
+    /** 영속된 파일 선택을 libtorrent 우선순위로 적용 (T-942) */
+    private fun applyPersistedSelection(id: String) {
+        val job = TorrentRepository.get(id) ?: return
+        if (job.files.isEmpty()) return
+        val th = handleMap[id] ?: return
+        try {
+            withGate {
+                th.prioritizeFiles(Array(job.files.size) { i ->
+                    if (job.files[i].selected) Priority.DEFAULT else Priority.IGNORE
+                })
+            }
+        } catch (e: Exception) {
+            DebugLogger.e(TAG, "파일 선택 적용 실패 id=$id: ${e.message}")
+        }
+    }
+
+    /** 파일 선택 변경 → 영속 + 즉시 적용 (T-942) */
+    fun setFileSelection(id: String, selected: Set<Int>): Boolean {
+        val job = TorrentRepository.get(id) ?: return false
+        if (job.files.isEmpty()) return false
+        TorrentRepository.update(id) { it.copy(files = it.files.map { f -> f.copy(selected = f.index in selected) }) }
+        persistNow()
+        applyPersistedSelection(id)
+        DebugLogger.i(TAG, "[FEATURE] 파일 선택 id=$id ${selected.size}/${job.files.size}개")
+        return true
     }
 
     /** 매핑 해제 — job.infoHash 폴백으로 좀비 hashToId 방지 (T-934 S3) */

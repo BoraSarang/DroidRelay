@@ -421,7 +421,12 @@ private fun Application.relayRoutes(context: Context, serverRef: RelayServer) {
 }
 
 /** Range(이어받기) 지원 파일 스트리밍 */
-internal suspend fun ApplicationCall.serveFile(file: File, jobId: String) {
+internal suspend fun ApplicationCall.serveFile(
+    file: File,
+    jobId: String,
+    inline: Boolean = false,
+    contentType: ContentType? = null,
+) {
     val total = file.length()
     response.header(HttpHeaders.AcceptRanges, "bytes")
 
@@ -433,14 +438,19 @@ internal suspend fun ApplicationCall.serveFile(file: File, jobId: String) {
     }
 
     val length = range.to - range.from + 1L
-    response.header(HttpHeaders.ContentDisposition, DispositionHeader.make(file.name))
+    if (inline) {
+        val enc = java.net.URLEncoder.encode(file.name, "UTF-8").replace("+", "%20")
+        response.header(HttpHeaders.ContentDisposition, "inline; filename=\"$enc\"; filename*=UTF-8''$enc")
+    } else {
+        response.header(HttpHeaders.ContentDisposition, DispositionHeader.make(file.name))
+    }
     if (range.partial) {
         response.status(HttpStatusCode.PartialContent)
         response.header(HttpHeaders.ContentRange, "bytes ${range.from}-${range.to}/$total")
     }
 
     val t0 = System.currentTimeMillis()
-    respondBytesWriter(contentType = ContentType.Application.OctetStream, contentLength = length) {
+    respondBytesWriter(contentType = contentType ?: ContentType.Application.OctetStream, contentLength = length) {
         RandomAccessFile(file, "r").use { raf ->
             raf.seek(range.from)
             val buf = ByteArray(BUFFER_SIZE)
@@ -459,6 +469,32 @@ internal suspend fun ApplicationCall.serveFile(file: File, jobId: String) {
         "전송 종료 id=$jobId '${file.name}' ${fmt(length)} " +
             "(${if (range.partial) "206 부분" else "200 전체"}) 소요=${System.currentTimeMillis() - t0}ms",
     )
+}
+
+/** 재생용 Content-Type — 확장자 기반 (T-940) */
+internal object StreamContentType {
+    fun forName(name: String): ContentType {
+        val ext = name.substringAfterLast('.', "").lowercase()
+        val pair = when (ext) {
+            "mp4", "m4v" -> "video" to "mp4"
+            "webm" -> "video" to "webm"
+            "mov" -> "video" to "quicktime"
+            "mkv" -> "video" to "x-matroska"
+            "ogv" -> "video" to "ogg"
+            "mp3" -> "audio" to "mpeg"
+            "m4a" -> "audio" to "mp4"
+            "ogg", "oga" -> "audio" to "ogg"
+            "wav" -> "audio" to "wav"
+            "flac" -> "audio" to "flac"
+            "jpg", "jpeg" -> "image" to "jpeg"
+            "png" -> "image" to "png"
+            "gif" -> "image" to "gif"
+            "webp" -> "image" to "webp"
+            "pdf" -> "application" to "pdf"
+            else -> "application" to "octet-stream"
+        }
+        return ContentType(pair.first, pair.second)
+    }
 }
 
 /** RFC 6266 — 비ASCII(한글/일본어/중국어) 파일명은 filename*=UTF-8''<percent-encoded>로 전달 */

@@ -46,6 +46,8 @@ object WebAssets {
   .popup{background:#0E1B33;border:1px solid #22345A;border-radius:14px;padding:18px;max-width:340px;width:calc(100% - 40px);box-shadow:0 12px 40px rgba(0,0,0,.5)}
   .popup h3{margin:0 0 6px;font-size:15px;color:#E8F0FF}
   .popup .msg{color:#8FA3BF;font-size:13px;margin:0 0 14px;white-space:pre-line;word-break:break-word}
+  .popup.wide{max-width:640px}
+  .popup video{width:100%;max-height:70vh;background:#000;border-radius:8px}
   .popup input{width:100%;box-sizing:border-box;padding:9px 10px;border-radius:8px;border:1px solid #2A3B5C;background:#101E3A;color:#E8F0FF;font-size:14px;margin:0 0 14px;outline:none}
   .popup input:focus{border-color:#2F80ED}
   .popup .pbtns{display:flex;gap:8px;justify-content:flex-end}
@@ -941,8 +943,15 @@ function renderTorrents(ts){
     +' 피어 <b style="color:#f86">'+ts.reduce(function(a,t){return a+(t.peers||0);},0)+'</b></span>';
   updateInfoBar();
 }
-function renderStorage(items){
-  if(dragActive())return;
+function isPlayable(name){return /\.(mp4|m4v|webm|mov|mkv|ogv|mp3|m4a|ogg|oga|wav|flac)$/i.test(name||'');}
+function playMedia(key,name){
+  var dlBase=location.protocol+'//'+location.hostname+':'+location.port;
+  var url=dlBase+'/stream/'+encodeURIComponent(key);
+  makeOverlay().innerHTML='<div class="popup wide"><h3>'+esc(name)+'</h3>'
+    +'<video controls autoplay preload="metadata" src="'+url+'"></video>'
+    +'<div class="pbtns"><button type="button" onclick="closePopup()">닫기</button></div></div>';
+}
+function renderStorage(items){  if(dragActive())return;
   var el=document.getElementById('fileList');document.getElementById('fileEmpty').style.display=items.length?'none':'block';
   document.getElementById('storageListTitle').textContent='📄 폴더 내용';
   var h='';
@@ -960,6 +969,7 @@ var dlBase=location.protocol+'//'+location.hostname+':'+location.port;
             :(fmt(f.size)+(dateStr?' · '+dateStr:'')))+'</div></div>'
         +'<div class="acts">';
       if(!isDir){
+        if(isPlayable(f.name))h+='<button class="ghost sm" data-play="'+esc(key)+'" data-name="'+esc(f.name)+'" onclick="event.stopPropagation();playMedia(this.dataset.play,this.dataset.name)">▶</button>';
         h+='<a class="btn-dl" href="'+dlBase+'/dl-file/'+encodeURIComponent(key)+'" download="'+esc(f.name)+'" onclick="event.stopPropagation();showDlToast()">📥</a>';
       }else{
         h+='<a class="btn-dl" href="'+dlBase+'/dl-folder/'+encodeURIComponent(key)+'" download="'+esc(f.name)+'.zip" onclick="event.stopPropagation();showDlToast()">📦</a>';
@@ -1496,13 +1506,14 @@ function loadTorrentDetail(id){
         });
         h+='</div></div>';
       }
-      // 파일 목록
+      // 파일 목록 (체크박스 선택 → 즉시 적용, T-942)
       var files=d.files||[];
       if(files.length>0){
         h+='<div class="modal-section"><div class="modal-section-title">파일 ('+files.length+')</div>';
         files.forEach(function(f){
           var fpct=Math.round((f.progress||0)*100);
           h+='<div class="modal-file-row">';
+          h+='<input type="checkbox" data-fidx="'+f.index+'"'+(f.selected===false?'':' checked')+' onchange="saveTorrentFiles(\''+id+'\')" style="flex:none">';
           h+='<span class="modal-file-path">'+esc(f.path)+'</span>';
           h+='<span class="modal-file-size">'+fmt(f.size||0)+'</span>';
           h+='<span class="modal-stat-value blue" style="min-width:35px;text-align:right">'+fpct+'%</span>';
@@ -1513,6 +1524,16 @@ function loadTorrentDetail(id){
       document.getElementById('tmBody').innerHTML=h;
     })
     .catch(function(e){document.getElementById('tmBody').innerHTML='<div style="color:#f86;padding:20px">로딩 실패: '+esc(e.message)+'</div>';});
+}
+
+// 토렌트 파일 선택 즉시 적용 (T-942)
+function saveTorrentFiles(id){
+  var boxes=document.querySelectorAll('#tmBody input[type=checkbox][data-fidx]');
+  var sel=[];
+  boxes.forEach(function(b){if(b.checked)sel.push(parseInt(b.getAttribute('data-fidx'),10));});
+  fetch('/api/torrents/'+id+'/files',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({selected:sel})})
+  .then(function(r){if(!r.ok)showDlToast('파일 선택 실패');});
 }
 
 // 카드 클릭 이벤트 위임 (토렌트 카드)

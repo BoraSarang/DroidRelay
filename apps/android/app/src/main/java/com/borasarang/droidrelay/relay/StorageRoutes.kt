@@ -468,4 +468,17 @@ internal fun Route.storageRoutes(context: Context, serverRef: RelayServer) {
             }
         }
     }
+
+    // 브라우저 직접 재생 — Range(206) 지원 inline 스트리밍 (T-940)
+    get("/stream/{name...}") {
+        val name = call.parameters.getAll("name")?.joinToString("/") ?: ""
+        val file = StorageGuard.storageFile(name)
+        if (file == null || !file.exists() || !file.isFile) {
+            DebugLogger.w("Http", "스트리밍 경로 차단 name=$name")
+            call.respondText("404 없음", ContentType.Text.Plain, HttpStatusCode.NotFound)
+        } else {
+            DebugLogger.i("Stream", "[FEATURE] 스트리밍 시작 name=$name")
+            call.serveFile(file, "stream", inline = true, contentType = StreamContentType.forName(file.name))
+        }
+    }
 }

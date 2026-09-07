@@ -312,4 +312,13 @@ T-001~T-008 전부 완료 (커밋 7574486).
 | T-938 | **보관함 폴더 다운로드** — `GET /dl-folder/` ZIP 실시간 스트리밍 + 웹 폴더행 📦 버튼 | 🔄 |
 | T-939 | **폴더 다운로드 속도 개선** — `setLevel(0)` 패스스루 + 256KB 버퍼 + 계측 로그 (PLAN_v0.17_dl-folder-speed) | ✅ |
 
+## v0.18 (2026-09-07) — 담기↔소비 완성 (PLAN_v0.18_media-share_android.md)
+
+| T-번호 | 내용 | 상태 |
+|--------|------|------|
+| T-940 | **브라우저 직접 재생** — `GET /stream/` Range(206) + 보관함 ▶ 버튼 + video 오버레이 | ✅ |
+| T-941 | **Share Intent 받기** — ACTION_SEND URL/magnet 수신 → 기존 등록 경로 | ✅ |
+| T-942 | **토렌트 파일 선택** — 목록 조회 + file_priority API + 웹/앱 체크박스 UI | ✅ |
+| T-943 | **검증·문서** — test/lint/assembleDebug + 실기기 E2E + CHANGELOG + 커밋 | ✅ |
+
 > v0.16.0(설정 1차)·v0.16.1(디자인 개편) 실기기 **직접 확인 대기**(사용자). 이후 **2차 확장** 예약: 스케줄(ScheduleRepository) / Debrid / 터널 / MCP / 기본값 복원. RSS CRUD는 별도 저장소(2차와 분리 검토).

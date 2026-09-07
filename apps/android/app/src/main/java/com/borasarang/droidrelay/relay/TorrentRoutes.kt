@@ -106,6 +106,18 @@ internal fun Route.torrentRoutes(context: Context, serverRef: RelayServer) {
         when (action) {
             "pause" -> { engine.pause(id); call.respondText("ok") }
             "resume" -> { engine.resume(id); call.respondText("ok") }
+            "files" -> {
+                if (TorrentRepository.get(id) == null) {
+                    call.respondText("없음", ContentType.Text.Plain, HttpStatusCode.NotFound)
+                    return@post
+                }
+                val json = try { JSONObject(call.receiveText()) } catch (_: Exception) { null }
+                val arr = json?.optJSONArray("selected")
+                if (arr == null) { call.respondErr("selected 배열 필요"); return@post }
+                val selected = (0 until arr.length()).mapNotNull { runCatching { arr.getInt(it) }.getOrNull() }.toSet()
+                if (engine.setFileSelection(id, selected)) call.respondText("ok")
+                else call.respondErr("파일 목록 없음 — 메타데이터 수신 후 시도")
+            }
             else -> call.respondText("지원 없는 동작", ContentType.Text.Plain, HttpStatusCode.BadRequest)
         }
     }

@@ -10,4 +10,16 @@
 - **전달로그**: `adb reverse` 테스트 잔재는 제거함. 폴더명에 성인 콘텐츠 표기 다수 — 언급 불필요.
 - **문서갱신**: PLAN_v0.17_dl-folder-speed_android.md, TODO T-939, CHANGELOG 0.17.0에 T-939, 세션 로그.
 - **큐상태**: 없음.
-- **E2E**: 설치까지만, 전송 E2E는 사용자 동작 대기.
+- **마무리(추가)**: v0.17.0 확정 — versionCode 25·versionName 0.17.0, assembleDebug GREEN 후 커밋 `59bf5f0` + `origin/feat/android-v014-stability` 푸시. 태그/릴리즈 APK는 미진행.
+
+## v0.18 세션 (T-940~942 구현 + T-943 검증 중)
+- **T-940**: `/stream/` Range inline + `StreamContentType` + 웹 ▶/video 오버레이. compile + JS node --check 통과.
+- **T-941**: SEND 필터(singleTop) + URL/magnet 추출 → 등록. `dumpsys` 등록 확인. 실전송 E2E는 사용자 동작 대기(잡 생성 부작용 회피).
+- **T-942**: `setFileSelection` + `prioritizeFiles` + 재매핑 복원 + files API + 웹/앱 체크박스. compile 통과.
+- **T-943**: testDebugUnitTest GREEN(신규 3건 포함) + assembleDebug 설치 Success. 서버 미기동이라 /stream 실전송·선택 다운로드는 E2E 대기. CHANGELOG 0.18.0(미배포) 기록.
+
+## v0.18 E2E 완료 (서버 기동 후)
+- **T-940 PASS**: 10KB 테스트 파일 업로드 → `Range: bytes=0-1023` → `206` + `Content-Range: bytes 0-1023/10240` + `video/mp4` + inline disposition, 1024B 내용 정확 일치. 전체 GET 200·전체 일치. `[FEATURE] 스트리밍 시작` 로그 2건 확인. 테스트 파일 삭제+휴지통 비우기로 정리.
+- **T-941**: SEND 필터 `dumpsys` 등록 확인 유지. 실전송(잡 생성 부작용)은 사용자 몫.
+- **T-942**: live torrent 0건이라 POST 미실시. 다음 토렌트 받을 때 상세 모달 체크박스로 확인 필요.
+- 참고: 아침의 영상 폴더 4건이 기기에서 사라짐(이동/삭제 추정) — E2E는 테스트 파일로 대체.

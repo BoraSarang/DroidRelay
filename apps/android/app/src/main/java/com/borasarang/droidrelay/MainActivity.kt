@@ -62,6 +62,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         DebugLogger.i("UI", "앱 실행 onCreate")
+        handleSharedIntent(intent)
 
         val settingsRepo = SettingsRepository.get(this)
         val initial = settingsRepo.firstBlocking()
@@ -78,6 +79,28 @@ class MainActivity : ComponentActivity() {
             ) {
                 RootApp()
             }
+        }
+    }
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleSharedIntent(intent)
+    }
+
+    /** 공유 받기: ACTION_SEND 텍스트에서 URL/magnet 추출 (T-941) */
+    private fun handleSharedIntent(intent: android.content.Intent?) {
+        if (intent?.action != android.content.Intent.ACTION_SEND) return
+        if (intent.type != "text/plain") return
+        val text = intent.getStringExtra(android.content.Intent.EXTRA_TEXT) ?: return
+        val match = Regex("""(magnet:\?\S+|https?://\S+)""").find(text)?.value
+            ?.trimEnd('.', ',', ')', ']', '>', '"', '\'') ?: return
+        if (match.startsWith("magnet:")) {
+            DebugLogger.i("UI", "[FEATURE] 공유 받기 magnet")
+            pendingSharedMagnet = match
+        } else {
+            DebugLogger.i("UI", "[FEATURE] 공유 받기 url=${match.take(90)}")
+            pendingSharedUrl = match
         }
     }
 
@@ -124,6 +147,8 @@ class MainActivity : ComponentActivity() {
 
     companion object {
         @Volatile var pendingClipUrl: String? = null
+        @Volatile var pendingSharedUrl: String? = null
+        @Volatile var pendingSharedMagnet: String? = null
     }
 }
 
@@ -139,7 +164,7 @@ fun RootApp() {
     val engine = com.borasarang.droidrelay.relay.RelayApp.get(context)
     val tabTitles = listOf("다운로드", "토렌트", "보관함", "설정")
 
-    // 클립보드 URL 감지 제안 (T-110)
+    // 클립보드 URL 감지 제안 (T-110) + 공유 받기 (T-941)
     LaunchedEffect(Unit) {
         while (true) {
             kotlinx.coroutines.delay(1500)
@@ -155,6 +180,20 @@ fun RootApp() {
                     DebugLogger.i("UI", "클립보드 제안 수락 → $url")
                     engine.enqueue(url)
                 }
+            }
+            MainActivity.pendingSharedUrl?.let { url ->
+                MainActivity.pendingSharedUrl = null
+                engine.enqueue(url)
+                scope.launch { snackbar.showSnackbar("공유받은 URL을 다운로드에 추가했습니다") }
+            }
+            MainActivity.pendingSharedMagnet?.let { magnet ->
+                MainActivity.pendingSharedMagnet = null
+                runCatching { com.borasarang.droidrelay.relay.RelayApp.getTorrent(context).addMagnet(magnet) }
+                    .onSuccess { tab = 1 }
+                    .onFailure { e ->
+                        DebugLogger.e("UI", "공유 magnet 추가 실패: ${e.message}")
+                        scope.launch { snackbar.showSnackbar("magnet 추가 실패: ${e.message}") }
+                    }
             }
         }
     }

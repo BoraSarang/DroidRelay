@@ -32,6 +32,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
@@ -121,6 +122,10 @@ fun TorrentScreen(onShowSnack: (String) -> Unit = {}) {
                         onDelete = { showDeleteDialog = job },
                         onMoveUp = { engine.reorder(job.id, -1) },
                         onMoveDown = { engine.reorder(job.id, 1) },
+                        onSelectFiles = { sel ->
+                            if (engine.setFileSelection(job.id, sel)) onShowSnack("파일 선택 적용됨 (${sel.size}/${job.files.size}개)")
+                            else onShowSnack("파일 목록 없음 — 메타데이터 수신 후 시도")
+                        },
                     )
                 }
                 item { Spacer(Modifier.height(80.dp)) }
@@ -187,8 +192,10 @@ private fun TorrentItem(
     onDelete: () -> Unit,
     onMoveUp: () -> Unit,
     onMoveDown: () -> Unit,
+    onSelectFiles: (Set<Int>) -> Unit,
 ) {
     val now = System.currentTimeMillis()
+    var filesExpanded by remember(job.id) { mutableStateOf(false) }
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -284,6 +291,43 @@ private fun TorrentItem(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.outline,
                     )
+                }
+            }
+            // 파일 선택 (T-942)
+            if (job.files.isNotEmpty()) {
+                Spacer(Modifier.height(4.dp))
+                TextButton(onClick = { filesExpanded = !filesExpanded }) {
+                    Text("파일 ${job.files.size}개 (${job.files.count { it.selected }}개 선택)")
+                }
+                if (filesExpanded) {
+                    Column {
+                        job.files.forEach { f ->
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Checkbox(
+                                    checked = f.selected,
+                                    onCheckedChange = { checked ->
+                                        onSelectFiles(
+                                            job.files.filter { if (it.index == f.index) checked else it.selected }
+                                                .map { it.index }.toSet(),
+                                        )
+                                    },
+                                )
+                                Column(Modifier.weight(1f)) {
+                                    Text(
+                                        f.path,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    Text(
+                                        fmtSize(f.size),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.outline,
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
