@@ -94,7 +94,7 @@ class RssFeedManager(
             for (item in newItems.reversed()) { // 오래된 것부터
                 val url = item.enclosureUrl?.takeIf { it.isNotBlank() } ?: item.link
                 if (url.isNotBlank()) {
-                    val existingJob = JobsRepository.jobs.value.find { it.url == url }
+                    val existingJob = JobsRepository.findDuplicateUrl(url)
                     val existingTorrent = TorrentRepository.all().any { it.magnet == url }
                     if (existingJob == null && !existingTorrent) {
                         val ok = when {

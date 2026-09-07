@@ -54,6 +54,16 @@ internal fun Route.jobRoutes(context: Context, serverRef: RelayServer) {
         }
         // Debrid 연동: 활성화된 경우 언리스트링크 시도
         val s = serverRef.settings
+        // 중복 가드 — 동일 URL이 이미 등록(진행/일시정지/완료)되면 409 (T-947)
+        JobsRepository.findDuplicateUrl(url.trim())?.let { dup ->
+            DebugLogger.w("Http", "중복 URL 추가 시도 → 거부 id=${dup.id}")
+            call.respondText(
+                JSONObject().put("error", "E-AND-DOWN-1006: 이미 등록된 다운로드입니다").put("id", dup.id).toString(),
+                ContentType.Application.Json,
+                HttpStatusCode.Conflict,
+            )
+            return@post
+        }
         val finalUrl = if (s.debridEnabled && s.debridApiKey.isNotBlank()) {
             try {
                 val provider = runCatching { DebridProvider.valueOf(s.debridProvider) }.getOrNull()

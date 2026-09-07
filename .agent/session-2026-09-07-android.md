@@ -23,3 +23,9 @@
 - **T-941**: SEND 필터 `dumpsys` 등록 확인 유지. 실전송(잡 생성 부작용)은 사용자 몫.
 - **T-942**: live torrent 0건이라 POST 미실시. 다음 토렌트 받을 때 상세 모달 체크박스로 확인 필요.
 - 참고: 아침의 영상 폴더 4건이 기기에서 사라짐(이동/삭제 추정) — E2E는 테스트 파일로 대체.
+
+## v0.19 완료 (T-944~948)
+- **T-944**: DavRoutes 신규(OPTIONS/PROPFIND/GET). 버그 1건 발견·수정: PROPFIND 루트 href가 lexical relativeTo로 `..` 탈출 → canonical 기준 수정 후 `/dav/` 확인.
+- **T-945/946**: StorageJanitor(쿼터·분류) + 설정 2종 + 완료 후킹 3엔진 + 앱/웹 UI + reset 포함.
+- **T-947**: normalizedUrl/findDuplicateUrl + 409(E-AND-DOWN-1006) + 전 경로 적용.
+- **검증**: unit 4건 GREEN, JS 2블록 OK, assembleDebug 설치. E2E PASS(DAV 206·PROPFIND·설정 roundtrip·409 fragment 정규화). 잔재 정리(잡·파일·휴지통). CHANGELOG 0.19.0(미배포).

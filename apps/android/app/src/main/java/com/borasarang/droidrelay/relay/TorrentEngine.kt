@@ -171,6 +171,11 @@ class TorrentEngine(
                 }
             }
             DebugLogger.i(TAG, "보관함 이동 완료 id=$id → ${dst.absolutePath}")
+            // 보관함 자동 운영 (v0.19) — 단일 파일은 분류+쿼터, 폴더는 쿼터만
+            runCatching {
+                if (dst.isFile) StorageJanitor.onCompleted(context, dst)
+                else StorageJanitor.enforceIfNeeded(context)
+            }
         } catch (e: Exception) {
             DebugLogger.e(TAG, "보관함 이동 실패 id=$id", e)
         }

@@ -250,6 +250,21 @@ fun SettingsScreen(onPortChanged: (Int) -> Unit) {
             SwitchRow("다운로드 알림 표시", s.notifications) { v -> kotlinx.coroutines.MainScope().launch { repo.setNotifications(v) } }
 
             Spacer(Modifier.height(12.dp))
+            Text("보관함 자동 운영", color = cs.onSurfaceVariant, style = MaterialTheme.typography.labelMedium)
+            Text(
+                "보관함 쿼터: ${if (s.storageQuotaGb == 0) "끔" else "${s.storageQuotaGb}GB (초과 시 오래된 파일 자동 휴지통)"}",
+                color = cs.onSurface,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            Slider(
+                value = s.storageQuotaGb.toFloat(),
+                onValueChange = { v -> kotlinx.coroutines.MainScope().launch { repo.setStorageQuotaGb(v.toInt()) } },
+                valueRange = 0f..128f,
+                steps = 127,
+            )
+            SwitchRow("완료 파일 자동 분류 (영상/음악/문서)", s.autoClassify) { v -> kotlinx.coroutines.MainScope().launch { repo.setAutoClassify(v) } }
+
+            Spacer(Modifier.height(12.dp))
             Text("전역 속도 제한 (다운로드·토렌트 공통)", color = cs.onSurfaceVariant, style = MaterialTheme.typography.labelMedium)
             val dlMbps = if (s.maxDownloadBps > 0) (s.maxDownloadBps / 1_048_576).toInt().coerceIn(1, 10) else 0
             SwitchRow(

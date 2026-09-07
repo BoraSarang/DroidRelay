@@ -151,6 +151,29 @@ object JobsRepository {
 
     fun nextOrder(): Int = (map.values.maxOfOrNull { it.order } ?: 0) + 1
 
+    /** URL 정규화 — 스킴/호스트 소문자 + fragment 제거 + 끝 슬래시 정리 (T-947) */
+    fun normalizedUrl(url: String): String {
+        val t = url.trim()
+        return runCatching {
+            val u = java.net.URI(t)
+            val scheme = (u.scheme ?: "").lowercase()
+            val host = (u.host ?: "").lowercase()
+            val port = if (u.port > 0) ":${u.port}" else ""
+            val path = (u.rawPath?.trimEnd('/') ?: "").ifEmpty { "" }
+            val query = if (!u.rawQuery.isNullOrEmpty()) "?${u.rawQuery}" else ""
+            "$scheme://$host$port$path$query"
+        }.getOrDefault(t.substringBefore('#').trim().trimEnd('/'))
+    }
+
+    /** 중복 URL 잡 조회 — CANCELED/FAILED는 재등록 허용 (T-947) */
+    fun findDuplicateUrl(url: String): Job? {
+        val norm = normalizedUrl(url)
+        return map.values.firstOrNull {
+            normalizedUrl(it.url) == norm &&
+                it.state != JobState.CANCELED && it.state != JobState.FAILED
+        }
+    }
+
     private fun refresh() {
         _jobs.value = map.values.sortedBy { it.order }
     }

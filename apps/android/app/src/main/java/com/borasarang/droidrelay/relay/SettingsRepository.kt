@@ -79,6 +79,9 @@ data class AppSettings(
     val watchdogIntervalSec: Int = 60,
     val torrentMinSeedWaitSec: Int = 0,
     val forceHttpsRedirect: Boolean = false,
+    // 보관함 자동 운영 (v0.19)
+    val storageQuotaGb: Int = 0, // 0=끔
+    val autoClassify: Boolean = false,
 )
 
 private val Context.settingsDataStore by preferencesDataStore("droidrelay_settings")
@@ -146,6 +149,9 @@ class SettingsRepository(private val context: Context) {
         val WATCHDOG_INTERVAL_SEC = intPreferencesKey("watchdog_interval_sec")
         val TORRENT_MIN_SEED_WAIT_SEC = intPreferencesKey("torrent_min_seed_wait_sec")
         val FORCE_HTTPS_REDIRECT = booleanPreferencesKey("force_https_redirect")
+        // 보관함 자동 운영 (v0.19)
+        val STORAGE_QUOTA_GB = intPreferencesKey("storage_quota_gb")
+        val AUTO_CLASSIFY = booleanPreferencesKey("auto_classify")
     }
 
     val settings: Flow<AppSettings> = context.settingsDataStore.data.map { p ->
@@ -198,6 +204,8 @@ class SettingsRepository(private val context: Context) {
             watchdogIntervalSec = (p[Keys.WATCHDOG_INTERVAL_SEC] ?: 60).coerceIn(15, 3600),
             torrentMinSeedWaitSec = (p[Keys.TORRENT_MIN_SEED_WAIT_SEC] ?: 0).coerceAtLeast(0),
             forceHttpsRedirect = p[Keys.FORCE_HTTPS_REDIRECT] ?: false,
+            storageQuotaGb = (p[Keys.STORAGE_QUOTA_GB] ?: 0).coerceIn(0, 1024),
+            autoClassify = p[Keys.AUTO_CLASSIFY] ?: false,
         )
     }
 
@@ -248,6 +256,13 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun setForceHttpsRedirect(b: Boolean) =
         context.settingsDataStore.edit { it[Keys.FORCE_HTTPS_REDIRECT] = b }
+
+    // 보관함 자동 운영 setters (v0.19)
+    suspend fun setStorageQuotaGb(gb: Int) =
+        context.settingsDataStore.edit { it[Keys.STORAGE_QUOTA_GB] = gb.coerceIn(0, 1024) }
+
+    suspend fun setAutoClassify(enabled: Boolean) =
+        context.settingsDataStore.edit { it[Keys.AUTO_CLASSIFY] = enabled }
 
     suspend fun addAllowedIp(ip: String) =
         context.settingsDataStore.edit { it[Keys.ALLOWED_IPS] = (it[Keys.ALLOWED_IPS] ?: emptySet()) + ip }

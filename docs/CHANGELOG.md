@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.19.0] - 2026-09-07 (미배포, 디버그 검증 중)
+
+### Added [android] — v0.19 외부 재생 + 자동 운영 (PLAN_v0.19_dav-quota_android)
+- **T-944 WebDAV 읽기**: `DavRoutes` (`OPTIONS`/`PROPFIND` Depth 0·1 + 207 XML + `GET /dav/` Range 재사용) — VLC/nPlayer 외부 재생. PROPFIND 루트 href `..` 탈출 버그 수정(canonical 기준)
+- **T-945 보관함 쿼터**: `storageQuotaGb`(0=끔) + 초과 시 오래된 파일 자동 휴지통(`StorageJanitor.enforceQuota`) — 완료 후처리 후킹(HTTP/비디오/토렌트)
+- **T-946 자동 분류**: `autoClassify` + 확장자→영상/음악/문서 폴더 자동 이동
+- **T-947 중복 감지**: `normalizedUrl` + `findDuplicateUrl` — `/api/jobs` 409(`E-AND-DOWN-1006`), 앱/Share/RSS/MCP 전 경로 안내·차단
+- **검증**: compile + testDebugUnitTest GREEN(`StorageJanitorTest` 4건) + assembleDebug 설치. 실기기 E2E: DAV 206/video-mp4·PROPFIND `/dav/`·설정 roundtrip·409(fragment 정규화 동일 id) PASS, 잔재 정리. 파일 선택 live POST·분류 실전송은 다음 토렌트 시 확인
+
 ## [0.18.0] - 2026-09-07 (미배포, 디버그 검증 중)
 
 ### Added [android] — v0.18 담기↔소비 완성 (PLAN_v0.18_media-share_android)

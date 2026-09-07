@@ -74,6 +74,8 @@ internal fun Route.settingsRoutes(context: Context, serverRef: RelayServer) {
                 put("concurrency", s.concurrency)
                 put("speedLimitKbps", s.speedLimitKbps)
                 put("notifications", s.notifications)
+                put("storageQuotaGb", s.storageQuotaGb)
+                put("autoClassify", s.autoClassify)
             }.toString(),
             ContentType.Application.Json
         )
@@ -86,6 +88,8 @@ internal fun Route.settingsRoutes(context: Context, serverRef: RelayServer) {
         json?.optInt("concurrency", -1)?.let { if (it >= 1) repo.setConcurrency(it) }
         json?.optInt("speedLimitKbps", -1)?.let { if (it >= 0) repo.setSpeedLimit(it) }
         if (json?.has("notifications") == true) json?.optBoolean("notifications")?.let { repo.setNotifications(it) }
+        json?.optInt("storageQuotaGb", -1)?.let { if (it >= 0) repo.setStorageQuotaGb(it) }
+        if (json?.has("autoClassify") == true) json?.optBoolean("autoClassify")?.let { repo.setAutoClassify(it) }
         // 엔진에 즉시 반영
         RelayApp.get(context).applySettings(repo.firstBlocking())
         serverRef.settings = repo.firstBlocking()
@@ -144,6 +148,8 @@ internal fun Route.settingsRoutes(context: Context, serverRef: RelayServer) {
                 repo.setConcurrency(SettingsConstraints.DEFAULT_CONCURRENCY)
                 repo.setSpeedLimit(0)
                 repo.setNotifications(true)
+                repo.setStorageQuotaGb(0)
+                repo.setAutoClassify(false)
                 RelayApp.get(ctx).applySettings(repo.firstBlocking())
             }
             "torrent" -> {
@@ -161,6 +167,8 @@ internal fun Route.settingsRoutes(context: Context, serverRef: RelayServer) {
                 repo.setConcurrency(SettingsConstraints.DEFAULT_CONCURRENCY)
                 repo.setSpeedLimit(0)
                 repo.setNotifications(true)
+                repo.setStorageQuotaGb(0)
+                repo.setAutoClassify(false)
                 repo.setTorrentUploadLimit(SettingsConstraints.DEFAULT_TORRENT_UPLOAD_KBPS)
                 repo.setTorrentDownloadLimit(SettingsConstraints.DEFAULT_TORRENT_DOWNLOAD_KBPS)
                 repo.setTorrentMaxActive(SettingsConstraints.DEFAULT_TORRENT_MAX_ACTIVE)

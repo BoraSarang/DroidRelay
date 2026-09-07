@@ -405,6 +405,8 @@ private fun Application.relayRoutes(context: Context, serverRef: RelayServer) {
 
         storageRoutes(context, serverRef)
 
+        davRoutes(context, serverRef)
+
         debugRoutes(context, serverRef)
 
         jobRoutes(context, serverRef)

@@ -284,6 +284,7 @@ private fun ServerCard(onCopyAddress: (String) -> Unit, qr: Bitmap?, onQrClick: 
 @Composable
 private fun AddRow() {
     var text by remember { mutableStateOf("") }
+    var dupWarn by remember { mutableStateOf(false) }
     val engine = RelayApp.get(LocalContext.current)
     val cs = MaterialTheme.colorScheme
 
@@ -307,12 +308,25 @@ private fun AddRow() {
         Button(onClick = {
             if (text.isNotBlank()) {
                 DebugLogger.i("UI", "추가 클릭 url=${text.trim()}")
-                engine.enqueue(text.trim())
-                text = ""
+                if (JobsRepository.findDuplicateUrl(text.trim()) != null) {
+                    dupWarn = true
+                    DebugLogger.i("UI", "중복 URL 추가 시도 → 안내")
+                } else {
+                    dupWarn = false
+                    engine.enqueue(text.trim())
+                    text = ""
+                }
             }
         }, shape = MaterialTheme.shapes.small) {
             Icon(Icons.Filled.Add, "추가")
         }
+    }
+    if (dupWarn) {
+        Text(
+            "이미 등록된 다운로드입니다",
+            color = MaterialTheme.colorScheme.error,
+            style = MaterialTheme.typography.bodySmall,
+        )
     }
 }
 

@@ -178,22 +178,36 @@ fun RootApp() {
                 )
                 if (result == androidx.compose.material3.SnackbarResult.ActionPerformed) {
                     DebugLogger.i("UI", "클립보드 제안 수락 → $url")
-                    engine.enqueue(url)
+                    if (com.borasarang.droidrelay.relay.JobsRepository.findDuplicateUrl(url) != null) {
+                        scope.launch { snackbar.showSnackbar("이미 등록된 다운로드입니다") }
+                    } else {
+                        engine.enqueue(url)
+                    }
                 }
             }
             MainActivity.pendingSharedUrl?.let { url ->
                 MainActivity.pendingSharedUrl = null
-                engine.enqueue(url)
-                scope.launch { snackbar.showSnackbar("공유받은 URL을 다운로드에 추가했습니다") }
+                if (com.borasarang.droidrelay.relay.JobsRepository.findDuplicateUrl(url) != null) {
+                    scope.launch { snackbar.showSnackbar("이미 등록된 다운로드입니다") }
+                } else {
+                    engine.enqueue(url)
+                    scope.launch { snackbar.showSnackbar("공유받은 URL을 다운로드에 추가했습니다") }
+                }
             }
             MainActivity.pendingSharedMagnet?.let { magnet ->
                 MainActivity.pendingSharedMagnet = null
-                runCatching { com.borasarang.droidrelay.relay.RelayApp.getTorrent(context).addMagnet(magnet) }
-                    .onSuccess { tab = 1 }
-                    .onFailure { e ->
-                        DebugLogger.e("UI", "공유 magnet 추가 실패: ${e.message}")
-                        scope.launch { snackbar.showSnackbar("magnet 추가 실패: ${e.message}") }
-                    }
+                val torrentEngine = com.borasarang.droidrelay.relay.RelayApp.getTorrent(context)
+                if (torrentEngine.isDuplicateMagnet(magnet)) {
+                    tab = 1
+                    scope.launch { snackbar.showSnackbar("이미 등록된 토렌트입니다") }
+                } else {
+                    runCatching { torrentEngine.addMagnet(magnet) }
+                        .onSuccess { tab = 1 }
+                        .onFailure { e ->
+                            DebugLogger.e("UI", "공유 magnet 추가 실패: ${e.message}")
+                            scope.launch { snackbar.showSnackbar("magnet 추가 실패: ${e.message}") }
+                        }
+                }
             }
         }
     }

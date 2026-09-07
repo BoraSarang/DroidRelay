@@ -321,4 +321,14 @@ T-001~T-008 전부 완료 (커밋 7574486).
 | T-942 | **토렌트 파일 선택** — 목록 조회 + file_priority API + 웹/앱 체크박스 UI | ✅ |
 | T-943 | **검증·문서** — test/lint/assembleDebug + 실기기 E2E + CHANGELOG + 커밋 | ✅ |
 
+## v0.19 (2026-09-07) — 외부 재생 + 자동 운영 (PLAN_v0.19_dav-quota_android.md)
+
+| T-번호 | 내용 | 상태 |
+|--------|------|------|
+| T-944 | **WebDAV 읽기** — PROPFIND+GET Range, VLC 연동 | ✅ |
+| T-945 | **보관함 쿼터** — 상한 초과 시 오래된 파일 자동 휴지통 | ✅ |
+| T-946 | **자동 분류** — 확장자별 폴더 자동 이동 | ✅ |
+| T-947 | **중복 감지** — 동일 URL/magnet 등록 차단·안내 | ✅ |
+| T-948 | **검증·문서** — test/lint/assembleDebug + 실기기 E2E + CHANGELOG + 커밋 | ✅ |
+
 > v0.16.0(설정 1차)·v0.16.1(디자인 개편) 실기기 **직접 확인 대기**(사용자). 이후 **2차 확장** 예약: 스케줄(ScheduleRepository) / Debrid / 터널 / MCP / 기본값 복원. RSS CRUD는 별도 저장소(2차와 분리 검토).

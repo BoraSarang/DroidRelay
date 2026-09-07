@@ -336,6 +336,20 @@ object WebAssets {
             <input type="checkbox" id="notifications" checked>
             <label for="notifications">다운로드 알림 표시 (앱에서만 적용)</label>
           </div>
+          <div class="sr" style="margin-top:12px">
+            <div class="si">
+              <div class="sl">보관함 쿼터</div>
+              <div class="sv">
+                <input type="range" id="storageQuotaGb" min="0" max="128" value="0" step="1">
+                <span id="storageQuotaLabel">끔</span>
+              </div>
+              <div class="sb">GB 단위 · 0 = 끔 · 초과 시 오래된 파일부터 자동 휴지통</div>
+            </div>
+          </div>
+          <div class="ck" style="margin-top:12px">
+            <input type="checkbox" id="autoClassify">
+            <label for="autoClassify">완료 파일 자동 분류 (영상/음악/문서 폴더)</label>
+          </div>
         </div>
       </div>
 
@@ -1604,6 +1618,9 @@ function loadSettings(){
     document.getElementById('speedLimitKbps').value=dl.speedLimitKbps!=null?dl.speedLimitKbps:0;
     document.getElementById('speedLimitLabel').textContent=kblabel(dl.speedLimitKbps,0,'무제한');
     document.getElementById('notifications').checked=dl.notifications!==false;
+    document.getElementById('storageQuotaGb').value=dl.storageQuotaGb!=null?dl.storageQuotaGb:0;
+    document.getElementById('storageQuotaLabel').textContent=dl.storageQuotaGb>0?dl.storageQuotaGb+'GB':'끔';
+    document.getElementById('autoClassify').checked=dl.autoClassify===true;
     // 토렌트 설정
     document.getElementById('torrentUploadLimit').value=tr.torrentUploadLimit!=null?tr.torrentUploadLimit:512;
     document.getElementById('torrentUploadLabel').textContent=kblabel(tr.torrentUploadLimit,512,'끔');
@@ -1731,10 +1748,13 @@ function saveDownloadSettings(){
   var body={
     concurrency:num(document.getElementById('concurrency').value,2),
     speedLimitKbps:num(document.getElementById('speedLimitKbps').value,0),
-    notifications:document.getElementById('notifications').checked
+    notifications:document.getElementById('notifications').checked,
+    storageQuotaGb:num(document.getElementById('storageQuotaGb').value,0),
+    autoClassify:document.getElementById('autoClassify').checked
   };
   document.getElementById('concurrencyLabel').textContent=body.concurrency;
   document.getElementById('speedLimitLabel').textContent=kblabel(body.speedLimitKbps,0,'무제한');
+  document.getElementById('storageQuotaLabel').textContent=body.storageQuotaGb>0?body.storageQuotaGb+'GB':'끔';
   apiPost('/api/settings/download',body)
     .then(function(d){if(!d.ok)alert('저장 실패');})
     .catch(function(e){alert('저장 실패: '+e);});
@@ -1872,6 +1892,8 @@ function resetSettings(category){
   if(s)s.addEventListener('input',function(){document.getElementById('concurrencyLabel').textContent=this.value;});
   s=document.getElementById('speedLimitKbps');
   if(s)s.addEventListener('input',function(){document.getElementById('speedLimitLabel').textContent=this.value>0?this.value+' KB/s':'무제한';});
+  s=document.getElementById('storageQuotaGb');
+  if(s)s.addEventListener('input',function(){document.getElementById('storageQuotaLabel').textContent=this.value>0?this.value+'GB':'끔';});
   s=document.getElementById('torrentUploadLimit');
   if(s)s.addEventListener('input',function(){document.getElementById('torrentUploadLabel').textContent=this.value+' KB/s';});
   s=document.getElementById('torrentDownloadLimit');
@@ -1895,6 +1917,8 @@ function resetSettings(category){
   document.getElementById('concurrency')?.addEventListener('change',autoSave('dl',saveDownloadSettings));
   document.getElementById('speedLimitKbps')?.addEventListener('change',autoSave('dl',saveDownloadSettings));
   document.getElementById('notifications')?.addEventListener('change',autoSave('dl',saveDownloadSettings));
+  document.getElementById('storageQuotaGb')?.addEventListener('change',autoSave('dl',saveDownloadSettings));
+  document.getElementById('autoClassify')?.addEventListener('change',autoSave('dl',saveDownloadSettings));
   document.getElementById('torrentUploadLimit')?.addEventListener('change',autoSave('tr',saveTorrentSettings));
   document.getElementById('torrentDownloadLimit')?.addEventListener('change',autoSave('tr',saveTorrentSettings));
   document.getElementById('torrentMaxActive')?.addEventListener('change',autoSave('tr',saveTorrentSettings));

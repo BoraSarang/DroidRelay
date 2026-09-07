@@ -343,6 +343,8 @@ class DownloadEngine(
                     )
                 }
                 DebugLogger.perf(TAG, "다운로드 id=$id '${done.name}' ${fmt(finalSize)} 평균=${fmt(finalSize * 1000 / elapsed)}/s") {}
+                // 보관함 자동 운영 (분류·쿼터, v0.19)
+                runCatching { StorageJanitor.onCompleted(context, java.io.File(StorageGuard.dlRoot, job.filename)) }
                 return@withContext Outcome.COMPLETED
             }
         } catch (e: Exception) {
