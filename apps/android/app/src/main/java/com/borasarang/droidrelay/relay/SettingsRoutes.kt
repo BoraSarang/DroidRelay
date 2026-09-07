@@ -136,6 +136,30 @@ internal fun Route.settingsRoutes(context: Context, serverRef: RelayServer) {
         call.respondText("""{"ok":true}""", ContentType.Application.Json)
     }
 
+    // ── 토렌트 검색 설정 (Torznab, T-950) ──
+    get("/api/settings/search") {
+        val s = serverRef.settings
+        call.respondText(
+            JSONObject().apply {
+                put("searchEnabled", s.searchEnabled)
+                put("searchUrl", s.searchUrl)
+                put("searchApiKey", s.searchApiKey)
+            }.toString(),
+            ContentType.Application.Json
+        )
+    }
+
+    post("/api/settings/search") {
+        val body = call.receiveText()
+        val json = try { JSONObject(body) } catch (_: Exception) { null }
+        val repo = SettingsRepository.get(context)
+        if (json?.has("searchEnabled") == true) json?.optBoolean("searchEnabled")?.let { repo.setSearchEnabled(it) }
+        json?.optString("searchUrl", "")?.let { if (it.isNotBlank()) repo.setSearchUrl(it) }
+        if (json?.has("searchApiKey") == true) json?.optString("searchApiKey", "")?.let { repo.setSearchApiKey(it) }
+        serverRef.settings = repo.firstBlocking()
+        call.respondText("""{"ok":true}""", ContentType.Application.Json)
+    }
+
     // ── 설정 리셋 (기본값 복원) ──
     post("/api/settings/reset") {
         val body = call.receiveText()
@@ -161,6 +185,9 @@ internal fun Route.settingsRoutes(context: Context, serverRef: RelayServer) {
                 repo.setTorrentPexEnabled(true)
                 repo.setTorrentListenPort(SettingsConstraints.randomEphemeralPort())
                 repo.setTorrentSavePath("/sdcard/Download/DroidRelay")
+                repo.setSearchEnabled(false)
+                repo.setSearchUrl("")
+                repo.setSearchApiKey("")
                 RelayApp.getTorrent(ctx).applySettings(repo.firstBlocking())
             }
             else -> {
@@ -177,6 +204,9 @@ internal fun Route.settingsRoutes(context: Context, serverRef: RelayServer) {
                 repo.setTorrentPexEnabled(true)
                 repo.setTorrentListenPort(SettingsConstraints.randomEphemeralPort())
                 repo.setTorrentSavePath("/sdcard/Download/DroidRelay")
+                repo.setSearchEnabled(false)
+                repo.setSearchUrl("")
+                repo.setSearchApiKey("")
                 RelayApp.get(ctx).applySettings(repo.firstBlocking())
                 RelayApp.getTorrent(ctx).applySettings(repo.firstBlocking())
             }

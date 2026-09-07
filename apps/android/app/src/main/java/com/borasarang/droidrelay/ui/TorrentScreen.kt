@@ -29,7 +29,9 @@ import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
@@ -48,7 +50,12 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import com.borasarang.droidrelay.relay.TorznabClient
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -69,6 +76,11 @@ fun TorrentScreen(onShowSnack: (String) -> Unit = {}) {
 
     var showMagnetDialog by remember { mutableStateOf(false) }
     var showDeleteDialog by remember { mutableStateOf<TorrentJob?>(null) }
+    // 토렌트 검색 (T-950)
+    var searchQuery by remember { mutableStateOf("") }
+    var searchResults by remember { mutableStateOf<List<TorznabClient.Result>?>(null) }
+    var searching by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
 
     val filePicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
@@ -114,6 +126,85 @@ fun TorrentScreen(onShowSnack: (String) -> Unit = {}) {
                 Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
+                item {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        OutlinedTextField(
+                            value = searchQuery,
+                            onValueChange = { searchQuery = it },
+                            label = { Text("토렌트 검색") },
+                            singleLine = true,
+                            shape = MaterialTheme.shapes.small,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Button(
+                            onClick = {
+                                if (searchQuery.isBlank() || searching) return@Button
+                                searching = true
+                                scope.launch(Dispatchers.IO) {
+                                    val res = runCatching { engine.search(searchQuery.trim()) }
+                                    withContext(Dispatchers.Main) {
+                                        searching = false
+                                        res.onSuccess {
+                                            searchResults = it
+                                            if (it.isEmpty()) onShowSnack("검색 결과 없음")
+                                        }.onFailure { e ->
+                                            DebugLogger.e("TorrentUI", "검색 실패", e)
+                                            onShowSnack("검색 실패: ${e.message}")
+                                        }
+                                    }
+                                }
+                            },
+                            enabled = !searching,
+                            shape = MaterialTheme.shapes.small,
+                        ) {
+                            Icon(Icons.Filled.Search, "검색")
+                        }
+                    }
+                }
+                searchResults?.let { results ->
+                    items(results) { r ->
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceContainer,
+                            ),
+                        ) {
+                            Row(
+                                Modifier.fillMaxWidth().padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(
+                                        r.title,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    Text(
+                                        "${fmtSize(r.size)} · 시드 ${r.seeders}${if (r.indexer.isNotBlank()) " · ${r.indexer}" else ""}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.outline,
+                                    )
+                                }
+                                TextButton(onClick = {
+                                    scope.launch(Dispatchers.IO) {
+                                        val ok = runCatching {
+                                            if (r.magnet != null) engine.addMagnet(r.magnet)
+                                            else engine.addTorrentUrl(r.url!!)
+                                        }
+                                        withContext(Dispatchers.Main) {
+                                            ok.onSuccess { onShowSnack("토렌트 추가됨") }
+                                                .onFailure { e -> onShowSnack("추가 실패: ${e.message}") }
+                                        }
+                                    }
+                                }) {
+                                    Text("받기")
+                                }
+                            }
+                        }
+                    }
+                }
                 items(torrents, key = { it.id }) { job ->
                     TorrentItem(
                         job = job,

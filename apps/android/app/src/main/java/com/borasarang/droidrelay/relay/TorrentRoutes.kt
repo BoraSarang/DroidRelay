@@ -56,6 +56,7 @@ internal fun Route.torrentRoutes(context: Context, serverRef: RelayServer) {
             val json = try { JSONObject(body) } catch (_: Exception) { null }
             val magnet = json?.optString("magnet")?.trim() ?: ""
             val torrentFile = json?.optString("torrentFileBase64")?.trim() ?: ""
+            val torrentUrl = json?.optString("torrentUrl")?.trim() ?: ""
 
             when {
                 magnet.startsWith("magnet:") -> {
@@ -90,7 +91,17 @@ internal fun Route.torrentRoutes(context: Context, serverRef: RelayServer) {
                     )
                 }
                 else -> {
-                    call.respondErr("magnet 또는 torrentFileBase64 필요")
+                    if (torrentUrl.startsWith("http://") || torrentUrl.startsWith("https://")) {
+                        val job = RelayApp.getTorrent(context).addTorrentUrl(torrentUrl)
+                        DebugLogger.i("Http", "torrent URL 추가 id=${job.id} url=${torrentUrl.take(80)}")
+                        call.respondText(
+                            JSONObject().put("id", job.id).toString(),
+                            ContentType.Application.Json,
+                            HttpStatusCode.Created,
+                        )
+                    } else {
+                        call.respondErr("magnet 또는 torrentFileBase64/torrentUrl 필요")
+                    }
                 }
             }
         } catch (e: Exception) {
@@ -141,6 +152,37 @@ internal fun Route.torrentRoutes(context: Context, serverRef: RelayServer) {
                 RelayApp.getTorrent(context).cancel(id)
                 call.respondText("ok")
             }
+        }
+    }
+
+    get("/api/search") {
+        val q = call.request.queryParameters["q"]?.trim() ?: ""
+        if (q.isBlank()) {
+            call.respondText("[]", ContentType.Application.Json)
+            return@get
+        }
+        try {
+            val results = RelayApp.getTorrent(context).search(q)
+            val arr = JSONArray()
+            results.forEach { r ->
+                arr.put(JSONObject().apply {
+                    put("title", r.title)
+                    put("size", r.size)
+                    put("seeders", r.seeders)
+                    put("peers", r.peers)
+                    put("magnet", r.magnet ?: JSONObject.NULL)
+                    put("url", r.url ?: JSONObject.NULL)
+                    put("indexer", r.indexer)
+                })
+            }
+            call.respondText(arr.toString(), ContentType.Application.Json)
+        } catch (e: Exception) {
+            DebugLogger.w("Http", "토렌트 검색 실패 q=${q.take(40)}: ${e.message}")
+            call.respondText(
+                JSONObject().put("error", e.message ?: "검색 실패").toString(),
+                ContentType.Application.Json,
+                HttpStatusCode.BadGateway,
+            )
         }
     }
 

@@ -481,4 +481,22 @@ internal fun Route.storageRoutes(context: Context, serverRef: RelayServer) {
             call.serveFile(file, "stream", inline = true, contentType = StreamContentType.forName(file.name))
         }
     }
+
+    // 영상 썸네일 — FFmpeg 추출 + 캐시 (T-949)
+    get("/thumb/{name...}") {
+        val name = call.parameters.getAll("name")?.joinToString("/") ?: ""
+        val file = StorageGuard.storageFile(name)
+        if (file == null || !file.exists() || !file.isFile) {
+            call.respondText("404 없음", ContentType.Text.Plain, HttpStatusCode.NotFound)
+            return@get
+        }
+        val thumb = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            ThumbManager.thumbFor(context, file)
+        }
+        if (thumb == null) {
+            call.respondText("404 썸네일 없음", ContentType.Text.Plain, HttpStatusCode.NotFound)
+        } else {
+            call.serveFile(thumb, "thumb", inline = true, contentType = ContentType.Image.JPEG)
+        }
+    }
 }

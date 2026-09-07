@@ -82,6 +82,13 @@ data class AppSettings(
     // 보관함 자동 운영 (v0.19)
     val storageQuotaGb: Int = 0, // 0=끔
     val autoClassify: Boolean = false,
+    // 토렌트 검색 Torznab (v0.20)
+    val searchEnabled: Boolean = false,
+    val searchUrl: String = "",
+    val searchApiKey: String = "",
+    // 게스트 읽기전용 (v0.20) — 웹 인증 켜짐 + 비밀번호 설정 시에만 유효
+    val guestEnabled: Boolean = false,
+    val guestPassword: String = "",
 )
 
 private val Context.settingsDataStore by preferencesDataStore("droidrelay_settings")
@@ -152,6 +159,13 @@ class SettingsRepository(private val context: Context) {
         // 보관함 자동 운영 (v0.19)
         val STORAGE_QUOTA_GB = intPreferencesKey("storage_quota_gb")
         val AUTO_CLASSIFY = booleanPreferencesKey("auto_classify")
+        // 토렌트 검색 (v0.20)
+        val SEARCH_ENABLED = booleanPreferencesKey("search_enabled")
+        val SEARCH_URL = stringPreferencesKey("search_url")
+        val SEARCH_API_KEY = stringPreferencesKey("search_api_key")
+        // 게스트 (v0.20)
+        val GUEST_ENABLED = booleanPreferencesKey("guest_enabled")
+        val GUEST_PASSWORD = stringPreferencesKey("guest_password")
     }
 
     val settings: Flow<AppSettings> = context.settingsDataStore.data.map { p ->
@@ -206,6 +220,11 @@ class SettingsRepository(private val context: Context) {
             forceHttpsRedirect = p[Keys.FORCE_HTTPS_REDIRECT] ?: false,
             storageQuotaGb = (p[Keys.STORAGE_QUOTA_GB] ?: 0).coerceIn(0, 1024),
             autoClassify = p[Keys.AUTO_CLASSIFY] ?: false,
+            searchEnabled = p[Keys.SEARCH_ENABLED] ?: false,
+            searchUrl = p[Keys.SEARCH_URL] ?: "",
+            searchApiKey = p[Keys.SEARCH_API_KEY] ?: "",
+            guestEnabled = p[Keys.GUEST_ENABLED] ?: false,
+            guestPassword = p[Keys.GUEST_PASSWORD] ?: "",
         )
     }
 
@@ -263,6 +282,23 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun setAutoClassify(enabled: Boolean) =
         context.settingsDataStore.edit { it[Keys.AUTO_CLASSIFY] = enabled }
+
+    // 토렌트 검색 setters (v0.20)
+    suspend fun setSearchEnabled(enabled: Boolean) =
+        context.settingsDataStore.edit { it[Keys.SEARCH_ENABLED] = enabled }
+
+    suspend fun setSearchUrl(url: String) =
+        context.settingsDataStore.edit { it[Keys.SEARCH_URL] = url.trim().trimEnd('/') }
+
+    suspend fun setSearchApiKey(key: String) =
+        context.settingsDataStore.edit { it[Keys.SEARCH_API_KEY] = key.trim() }
+
+    // 게스트 setters (v0.20)
+    suspend fun setGuestEnabled(enabled: Boolean) =
+        context.settingsDataStore.edit { it[Keys.GUEST_ENABLED] = enabled }
+
+    suspend fun setGuestPassword(pass: String) =
+        context.settingsDataStore.edit { if (pass.isNotBlank()) it[Keys.GUEST_PASSWORD] = pass }
 
     suspend fun addAllowedIp(ip: String) =
         context.settingsDataStore.edit { it[Keys.ALLOWED_IPS] = (it[Keys.ALLOWED_IPS] ?: emptySet()) + ip }
