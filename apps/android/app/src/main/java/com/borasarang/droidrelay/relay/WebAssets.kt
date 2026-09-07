@@ -345,7 +345,7 @@ object WebAssets {
             <div class="si">
               <div class="sl">업로드 속도</div>
               <div class="sv">
-                <input type="range" id="torrentUploadLimit" min="0" max="1024" value="512" step="64">
+                <input type="range" id="torrentUploadLimit" min="0" max="1024" value="512" step="32">
                 <span id="torrentUploadLabel" style="color:#f96">512 KB/s</span>
               </div>
               <div class="sb">KB/s 단위 · 0 = 업로드 안 함 (피어 평판 저하 유의)</div>
@@ -670,7 +670,11 @@ window.__dragActiveAt=0;
 function dragActive(){return window.__dragActive&&(Date.now()-window.__dragActiveAt)<5000;}
 window.onerror=function(msg,src,line){var t=document.createElement('div');t.textContent='⚠ JS 오류: '+msg+' @'+line;t.style.cssText='position:fixed;top:10px;left:50%;transform:translateX(-50%);background:#5c1a1a;color:#ff8a93;padding:8px 14px;border-radius:8px;font-size:12px;z-index:99999';document.body.appendChild(t);setTimeout(function(){t.remove()},6000);};
 
-function esc(s){return (s||'').replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;'}[c];});}
+function esc(s){return (s||'').replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+function num(v,d){v=parseFloat(v);return isFinite(v)?v:d;}
+function kblabel(v,d,zero){v=(v!=null?v:d);return v===0?zero:v+' KB/s';}
+function apiGet(p){return fetch(p).then(function(r){return r.json();});}
+function apiPost(p,b){return fetch(p,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b||{})}).then(function(r){return r.json();});}
 function showDlToast(msg){var t=document.createElement('div');t.textContent=msg||'다운로드 요청 했습니다';t.style.cssText='position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#1a5c3a;color:#69e29b;padding:10px 20px;border-radius:8px;font-size:14px;z-index:9999;opacity:1;transition:opacity 1.5s';document.body.appendChild(t);setTimeout(function(){t.style.opacity='0'},1500);setTimeout(function(){t.remove()},3000);}
 function fmt(n){if(n==null||n<0)return '?';if(n<1048576)return (n/1024).toFixed(0)+' KB';if(n<1073741824)return (n/1048576).toFixed(1)+' MB';return (n/1073741824).toFixed(2)+' GB';}
 function spd(bps){return bps>0?(bps/1024).toFixed(0)+' KB/s':'-';}
@@ -691,29 +695,7 @@ function fileIcon(name,isDir){
     '7z':'📦',apk:'📱',exe:'💿',iso:'💿',txt:'📝',md:'📝',json:'📝',xml:'📝',torrent:'🔗'};
   return icons[ext]||'📄';
 }
-function switchTab(t){
-  curTab=t;
-  if(trashMode&&t!=='storage')toggleTrash();
-  document.querySelectorAll('.tab').forEach(function(el,i){
-    el.classList.toggle('active',(['dl','torrent','storage','settings'])[i]===t);
-  });
-  document.getElementById('panel-dl').classList.toggle('active',t==='dl');
-  document.getElementById('panel-torrent').classList.toggle('active',t==='torrent');
-  document.getElementById('panel-storage').classList.toggle('active',t==='storage');
-  document.getElementById('panel-settings').classList.toggle('active',t==='settings');
-  if(t==='storage')refreshStorage();
-  if(t==='settings')loadSettings();
-}
-function switchSettingsSection(s){
-  document.querySelectorAll('.settings-nav-item').forEach(function(el,i){
-    el.classList.toggle('active',(['global','download','torrent','rss','debrid','tunnel','guard','mcp','schedule','storage','debug','reset'])[i]===s);
-  });
-  document.querySelectorAll('.settings-content').forEach(function(el){
-    el.classList.remove('active');
-  });
-  var target=document.getElementById('settings-'+s);
-  if(target)target.classList.add('active');
-}
+// switchTab/switchSettingsSection 정의는 하단 설정 섹션에 단일화 (중복 제거, T-936)
 var __videoState=null;
 function videoErr(msg){
   document.getElementById('videoArea').innerHTML='<div class="err">'+esc(msg||'오류')+'</div>';
@@ -937,9 +919,9 @@ function renderTorrents(ts){
     var st=t.state||'UNKNOWN';
     var badgeClass={DOWNLOADING:'RUNNING',SEEDING:'DONE',PAUSED:'PAUSED',ERROR:'FAILED',FETCHING_METADATA:'QUEUED',METADATA:'QUEUED',ADDING:'QUEUED'}[st]||'QUEUED';
     var pause='';
-    if(st==='DOWNLOADING'||st==='SEEDING')pause='<button class="ghost" onclick="torrentAct(\''+t.id+'\',\'pause\')">일시정지</button>';
-    if(st==='PAUSED')pause='<button class="ghost" onclick="torrentAct(\''+t.id+'\',\'resume\')">재개</button>';
-    var del='<button class="ghost" onclick="torrentDel(\''+t.id+'\')">삭제</button>';
+    if(st==='DOWNLOADING'||st==='FETCHING_METADATA')pause='<button class="ghost" onclick="torrentAct(\''+t.id+'\',\'pause\')">일시정지</button>';
+    if(st==='PAUSED'||st==='FAILED')pause='<button class="ghost" onclick="torrentAct(\''+t.id+'\',\'resume\')">재개</button>';
+    var del='<button class="ghost" onclick="torrentDelConfirm(\''+t.id+'\')">삭제</button>';
     h+='<div class="card" draggable="true" data-id="'+t.id+'">'
       +'<div style="flex:1;min-width:0;padding:14px">'
       +'<div class="name">'+esc(t.name||t.hash||'파일 불명')+'</div>'
@@ -979,6 +961,8 @@ var dlBase=location.protocol+'//'+location.hostname+':'+location.port;
         +'<div class="acts">';
       if(!isDir){
         h+='<a class="btn-dl" href="'+dlBase+'/dl-file/'+encodeURIComponent(key)+'" download="'+esc(f.name)+'" onclick="event.stopPropagation();showDlToast()">📥</a>';
+      }else{
+        h+='<a class="btn-dl" href="'+dlBase+'/dl-folder/'+encodeURIComponent(key)+'" download="'+esc(f.name)+'.zip" onclick="event.stopPropagation();showDlToast()">📦</a>';
       }
     h+='<button class="ghost sm" data-act="rename">✏️</button>';
     h+='<button class="ghost sm" data-act="del">🗑</button>';
@@ -1347,6 +1331,14 @@ function act(id,a){fetch('/api/jobs/'+id+'/'+a,{method:'POST'}).then(refresh);}
 function delJob(id){fetch('/api/jobs/'+id,{method:'DELETE'}).then(refresh);}
 function torrentAct(id,a){fetch('/api/torrents/'+id+'/'+a,{method:'POST'}).then(refresh);}
 function torrentDel(id){fetch('/api/torrents/'+id,{method:'DELETE'}).then(refresh);}
+function torrentDelConfirm(id){
+  var t=null;
+  (window.__torrents||[]).forEach(function(x){if(x.id===id)t=x;});
+  var name=t?(t.name||'이름 없음'):'토렌트';
+  var incomplete=t&&(t.state==='DOWNLOADING'||t.state==='FETCHING_METADATA'||t.state==='PAUSED'||t.state==='FAILED');
+  var msg='「'+name+'」 torrent를 목록에서 삭제할까요?'+(incomplete?'\n다운로드 중이던 파일도 함께 삭제됩니다.':'');
+  confirmPopup('토렌트 삭제',msg,function(){torrentDel(id);},true);
+}
 (function(){
   ['list','torrentList'].forEach(function(cid){
     var el=document.getElementById(cid);
@@ -1578,34 +1570,34 @@ function loadSettings(){
     // 전역 속도 제한
     document.getElementById('dlSpeedEnabled').checked=sl.maxDownloadBps>0;
     document.getElementById('maxDownloadMbps').disabled=sl.maxDownloadBps<=0;
-    document.getElementById('maxDownloadMbps').value=Math.round(sl.maxDownloadBps/1048576)||3;
-    document.getElementById('maxDownloadLabel').textContent=(Math.round(sl.maxDownloadBps/1048576)||3)+' Mbps';
+    document.getElementById('maxDownloadMbps').value=sl.maxDownloadBps!=null?Math.round(sl.maxDownloadBps/1048576):3;
+    document.getElementById('maxDownloadLabel').textContent=(sl.maxDownloadBps!=null?Math.round(sl.maxDownloadBps/1048576):3)+' Mbps';
     document.getElementById('ulSpeedEnabled').checked=sl.maxUploadBps>0;
     document.getElementById('maxUploadMbps').disabled=sl.maxUploadBps<=0;
-    document.getElementById('maxUploadMbps').value=Math.round(sl.maxUploadBps/1048576)||3;
-    document.getElementById('maxUploadLabel').textContent=(Math.round(sl.maxUploadBps/1048576)||3)+' Mbps';
+    document.getElementById('maxUploadMbps').value=sl.maxUploadBps!=null?Math.round(sl.maxUploadBps/1048576):3;
+    document.getElementById('maxUploadLabel').textContent=(sl.maxUploadBps!=null?Math.round(sl.maxUploadBps/1048576):3)+' Mbps';
     updateSpeedLimitStatus(sl);
     // 다운로드 설정
-    document.getElementById('concurrency').value=dl.concurrency||2;
-    document.getElementById('concurrencyLabel').textContent=dl.concurrency||2;
-    document.getElementById('speedLimitKbps').value=dl.speedLimitKbps||0;
-    document.getElementById('speedLimitLabel').textContent=(dl.speedLimitKbps||0)>0?dl.speedLimitKbps+' KB/s':'무제한';
+    document.getElementById('concurrency').value=dl.concurrency!=null?dl.concurrency:2;
+    document.getElementById('concurrencyLabel').textContent=dl.concurrency!=null?dl.concurrency:2;
+    document.getElementById('speedLimitKbps').value=dl.speedLimitKbps!=null?dl.speedLimitKbps:0;
+    document.getElementById('speedLimitLabel').textContent=kblabel(dl.speedLimitKbps,0,'무제한');
     document.getElementById('notifications').checked=dl.notifications!==false;
     // 토렌트 설정
-    document.getElementById('torrentUploadLimit').value=tr.torrentUploadLimit||512;
-    document.getElementById('torrentUploadLabel').textContent=(tr.torrentUploadLimit||512)+' KB/s';
-    document.getElementById('torrentDownloadLimit').value=tr.torrentDownloadLimit||0;
-    document.getElementById('torrentDownloadLabel').textContent=(tr.torrentDownloadLimit||0)>0?tr.torrentDownloadLimit+' KB/s':'무제한';
-    document.getElementById('torrentMaxActive').value=tr.torrentMaxActive||3;
-    document.getElementById('torrentMaxActiveLabel').textContent=tr.torrentMaxActive||3;
-    document.getElementById('torrentSeedRatio').value=tr.torrentSeedRatio||2.0;
-    document.getElementById('torrentSeedRatioLabel').textContent=(tr.torrentSeedRatio||2.0).toFixed(1);
+    document.getElementById('torrentUploadLimit').value=tr.torrentUploadLimit!=null?tr.torrentUploadLimit:512;
+    document.getElementById('torrentUploadLabel').textContent=kblabel(tr.torrentUploadLimit,512,'끔');
+    document.getElementById('torrentDownloadLimit').value=tr.torrentDownloadLimit!=null?tr.torrentDownloadLimit:0;
+    document.getElementById('torrentDownloadLabel').textContent=kblabel(tr.torrentDownloadLimit,0,'무제한');
+    document.getElementById('torrentMaxActive').value=tr.torrentMaxActive!=null?tr.torrentMaxActive:3;
+    document.getElementById('torrentMaxActiveLabel').textContent=tr.torrentMaxActive!=null?tr.torrentMaxActive:3;
+    document.getElementById('torrentSeedRatio').value=tr.torrentSeedRatio!=null?tr.torrentSeedRatio:2.0;
+    document.getElementById('torrentSeedRatioLabel').textContent=(tr.torrentSeedRatio!=null?tr.torrentSeedRatio:2.0).toFixed(1);
     document.getElementById('torrentDhtEnabled').checked=tr.torrentDhtEnabled!==false;
     document.getElementById('torrentPexEnabled').checked=tr.torrentPexEnabled!==false;
     document.getElementById('torrentSequentialDownload').checked=tr.torrentSequentialDownload===true;
-    document.getElementById('torrentListenPort').value=tr.torrentListenPort||6881;
+    document.getElementById('torrentListenPort').value=tr.torrentListenPort!=null?tr.torrentListenPort:6881;
     document.getElementById('torrentSavePath').value=tr.torrentSavePath||'/sdcard/Download/DroidRelay';
-    document.getElementById('torrentMinSeedWaitSec').value=tr.torrentMinSeedWaitSec||0;
+    document.getElementById('torrentMinSeedWaitSec').value=tr.torrentMinSeedWaitSec!=null?tr.torrentMinSeedWaitSec:0;
     document.getElementById('pathTestResult').textContent='';
     // Debrid 설정
     document.getElementById('debridEnabled').checked=db.debridEnabled===true;
@@ -1617,13 +1609,13 @@ function loadSettings(){
     if(tunnelSelectedProvider)highlightTunnelProvider(tunnelSelectedProvider);
     // 가드 설정
     document.getElementById('guardEnabled').checked=gd.guardEnabled===true;
-    document.getElementById('guardThermalLimit').value=gd.guardThermalLimit||50;
-    document.getElementById('guardThermalLabel').textContent=(gd.guardThermalLimit||50)+'°C';
-    document.getElementById('guardBatteryLimit').value=gd.guardBatteryLimit||20;
-    document.getElementById('guardBatteryLabel').textContent=(gd.guardBatteryLimit||20)+'%';
-    document.getElementById('guardStorageLimit').value=gd.guardStorageLimit||90;
-    document.getElementById('guardStorageLabel').textContent=(gd.guardStorageLimit||90)+'%';
-    document.getElementById('watchdogIntervalSec').value=gd.watchdogIntervalSec||60;
+    document.getElementById('guardThermalLimit').value=gd.guardThermalLimit!=null?gd.guardThermalLimit:50;
+    document.getElementById('guardThermalLabel').textContent=(gd.guardThermalLimit!=null?gd.guardThermalLimit:50)+'°C';
+    document.getElementById('guardBatteryLimit').value=gd.guardBatteryLimit!=null?gd.guardBatteryLimit:20;
+    document.getElementById('guardBatteryLabel').textContent=(gd.guardBatteryLimit!=null?gd.guardBatteryLimit:20)+'%';
+    document.getElementById('guardStorageLimit').value=gd.guardStorageLimit!=null?gd.guardStorageLimit:90;
+    document.getElementById('guardStorageLabel').textContent=(gd.guardStorageLimit!=null?gd.guardStorageLimit:90)+'%';
+    document.getElementById('watchdogIntervalSec').value=gd.watchdogIntervalSec!=null?gd.watchdogIntervalSec:60;
     document.getElementById('forceHttpsRedirect').checked=gd.forceHttpsRedirect===true;
     // MCP 설정
     document.getElementById('mcpPrivacyMode').checked=mc.mcpPrivacyMode===true;
@@ -1636,8 +1628,8 @@ function loadSettings(){
     document.getElementById('scheduleCron').value=sch.scheduleCron||'';
     document.getElementById('scheduleWifiOnly').checked=sch.scheduleWifiOnly!==false;
     document.getElementById('scheduleChargingOnly').checked=sch.scheduleChargingOnly===true;
-    document.getElementById('scheduleBatteryMin').value=sch.scheduleBatteryMin||30;
-    document.getElementById('scheduleBatteryLabel').textContent=(sch.scheduleBatteryMin||30)+'%';
+    document.getElementById('scheduleBatteryMin').value=sch.scheduleBatteryMin!=null?sch.scheduleBatteryMin:30;
+    document.getElementById('scheduleBatteryLabel').textContent=(sch.scheduleBatteryMin!=null?sch.scheduleBatteryMin:30)+'%';
     if(sch.scheduleCron){
       var el=document.getElementById('scheduleStatus');
       el.textContent='크론: "'+sch.scheduleCron+'"'+(sch.cronValid?' ✓':' ✗');
@@ -1709,45 +1701,42 @@ function saveSpeedLimit(dl, ul){
   var body={};
   if(dl!==undefined)body.maxDownloadBps=dl;
   if(ul!==undefined)body.maxUploadBps=ul;
-  fetch('/api/settings/speed-limit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
-    .then(function(r){return r.json();})
+  apiPost('/api/settings/speed-limit',body)
     .then(function(d){if(d.ok)loadSettings();else alert('저장 실패');})
     .catch(function(e){alert('저장 실패: '+e);});
 }
 
 function saveDownloadSettings(){
   var body={
-    concurrency:parseInt(document.getElementById('concurrency').value)||2,
-    speedLimitKbps:parseInt(document.getElementById('speedLimitKbps').value)||0,
+    concurrency:num(document.getElementById('concurrency').value,2),
+    speedLimitKbps:num(document.getElementById('speedLimitKbps').value,0),
     notifications:document.getElementById('notifications').checked
   };
   document.getElementById('concurrencyLabel').textContent=body.concurrency;
-  document.getElementById('speedLimitLabel').textContent=body.speedLimitKbps>0?body.speedLimitKbps+' KB/s':'무제한';
-  fetch('/api/settings/download',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
-    .then(function(r){return r.json();})
+  document.getElementById('speedLimitLabel').textContent=kblabel(body.speedLimitKbps,0,'무제한');
+  apiPost('/api/settings/download',body)
     .then(function(d){if(!d.ok)alert('저장 실패');})
     .catch(function(e){alert('저장 실패: '+e);});
 }
 
 function saveTorrentSettings(){
   var body={
-    torrentUploadLimit:parseInt(document.getElementById('torrentUploadLimit').value)||512,
-    torrentDownloadLimit:parseInt(document.getElementById('torrentDownloadLimit').value)||0,
-    torrentMaxActive:parseInt(document.getElementById('torrentMaxActive').value)||3,
-    torrentSeedRatio:parseFloat(document.getElementById('torrentSeedRatio').value)||2.0,
+    torrentUploadLimit:num(document.getElementById('torrentUploadLimit').value,512),
+    torrentDownloadLimit:num(document.getElementById('torrentDownloadLimit').value,0),
+    torrentMaxActive:num(document.getElementById('torrentMaxActive').value,3),
+    torrentSeedRatio:num(document.getElementById('torrentSeedRatio').value,2.0),
     torrentDhtEnabled:document.getElementById('torrentDhtEnabled').checked,
     torrentPexEnabled:document.getElementById('torrentPexEnabled').checked,
     torrentSequentialDownload:document.getElementById('torrentSequentialDownload').checked,
-    torrentListenPort:parseInt(document.getElementById('torrentListenPort').value)||6881,
+    torrentListenPort:num(document.getElementById('torrentListenPort').value,6881),
     torrentSavePath:document.getElementById('torrentSavePath').value.trim(),
-    torrentMinSeedWaitSec:parseInt(document.getElementById('torrentMinSeedWaitSec').value)||0
+    torrentMinSeedWaitSec:num(document.getElementById('torrentMinSeedWaitSec').value,0)
   };
-  document.getElementById('torrentUploadLabel').textContent=body.torrentUploadLimit+' KB/s';
-  document.getElementById('torrentDownloadLabel').textContent=body.torrentDownloadLimit>0?body.torrentDownloadLimit+' KB/s':'무제한';
+  document.getElementById('torrentUploadLabel').textContent=kblabel(body.torrentUploadLimit,512,'끔');
+  document.getElementById('torrentDownloadLabel').textContent=kblabel(body.torrentDownloadLimit,0,'무제한');
   document.getElementById('torrentMaxActiveLabel').textContent=body.torrentMaxActive;
   document.getElementById('torrentSeedRatioLabel').textContent=body.torrentSeedRatio.toFixed(1);
-  fetch('/api/settings/torrent',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
-    .then(function(r){return r.json();})
+  apiPost('/api/settings/torrent',body)
     .then(function(d){if(d.ok){showDlToast('토렌트 설정 저장됨');}else alert('저장 실패: '+(d.error||''));})
     .catch(function(e){alert('저장 실패: '+e);});
 }
@@ -1878,6 +1867,10 @@ function resetSettings(category){
       debounceTimers[key]=setTimeout(fn,500);
     };
   }
+  document.getElementById('maxDownloadMbps')?.addEventListener('input',function(){document.getElementById('maxDownloadLabel').textContent=this.value+' Mbps';});
+  document.getElementById('maxUploadMbps')?.addEventListener('input',function(){document.getElementById('maxUploadLabel').textContent=this.value+' Mbps';});
+  document.getElementById('maxDownloadMbps')?.addEventListener('change',autoSave('sl',function(){onSpeedLimitChange('dl');}));
+  document.getElementById('maxUploadMbps')?.addEventListener('change',autoSave('sl',function(){onSpeedLimitChange('ul');}));
   document.getElementById('concurrency')?.addEventListener('change',autoSave('dl',saveDownloadSettings));
   document.getElementById('speedLimitKbps')?.addEventListener('change',autoSave('dl',saveDownloadSettings));
   document.getElementById('notifications')?.addEventListener('change',autoSave('dl',saveDownloadSettings));
@@ -1909,8 +1902,7 @@ function highlightDebridProvider(provider){
 }
 function setDebridProvider(provider){
   highlightDebridProvider(provider);
-  fetch('/api/settings/debrid',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({debridProvider:provider})})
-    .then(function(r){return r.json();})
+  apiPost('/api/settings/debrid',{debridProvider:provider})
     .then(function(d){if(d.ok)showDlToast('제공자 설정됨: '+provider);})
     .catch(function(e){alert('설정 실패: '+e);});
 }
@@ -1919,8 +1911,7 @@ function saveDebridSettings(){
     debridEnabled:document.getElementById('debridEnabled').checked,
     debridApiKey:document.getElementById('debridApiKey').value.trim()
   };
-  fetch('/api/settings/debrid',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
-    .then(function(r){return r.json();})
+  apiPost('/api/settings/debrid',body)
     .then(function(d){if(d.ok)showDlToast('Debrid 설정 저장됨');else alert('저장 실패: '+(d.error||''));})
     .catch(function(e){alert('저장 실패: '+e);});
 }
@@ -1953,8 +1944,7 @@ function saveTunnelSettings(){
     tunnelEnabled:document.getElementById('tunnelEnabled').checked,
     tunnelProvider:tunnelSelectedProvider
   };
-  fetch('/api/settings/tunnel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
-    .then(function(r){return r.json();})
+  apiPost('/api/settings/tunnel',body)
     .then(function(d){if(d.ok){showDlToast('터널 설정 저장됨');checkTunnelStatus();}else alert('저장 실패: '+(d.error||''));})
     .catch(function(e){alert('저장 실패: '+e);});
 }
@@ -1975,22 +1965,21 @@ function checkTunnelStatus(){
 
 // ── 가드 데몬 설정 ──
 function saveGuardSettings(){
-  var watchdogSec=parseInt(document.getElementById('watchdogIntervalSec').value)||60;
+  var watchdogSec=num(document.getElementById('watchdogIntervalSec').value,60);
   if(watchdogSec<15)watchdogSec=15;
   if(watchdogSec>3600)watchdogSec=3600;
   var body={
     guardEnabled:document.getElementById('guardEnabled').checked,
-    guardThermalLimit:parseInt(document.getElementById('guardThermalLimit').value)||50,
-    guardBatteryLimit:parseInt(document.getElementById('guardBatteryLimit').value)||20,
-    guardStorageLimit:parseInt(document.getElementById('guardStorageLimit').value)||90,
+    guardThermalLimit:num(document.getElementById('guardThermalLimit').value,50),
+    guardBatteryLimit:num(document.getElementById('guardBatteryLimit').value,20),
+    guardStorageLimit:num(document.getElementById('guardStorageLimit').value,90),
     watchdogIntervalSec:watchdogSec,
     forceHttpsRedirect:document.getElementById('forceHttpsRedirect').checked
   };
   document.getElementById('guardThermalLabel').textContent=body.guardThermalLimit+'°C';
   document.getElementById('guardBatteryLabel').textContent=body.guardBatteryLimit+'%';
   document.getElementById('guardStorageLabel').textContent=body.guardStorageLimit+'%';
-  fetch('/api/settings/guard',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
-    .then(function(r){return r.json();})
+  apiPost('/api/settings/guard',body)
     .then(function(d){if(d.ok)showDlToast('가드 설정 저장됨');else alert('저장 실패');})
     .catch(function(e){alert('저장 실패: '+e);});
 }
@@ -2020,10 +2009,9 @@ function saveMcpSettings(){
     mcpPrivacyMode:document.getElementById('mcpPrivacyMode').checked,
     mcpToolsDisabled:disabled
   };
-  fetch('/api/settings/mcp',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
-    .then(function(r){return r.json();})
-    .then(function(d){if(d.ok) toast('MCP 권한 저장 완료');})
-    .catch(function(e){toast('저장 실패: '+e.message);});
+  apiPost('/api/settings/mcp',body)
+    .then(function(d){if(d.ok) showDlToast('MCP 권한 저장 완료');})
+    .catch(function(e){showDlToast('저장 실패: '+e.message);});
 }
 
 function saveScheduleSettings(){
@@ -2032,13 +2020,12 @@ function saveScheduleSettings(){
     scheduleCron:document.getElementById('scheduleCron').value.trim(),
     scheduleWifiOnly:document.getElementById('scheduleWifiOnly').checked,
     scheduleChargingOnly:document.getElementById('scheduleChargingOnly').checked,
-    scheduleBatteryMin:parseInt(document.getElementById('scheduleBatteryMin').value)
+    scheduleBatteryMin:num(document.getElementById('scheduleBatteryMin').value,30)
   };
-  fetch('/api/settings/schedule',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
-    .then(function(r){return r.json();})
+  apiPost('/api/settings/schedule',body)
     .then(function(d){
       if(d.ok){
-        toast('스케줄 저장 완료');
+        showDlToast('스케줄 저장 완료');
         var el=document.getElementById('scheduleStatus');
         if(body.scheduleCron){
           el.textContent='다음 실행: 크론 "'+body.scheduleCron+'"';
@@ -2049,7 +2036,7 @@ function saveScheduleSettings(){
         }
       }
     })
-    .catch(function(e){toast('저장 실패: '+e.message);});
+    .catch(function(e){showDlToast('저장 실패: '+e.message);});
 }
 
 function detectStorage(){

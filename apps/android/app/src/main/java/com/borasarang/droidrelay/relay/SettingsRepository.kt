@@ -31,7 +31,7 @@ data class AppSettings(
     val port: Int = 8080,
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
     val dynamicColor: Boolean = true,
-    val concurrency: Int = 1,
+    val concurrency: Int = SettingsConstraints.DEFAULT_CONCURRENCY,
     val autoStart: Boolean = true,
     val notifications: Boolean = true,
     val webAuthEnabled: Boolean = false,
@@ -43,7 +43,7 @@ data class AppSettings(
     val allowedIps: Set<String> = emptySet(),
     val accessScope: AccessScope = AccessScope.SUBNET_ONLY,
     val torrentSavePath: String = "",
-    val torrentUploadLimit: Long = 0L,
+    val torrentUploadLimit: Long = SettingsConstraints.DEFAULT_TORRENT_UPLOAD_KBPS.toLong(),
     val torrentDownloadLimit: Long = 0L,
     val torrentMaxActive: Int = 3,
     val torrentSeedRatio: Float = 2.0f,
@@ -154,7 +154,8 @@ class SettingsRepository(private val context: Context) {
             themeMode = runCatching { ThemeMode.valueOf(p[Keys.THEME] ?: ThemeMode.SYSTEM.name) }
                 .getOrDefault(ThemeMode.SYSTEM),
             dynamicColor = p[Keys.DYNAMIC] ?: true,
-            concurrency = (p[Keys.CONCURRENCY] ?: 1).coerceIn(1, 4),
+            concurrency = (p[Keys.CONCURRENCY] ?: SettingsConstraints.DEFAULT_CONCURRENCY)
+                .coerceIn(SettingsConstraints.CONCURRENCY_MIN, SettingsConstraints.CONCURRENCY_MAX),
             autoStart = p[Keys.AUTO_START] ?: true,
             notifications = p[Keys.NOTIFICATIONS] ?: true,
             webAuthEnabled = p[Keys.WEB_AUTH] ?: false,
@@ -167,7 +168,7 @@ class SettingsRepository(private val context: Context) {
             accessScope = runCatching { AccessScope.valueOf(p[Keys.ACCESS_SCOPE] ?: AccessScope.SUBNET_ONLY.name) }
                 .getOrDefault(AccessScope.SUBNET_ONLY),
             torrentSavePath = p[Keys.TORRENT_SAVE_PATH] ?: "",
-            torrentUploadLimit = (p[Keys.TORRENT_UPLOAD_LIMIT] ?: 0).toLong().coerceAtLeast(0),
+            torrentUploadLimit = (p[Keys.TORRENT_UPLOAD_LIMIT] ?: SettingsConstraints.DEFAULT_TORRENT_UPLOAD_KBPS).toLong().coerceAtLeast(0),
             torrentDownloadLimit = (p[Keys.TORRENT_DOWNLOAD_LIMIT] ?: 0).toLong().coerceAtLeast(0),
             torrentMaxActive = (p[Keys.TORRENT_MAX_ACTIVE] ?: 3).coerceIn(1, 10),
             torrentSeedRatio = (p[Keys.TORRENT_SEED_RATIO] ?: 200).toInt().coerceIn(0, 1000) / 100f,
@@ -213,7 +214,9 @@ class SettingsRepository(private val context: Context) {
         context.settingsDataStore.edit { it[Keys.DYNAMIC] = b }
 
     suspend fun setConcurrency(n: Int) =
-        context.settingsDataStore.edit { it[Keys.CONCURRENCY] = n.coerceIn(1, 4) }
+        context.settingsDataStore.edit {
+            it[Keys.CONCURRENCY] = n.coerceIn(SettingsConstraints.CONCURRENCY_MIN, SettingsConstraints.CONCURRENCY_MAX)
+        }
 
     suspend fun setAutoStart(b: Boolean) =
         context.settingsDataStore.edit { it[Keys.AUTO_START] = b }

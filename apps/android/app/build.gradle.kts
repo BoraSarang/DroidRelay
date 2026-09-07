@@ -13,6 +13,17 @@ val keystoreProps = Properties().apply {
     }
 }
 
+// HTTPS 자체서명 키스토어 비밀번호 — tls.properties (없으면 빌드 실패, 시크릿 하드코딩 금지)
+val tlsPropsFile = rootProject.file("tls.properties")
+val tlsKeystorePassword: String =
+    if (tlsPropsFile.exists()) {
+        Properties().apply { tlsPropsFile.inputStream().use { load(it) } }
+            .getProperty("tlsKeystorePassword", "")
+            .also { require(it.isNotEmpty()) { "tls.properties에 tlsKeystorePassword가 비어 있음" } }
+    } else {
+        throw GradleException("tls.properties 없음 — apps/android/tls.properties에 tlsKeystorePassword 기록 필요")
+    }
+
 android {
     namespace = "com.borasarang.droidrelay"
     compileSdk = 36
@@ -21,8 +32,9 @@ android {
         applicationId = "com.borasarang.droidrelay"
         minSdk = 26
         targetSdk = 36
-        versionCode = 23
-        versionName = "0.16.5"
+        versionCode = 25
+        versionName = "0.17.0"
+        buildConfigField("String", "TLS_KEYSTORE_PASSWORD", "\"$tlsKeystorePassword\"")
     }
 
     signingConfigs {

@@ -1,5 +1,34 @@
 # Changelog
 
+## [0.17.0] - 2026-09-07
+
+### Added/Fixed [android] — T-937 웹 토렌트 삭제 UX + T-938 폴더 다운로드
+- **T-937 웹 삭제 컨펌**: 토렌트 삭제 버튼 즉시 삭제 → `confirmPopup('토렌트 삭제')` 경유. 본문 `'이름' torrent를 목록에서 삭제할까요?` + 미완료 시 `다운로드 중이던 파일도 함께 삭제됩니다.` (앱 문구와 정합)
+- **T-937 버튼 앱 통일**: 추출중 일시정지 추가·실패 재개 추가·시딩 일시정지 제거 (앱 TorrentScreen 규칙과 동일)
+- **T-937 잔존 정리**: 미완료 삭제 시 `saveDir/<infohash>/` 후보 디렉토리도 제거 (추출중 단계 job.name 불일치로 남던 쓰레기 해소)
+- **T-938 폴더 다운로드**: `GET /dl-folder/{name...}` ZIP 실시간 스트리밍(임시파일 없음·canonical 탈출 차단·한글 UTF-8) + 웹 폴더행 📦 버튼 (`폴더명.zip`)
+- **T-939 폴더 다운로드 속도 개선**: 영상 등 기압축 파일 재압축이 CPU 병목 → `ZipOutputStream.setLevel(0)` 패스스루 + 256KB 버퍼(`BufferedOutputStream`) + 완료 로그(파일 수·원본 MB·소요 s·MB/s). 버튼/파일명/내부 구조 변경 없음
+- **검증**: compileDebugKotlin + ktlint GREEN, assembleDebug 완료. 실기기 설치·동작 검증 대기 (기기 미연결)
+- **T-939 실기기 실측(2026-09-07)**: 850.8MB 폴더 → 서버 15.7초(54.1MB/s), 맥 curl 12.5초(71MB/s·570Mbps·HTTP 200). Wi-Fi 실효 상한 근처로 정상 확정
+
+### Refactor [android] — 리팩토링 4묶음 (PLAN_v0.17_refactor_android)
+- **Phase1 긴급 버그(T-933)**: 웹 MCP/스케줄 저장 `toast()` 미정의 → `showDlToast` 교체; 숫자 `||기본값` falsy로 0(끔/무제한) 소실 → `!=null` 판별 + `num()` NaN 가드; 전역 속도 슬라이더 저장 바인딩 누락 → input/change 바인딩; TLS 키스토어 PW 하드코딩 → `tls.properties`+`BuildConfig.TLS_KEYSTORE_PASSWORD` (git 미추적); DeviceGate `f.get()` 무타임아웃 → 60초 타임아웃 후 거부
+- **Phase2 T-931 후속(T-934)**: 3종 alert handle transient 수명 주석 명시; FINISHED 파일 이동+영속을 게이트 밖으로; `register/unregisterMapping` 단일 헬퍼 (cancel 원자화·polling 무효제거 job.infoHash 폴백·수동매핑 3곳 통합·removedHash 제거); apply* 3종 session null 체크 게이트 안; seedWaitSince 누수 정리
+- **Phase3 설정 단일화(T-935)**: `SettingsConstraints` 단일 진실 (업로드 0~1024/step32/기본 512·다운로드 0~20480/step1024/기본 0·동시수 1~4/기본 2·최대활성 1~10/기본 3·upload/downloadLabel·randomEphemeralPort); 앱 속도 UI 프리셋→연속 슬라이더 통일; Repo 기본값 512/2 정합; 서버/앱 reset 리터럴 상수화; 웹 `kblabel()` 0=끔/무제한 표시
+- **Phase4 구조 분리(T-936)**: RelayServer 1897→519줄 (TorrentRoutes/JobRoutes/SettingsRoutes/StorageRoutes+StorageGuard/DebugRoutes, serveFile·toJson internal 승격); WebAssets switchTab 중복 삭제·`apiGet/apiPost` 도입(save* 8함수 교체); error_message_ko.json 미등록 8종 추가 + Stor 태그 교정
+- **검증**: compileDebugKotlin + ktlint(스크립트 제외) GREEN, assembleDebug 설치. 실기기 API 스모크는 앱 실행 후 진행 예정
+- **버전**: versionCode 24 → **25**, versionName **0.17.0**
+
+## [0.16.6] - 2026-09-06
+
+### Fixed [android] — magnet 추가 시 SIGSEGV 근본 원인(alert.handle() dangling) + libtorrent JNI 직렬화 게이트
+- **재현(크래시 2건 분석)**: magnet 추가 → ADD_TORRENT 매핑 수백 ms 후 netty 웹 스레드(`eventLoopGroupP`)에서 SIGSEGV. v0.16.5는 `torrent_status::state()`(status 경유), v0.16.6 게이트 적용 후엔 `torrent_handle_is_valid`(`pieceInfo → torrentFile()`)로 crash 지점 변경 — **스레드 경합이 아니라 native handle 수명 문제**임을 확인
+- **근본 원인(libtorrent4j SWIG 소유권)**: `AddTorrentAlert.handle()`은 `new torrent_handle(cPtr, false)`(swigCMemOwn=false) — **alert C++ 객체 내부 멤버 메모리를 가리키는 참조**를 반환. 이를 `handleMap`에 long-lived로 보관하면 alert가 `pop_alerts` 후 소멸되며 **dangling** → 이후 장기 보관된 handle로 JNI 호출 시 `__shared_weak_count::lock()` UAF → SIGSEGV. 반면 `session.find(hash)`는 `new torrent_handle(cPtr, true)`로 **독립 heap 카피**를 만들며 세션·알림 수명과 무관하게 안전(공식 문서 "alert handle may be invalid" + 알려진 이슈 확인). T-930(T-996) 게이트 serialization만으로는 UAF를 막을 수 없음
+- **수정(T-931)**: `ADD_TORRENT`에서 alert handle을 저장하지 않고 `session.find(Sha1Hash.parseHex(hash))` 기반 handle로 `handleMap`에 보관(`session.find` null이면 폴링 자동 매핑 대기). alert 내 handle은 id/hash 추출(`infoHash()`)에만 사용 → alert 생존 기간 내 일시 사용으로 제한
+- **함께 적용**: T-930 libtorrent JNI 전체 ReentrantLock 직렬화(sessionGate + withGate/withGateAlert(tryLock 300ms)), RelayService `onDestroy/onTaskRemoved`의 `stopForeground(STOP_FOREGROUND_REMOVE)`(FGS DidNotStopInTime 방어), 업로드 속도 프리셋 32KB/s 추가(설정 화면)
+- **검증**: assembleDebug GREEN → `R5CT215F4QK` debug 재설치(데이터 기존 유지, 서명 동일 업그레이드). **이전 크래시를 일으킨 동일 magnet으로 재현 테스트**: 취소→재추가→즉시 폴링 20회 연속 HTTP 200 + 프로세스 생존, `ADD_TORRENT 매핑(id=find 기반)` 로그 확인, 메타데이터 수신 → DOWNLOADING → pieceInfo(5/1267) 정상
+- **버전**: versionCode 24, versionName **0.16.6** (현재 디버그 설치본)
+
 ## [0.16.5] - 2026-09-05
 
 ### Fixed [android] — v0.16.4 방어 코드의 한계 극복: FGS 5초 의무 타임아웃 크래시 + 배터리 UI 개선

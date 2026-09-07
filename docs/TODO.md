@@ -301,5 +301,15 @@ T-001~T-008 전부 완료 (커밋 7574486).
 | T-927 | v0.16.2(versionCode 20) 검증(unit/ktlint/assembleRelease) + 실기기 인플레이스 설치 + CHANGELOG/TODO 갱신 | ✅ |
 | T-928 | **다운로드 QR 확대/축소 토글** — QR 탭 → 전체 화면 반투명 오버레이에 확대 표시(scale 모션), 화면 아무 곳/닫기 버튼 재클릭 시 축소. qr 비트맵 1회 캐시 재사용 | ✅ |
 | T-929 | **FGS 크래시 루프 수정(v0.16.4)** — 백그라운드 재시작 시 `ForegroundServiceStartNotAllowedException` → `startInForeground()` try-catch + onStartCommand 재시도 + start() 안전화. 배터리 최적화 예외 UI(상태+무제한 허용 요청 버튼) 추가 | ✅ |
+| T-930 | **libtorrent JNI 직렬화 게이트(v0.16.6)** — ReentrantLock sessionGate로 모든 세션/핸들 접근 직렬화 + alert 콜백 tryLock(300ms) → GC가 netty 스레드를 정리하지 못해 크래시 지속 확인 | ✅ ⚠️ |
+| T-931 | **alert.handle() dangling root fix(v0.16.6)** — `AddTorrentAlert.handle()`은 alert C++ 객체 내부 메모리 참조(swigCMemOwn=false, GC 후 dangling) → `handleMap` 장기 보관을 `session.find(hash)` 기반 독립 heap 카피로 교체. 실기기 동일 magnet 재현 테스트 20회 연속 200 + 프로세스 생존 | ✅ |
+| T-932 | **웹 토렌트 업로드 32KB/s 선택** — 웹 설정 `torrentUploadLimit` 슬라이더 step 64 → 32 (앱 SettingsScreen 프리셋에 맞춘 동일 단위) | ✅ |
+| T-933 | **Phase1 긴급 버그** — 웹 toast 미정의·`||`falsy 0소실·전역슬라이더 바인딩·키스토어PW BuildConfig·DeviceGate 타임아웃 (PLAN_v0.17) | ✅ |
+| T-934 | **Phase2 T-931 후속 안정화** — 3종 alert transient 명시·FINISHED IO 게이트 밖·register/unregisterMapping·session 체크 게이트 안·seedWait 정리 | ✅ |
+| T-935 | **Phase3 설정 단일화** — SettingsConstraints 단일 진실·앱 슬라이더 통일·Repo 기본값 512/2·reset 상수화·웹 kblabel | ✅ |
+| T-936 | **Phase4 구조 분리** — RelayServer 1897→519 (Torrent/Job/Settings/Storage/DebugRoutes+StorageGuard)·WebAssets 중복삭제·apiGet/apiPost·num/kblabel·에러코드 8종 등록 | ✅ |
+| T-937 | **웹 토렌트 삭제 UX + 잔존 정리** — 삭제 컨펌('목록에서 삭제+파일 동반안내')·버튼 앱 통일(추출중 일시정지·실패 재개·시딩 삭제만)·cancel() infohash 잔존 디렉토리 정리 | 🔄 |
+| T-938 | **보관함 폴더 다운로드** — `GET /dl-folder/` ZIP 실시간 스트리밍 + 웹 폴더행 📦 버튼 | 🔄 |
+| T-939 | **폴더 다운로드 속도 개선** — `setLevel(0)` 패스스루 + 256KB 버퍼 + 계측 로그 (PLAN_v0.17_dl-folder-speed) | ✅ |
 
 > v0.16.0(설정 1차)·v0.16.1(디자인 개편) 실기기 **직접 확인 대기**(사용자). 이후 **2차 확장** 예약: 스케줄(ScheduleRepository) / Debrid / 터널 / MCP / 기본값 복원. RSS CRUD는 별도 저장소(2차와 분리 검토).

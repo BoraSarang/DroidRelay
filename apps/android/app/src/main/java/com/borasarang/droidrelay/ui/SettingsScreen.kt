@@ -47,6 +47,7 @@ import com.borasarang.droidrelay.relay.DebugLogger
 import com.borasarang.droidrelay.relay.RelayApp
 import com.borasarang.droidrelay.relay.RelayService
 import com.borasarang.droidrelay.relay.ServerState
+import com.borasarang.droidrelay.relay.SettingsConstraints
 import com.borasarang.droidrelay.relay.SettingsRepository
 import com.borasarang.droidrelay.relay.ThemeMode
 import com.borasarang.droidrelay.relay.TunnelProvider
@@ -355,53 +356,48 @@ fun SettingsScreen(onPortChanged: (Int) -> Unit) {
 
         HorizontalDivider(color = cs.outlineVariant)
 
-        // ── Torrent ──
-        val uploadPresets = remember { listOf(0L, 64L, 256L, 512L, 1024L) } // KB/s
-        val uploadLabels = listOf("끔", "64", "256", "512", "1M")
-        val downloadPresets = remember { listOf(0L, 1024L, 5120L, 10240L, 20480L) } // KB/s
-        val downloadLabels = listOf("무제한", "1M", "5M", "10M", "20M")
-
+        // ── Torrent (웹 슬라이더와 동일 단위 — SettingsConstraints 단일 진실, T-935) ──
         SettingSection("Torrent") {
-            // 업로드 속도 (0 = 업로드 사용 안 함)
+            // 업로드 속도 (0 = 끔)
             Text(
-                "기본 업로드 속도: ${if (s.torrentUploadLimit == 0L) "사용 안 함" else "${s.torrentUploadLimit} KB/s"}",
+                "기본 업로드 속도: ${SettingsConstraints.uploadLabel(s.torrentUploadLimit)}",
                 color = cs.onSurface,
             )
             Slider(
-                value = uploadPresets.indexOfFirst { it == s.torrentUploadLimit }.coerceAtLeast(0).toFloat(),
+                value = s.torrentUploadLimit.toFloat(),
                 onValueChange = { v ->
-                    val idx = v.roundToInt().coerceIn(0, uploadPresets.lastIndex)
-                    kotlinx.coroutines.MainScope().launch { repo.setTorrentUploadLimit(uploadPresets[idx].toInt()) }
+                    val kbps = (v.roundToInt() / SettingsConstraints.TORRENT_UPLOAD_STEP * SettingsConstraints.TORRENT_UPLOAD_STEP)
+                        .coerceIn(SettingsConstraints.TORRENT_UPLOAD_MIN, SettingsConstraints.TORRENT_UPLOAD_MAX)
+                    kotlinx.coroutines.MainScope().launch { repo.setTorrentUploadLimit(kbps) }
                 },
-                valueRange = 0f..uploadPresets.lastIndex.toFloat(),
-                steps = uploadPresets.size - 2,
+                valueRange = SettingsConstraints.TORRENT_UPLOAD_MIN.toFloat()..SettingsConstraints.TORRENT_UPLOAD_MAX.toFloat(),
+                steps = SettingsConstraints.TORRENT_UPLOAD_MAX / SettingsConstraints.TORRENT_UPLOAD_STEP - 1,
             )
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                uploadLabels.forEach { label ->
-                    Text(label, style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
-                }
+                Text("끔", style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
+                Text("1M", style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
             }
 
             Spacer(Modifier.height(8.dp))
 
             // 다운로드 속도 (0 = 무제한)
             Text(
-                "기본 다운로드 속도: ${if (s.torrentDownloadLimit == 0L) "무제한" else "${s.torrentDownloadLimit} KB/s"}",
+                "기본 다운로드 속도: ${SettingsConstraints.downloadLabel(s.torrentDownloadLimit)}",
                 color = cs.onSurface,
             )
             Slider(
-                value = downloadPresets.indexOfFirst { it == s.torrentDownloadLimit }.coerceAtLeast(0).toFloat(),
+                value = s.torrentDownloadLimit.toFloat(),
                 onValueChange = { v ->
-                    val idx = v.roundToInt().coerceIn(0, downloadPresets.lastIndex)
-                    kotlinx.coroutines.MainScope().launch { repo.setTorrentDownloadLimit(downloadPresets[idx].toInt()) }
+                    val kbps = (v.roundToInt() / SettingsConstraints.TORRENT_DOWNLOAD_STEP * SettingsConstraints.TORRENT_DOWNLOAD_STEP)
+                        .coerceIn(SettingsConstraints.TORRENT_DOWNLOAD_MIN, SettingsConstraints.TORRENT_DOWNLOAD_MAX)
+                    kotlinx.coroutines.MainScope().launch { repo.setTorrentDownloadLimit(kbps) }
                 },
-                valueRange = 0f..downloadPresets.lastIndex.toFloat(),
-                steps = downloadPresets.size - 2,
+                valueRange = SettingsConstraints.TORRENT_DOWNLOAD_MIN.toFloat()..SettingsConstraints.TORRENT_DOWNLOAD_MAX.toFloat(),
+                steps = SettingsConstraints.TORRENT_DOWNLOAD_MAX / SettingsConstraints.TORRENT_DOWNLOAD_STEP - 1,
             )
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                downloadLabels.forEach { label ->
-                    Text(label, style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
-                }
+                Text("무제한", style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
+                Text("20M", style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
             }
 
             // 최대 활성 torrent
@@ -409,8 +405,8 @@ fun SettingsScreen(onPortChanged: (Int) -> Unit) {
             Slider(
                 value = s.torrentMaxActive.toFloat(),
                 onValueChange = { kotlinx.coroutines.MainScope().launch { repo.setTorrentMaxActive(it.toInt()) } },
-                valueRange = 1f..10f,
-                steps = 8,
+                valueRange = SettingsConstraints.TORRENT_MAX_ACTIVE_MIN.toFloat()..SettingsConstraints.TORRENT_MAX_ACTIVE_MAX.toFloat(),
+                steps = SettingsConstraints.TORRENT_MAX_ACTIVE_MAX - SettingsConstraints.TORRENT_MAX_ACTIVE_MIN - 1,
             )
 
             // 시드 ratio
@@ -843,39 +839,37 @@ private fun resetSettings(ctx: android.content.Context, repo: SettingsRepository
     DebugLogger.w("Settings", "설정 기본값 복원 진행 category=$category")
     when (category) {
         "download" -> kotlinx.coroutines.MainScope().launch {
-            repo.setConcurrency(2)
+            repo.setConcurrency(SettingsConstraints.DEFAULT_CONCURRENCY)
             repo.setSpeedLimit(0)
             repo.setNotifications(true)
             RelayApp.get(ctx).applySettings(repo.firstBlocking())
         }
         "torrent" -> kotlinx.coroutines.MainScope().launch {
-            repo.setTorrentUploadLimit(512)
-            repo.setTorrentDownloadLimit(0)
-            repo.setTorrentMaxActive(3)
+            repo.setTorrentUploadLimit(SettingsConstraints.DEFAULT_TORRENT_UPLOAD_KBPS)
+            repo.setTorrentDownloadLimit(SettingsConstraints.DEFAULT_TORRENT_DOWNLOAD_KBPS)
+            repo.setTorrentMaxActive(SettingsConstraints.DEFAULT_TORRENT_MAX_ACTIVE)
             repo.setTorrentSeedRatio(2.0f)
             repo.setTorrentDhtEnabled(true)
             repo.setTorrentPexEnabled(true)
-            val randomPort = (49152 + (Math.random() * 16384).toInt()).coerceIn(49152, 65535)
-            repo.setTorrentListenPort(randomPort)
+            repo.setTorrentListenPort(SettingsConstraints.randomEphemeralPort())
             repo.setTorrentSavePath("/sdcard/Download/DroidRelay")
             RelayApp.getTorrent(ctx).applySettings(repo.firstBlocking())
         }
         "all" -> {
             kotlinx.coroutines.MainScope().launch {
-                repo.setConcurrency(2)
+                repo.setConcurrency(SettingsConstraints.DEFAULT_CONCURRENCY)
                 repo.setSpeedLimit(0)
                 repo.setNotifications(true)
                 RelayApp.get(ctx).applySettings(repo.firstBlocking())
             }
             kotlinx.coroutines.MainScope().launch {
-                repo.setTorrentUploadLimit(512)
-                repo.setTorrentDownloadLimit(0)
-                repo.setTorrentMaxActive(3)
+                repo.setTorrentUploadLimit(SettingsConstraints.DEFAULT_TORRENT_UPLOAD_KBPS)
+                repo.setTorrentDownloadLimit(SettingsConstraints.DEFAULT_TORRENT_DOWNLOAD_KBPS)
+                repo.setTorrentMaxActive(SettingsConstraints.DEFAULT_TORRENT_MAX_ACTIVE)
                 repo.setTorrentSeedRatio(2.0f)
                 repo.setTorrentDhtEnabled(true)
                 repo.setTorrentPexEnabled(true)
-                val randomPort = (49152 + (Math.random() * 16384).toInt()).coerceIn(49152, 65535)
-                repo.setTorrentListenPort(randomPort)
+                repo.setTorrentListenPort(SettingsConstraints.randomEphemeralPort())
                 repo.setTorrentSavePath("/sdcard/Download/DroidRelay")
                 RelayApp.getTorrent(ctx).applySettings(repo.firstBlocking())
             }

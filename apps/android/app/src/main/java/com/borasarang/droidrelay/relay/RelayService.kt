@@ -9,6 +9,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
+import androidx.core.app.ServiceCompat
 import com.borasarang.droidrelay.R
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -290,6 +291,11 @@ class RelayService : Service() {
 
     override fun onDestroy() {
         DebugLogger.i(TAG, "서비스 종료 시작 — 컴포넌트 정리")
+        // FGS로 승격된 경우 반드시 제거 — 누락 시 ForegroundServiceDidNotStopInTimeException(E-AND-SRV-0110)
+        if (isForeground) {
+            ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+            isForeground = false
+        }
         server?.stop()
         server = null
         networkMonitor?.unregister()
@@ -319,6 +325,11 @@ class RelayService : Service() {
         val jobs = com.borasarang.droidrelay.relay.JobsRepository.all()
         JobsPersistence(applicationContext).save(jobs)
         TorrentRepository.all().let { TorrentPersistence(applicationContext).save(it) }
+        // FGS 제거 누락 시 시스템에 의해 타임아웃 크래시 발생 — 스와이프 종료 시에도 명시적으로 해제 (E-AND-SRV-0110)
+        if (isForeground) {
+            ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+            isForeground = false
+        }
         super.onTaskRemoved(rootIntent)
     }
 
