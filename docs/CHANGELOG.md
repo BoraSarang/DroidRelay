@@ -1,6 +1,8 @@
 # Changelog
 
-## [0.21.0] - 2026-09-07 (미배포, 디버그 검증 중)
+## [0.21.0] - 2026-09-07
+
+> v0.18~0.21 묶음. versionCode 26, versionName 0.21.0.
 
 ### Fixed [android] — 설정 감사 + 업로드 최소화 (PLAN_v0.21_settings-audit_android)
 - **T-955 감사**: 53필드 전수 — 적용 49, 데드 4(`torrentSavePath`·`torrentSeedRatio`·`torrentDhtEnabled`·`torrentPexEnabled`). 잘린 설정 잔재(유튜브/SHA) 0건, 고아 키 0건

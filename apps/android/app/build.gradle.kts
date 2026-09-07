@@ -32,8 +32,8 @@ android {
         applicationId = "com.borasarang.droidrelay"
         minSdk = 26
         targetSdk = 36
-        versionCode = 25
-        versionName = "0.17.0"
+        versionCode = 26
+        versionName = "0.21.0"
         buildConfigField("String", "TLS_KEYSTORE_PASSWORD", "\"$tlsKeystorePassword\"")
     }
 
