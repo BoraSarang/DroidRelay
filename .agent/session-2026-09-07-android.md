@@ -41,3 +41,9 @@
 - **배선**: 비율 강제(shouldPauseAtRatio 순수함수+테스트 5건)·DHT 토글·저장경로·PEX 문구·프리셋(앱/웹).
 - **E2E**: DHT 정지/시작 로그·roundtrip·토렌트 26% PASS. 사용자 비율 0(제한 없음)·업로드 32는 기존 설정 유지.
 - CHANGELOG 0.21.0(미배포), TODO 전부 ✅.
+
+## 배포 (v0.21.0, main)
+- 잡파일 정리(--viewport·.opencode/ 삭제, PLAN_v0.16.4 docs 편입) → feat→main 머지(`6e398a6`)·푸시.
+- 서명 릴리즈 빌드 GREEN + apksigner 서명 확인(SHA-256 `2f1dc84a…`).
+- 태그 v0.21.0 + GitHub Release 공개 (APK 75MB 첨부, draft→published).
+- 주의: debug→release 전환 시 `adb uninstall` 후 설치 (서명 불일치, 기존 데이터 삭제됨).
