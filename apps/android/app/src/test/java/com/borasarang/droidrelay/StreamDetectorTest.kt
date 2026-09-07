@@ -2,8 +2,13 @@ package com.borasarang.droidrelay
 
 import com.borasarang.droidrelay.relay.StreamDetector
 import com.borasarang.droidrelay.relay.VideoDownloadManager
+import com.borasarang.droidrelay.relay.VideoException
+import com.sun.net.httpserver.HttpServer
+import java.net.InetSocketAddress
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
 import org.junit.Test
 
 class StreamDetectorTest {
@@ -210,5 +215,92 @@ class StreamDetectorTest {
         assertEquals(0, VideoDownloadManager.segmentsDoneFromLog("", 5))
         val over = VideoDownloadManager.segmentsDoneFromLog("[hls] Opening '0000.ts' for reading\n[hls] Opening '0001.ts' for reading", 1)
         assertEquals(1, over)
+    }
+}
+
+/**
+ * 직접 매니페스트 분석(fetch) 경로 단위 테스트 — JDK 내장 HttpServer 스텁.
+ * 403 즉시 전파(E-AND-VID-0206)와 fetch 1회로 variant/세그먼트/재생시간 계측을 검증한다.
+ */
+class ManifestFetchTest {
+    private var server: HttpServer? = null
+
+    @After
+    fun tearDown() {
+        runCatching { server?.stop(0) }
+    }
+
+    /** path → (status, body) 라우팅 로컬 서버를 켜고 포트 반환 (테스트마다 자동 close) */
+    private fun startServer(vararg routes: Pair<String, Pair<Int, String>>): Int {
+        val s = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+        routes.forEach { (path, resp) ->
+            s.createContext(path) { ex ->
+                val body = resp.second.toByteArray()
+                ex.sendResponseHeaders(resp.first, body.size.toLong())
+                ex.responseBody.use { it.write(body) }
+            }
+        }
+        s.start()
+        server = s
+        return s.address.port
+    }
+
+    @Test
+    fun `직접 매니페스트가 403이면 분석 즉시 차단 예외를 전파한다`() {
+        val port = startServer("/v.m3u8" to (403 to "<html>blocked</html>"))
+        try {
+            StreamDetector.analyze("http://127.0.0.1:$port/v.m3u8")
+            fail("403 매니페스트는 VideoException을 던져야 한다")
+        } catch (e: VideoException) {
+            assertEquals("E-AND-VID-0206", e.code)
+        }
+    }
+
+    @Test
+    fun `미디어 플레이리스트는 fetch 한 번으로 세그먼트와 재생 시간을 계측한다`() {
+        val playlist = """
+            #EXTM3U
+            #EXT-X-VERSION:3
+            #EXTINF:6.0,
+            0000.ts
+            #EXTINF:6.0,
+            0001.ts
+            #EXT-X-ENDLIST
+        """.trimIndent()
+        val port = startServer("/media.m3u8" to (200 to playlist))
+        val found = StreamDetector.analyze("http://127.0.0.1:$port/media.m3u8")
+        assertTrue(found.isDirect)
+        assertEquals("stream", found.kind)
+        assertEquals(0, found.qualities.size)
+        assertEquals(2, found.segmentsTotal)
+        assertEquals(12000L, found.durationMs)
+    }
+
+    @Test
+    fun `마스터 매니페스트는 첫 variant를 팔로우해 세그먼트와 재생 시간을 계측한다`() {
+        val master = """
+            #EXTM3U
+            #EXT-X-STREAM-INF:BANDWIDTH=800000,RESOLUTION=640x360
+            low.m3u8
+            #EXT-X-STREAM-INF:BANDWIDTH=1400000,RESOLUTION=1280x720
+            high.m3u8
+        """.trimIndent()
+        val low = """
+            #EXTM3U
+            #EXTINF:6.0,
+            seg0.ts
+            #EXTINF:6.0,
+            seg1.ts
+            #EXT-X-ENDLIST
+        """.trimIndent()
+        val port = startServer(
+            "/index.m3u8" to (200 to master),
+            "/low.m3u8" to (200 to low),
+        )
+        val found = StreamDetector.analyze("http://127.0.0.1:$port/index.m3u8")
+        assertEquals(2, found.qualities.size)
+        assertEquals("360p", found.qualities[0].label)
+        assertEquals(2, found.segmentsTotal)
+        assertEquals(12000L, found.durationMs)
     }
 }

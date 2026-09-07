@@ -1,5 +1,174 @@
 # Changelog
 
+## [0.21.0] - 2026-09-07
+
+> v0.18~0.21 묶음. versionCode 26, versionName 0.21.0.
+
+### Fixed [android] — 설정 감사 + 업로드 최소화 (PLAN_v0.21_settings-audit_android)
+- **T-955 감사**: 53필드 전수 — 적용 49, 데드 4(`torrentSavePath`·`torrentSeedRatio`·`torrentDhtEnabled`·`torrentPexEnabled`). 잘린 설정 잔재(유튜브/SHA) 0건, 고아 키 0건
+- **T-956 시드 비율 강제**: SEEDING 중 `totalUpload/totalDownload` 도달 시 자동 일시정지 (`0`=제한 없음)
+- **T-957 DHT 토글**: `start/stopDht` 배선 (기동 분기 + 실행 중 전환)
+- **T-958 저장 경로**: 설정값 사용 (기본 기존 경로)
+- **T-959 PEX 안내 + 프리셋**: "API 없어 항상 켜짐·트래픽 미미" 문구 + "업로드 최소화" 원터치(비율 0.5·업로드 32KB/s·DHT 끔, 앱/웹)
+- **검증**: SeedRatioTest 5건 GREEN + assembleDebug 설치. 실기기 E2E: DHT 정지/시작 로그·설정 roundtrip·토렌트 26% 진행 PASS. 비율 도달 실전은 실사용 관찰
+
+## [0.20.0] - 2026-09-07 (미배포, 디버그 검증 중)
+
+### Added [android] — v0.20 미리보기·검색·공유 (PLAN_v0.20_thumb-search-share_android)
+- **T-949 영상 썸네일**: `ThumbManager`(FFmpeg 10초→1초 프레임, 320px, 300개 캐시) + `GET /thumb/` + 보관함 목록 미리보기(img lazy, 실패 시 제거)
+- **T-950 토렌트 검색**: `TorznabClient`(Torznab XML 파싱·시드순 50건) + `GET /api/search` + `torrentUrl` 바로 받기 + 웹 검색 UI + 앱 검색 UI + Jackett/Prowlarr 설정(앱/웹)
+- **T-951 만료 공유 링크**: `ShareRepository`(영속) + `/api/share` 발급/목록/삭제 + `GET /s/{token}` (BasicAuth 예외, 토큰이 권한). 발급 팝업은 유지시간 셀렉트(1시간~30일)+설명 문구
+- **T-952 게스트 읽기전용**: guest 계정 + GET 열람·다운로드만 허용(설정·발행·제어는 403) — 웹 인증 켜짐 시 유효
+- **T-953 위젯/퀵타일**: 홈 위젯 + QS 타일 서버 토글(`ServerToggle` 공용)
+- **검증**: compile + test GREEN + assembleDebug 설치. 실기기 E2E: files API 200(선택 유지)·공유 발급→다운로드 일치→삭제→404·썸네일 실패경로 404·검색 미설정 502·설정 조회 PASS, 잔재 정리. 진짜 영상 썸네일·게스트 매트릭스·위젯 탭은 실사용 확인 대기
+
+## [0.19.0] - 2026-09-07 (미배포, 디버그 검증 중)
+
+### Added [android] — v0.19 외부 재생 + 자동 운영 (PLAN_v0.19_dav-quota_android)
+- **T-944 WebDAV 읽기**: `DavRoutes` (`OPTIONS`/`PROPFIND` Depth 0·1 + 207 XML + `GET /dav/` Range 재사용) — VLC/nPlayer 외부 재생. PROPFIND 루트 href `..` 탈출 버그 수정(canonical 기준)
+- **T-945 보관함 쿼터**: `storageQuotaGb`(0=끔) + 초과 시 오래된 파일 자동 휴지통(`StorageJanitor.enforceQuota`) — 완료 후처리 후킹(HTTP/비디오/토렌트)
+- **T-946 자동 분류**: `autoClassify` + 확장자→영상/음악/문서 폴더 자동 이동
+- **T-947 중복 감지**: `normalizedUrl` + `findDuplicateUrl` — `/api/jobs` 409(`E-AND-DOWN-1006`), 앱/Share/RSS/MCP 전 경로 안내·차단
+- **검증**: compile + testDebugUnitTest GREEN(`StorageJanitorTest` 4건) + assembleDebug 설치. 실기기 E2E: DAV 206/video-mp4·PROPFIND `/dav/`·설정 roundtrip·409(fragment 정규화 동일 id) PASS, 잔재 정리. 파일 선택 live POST·분류 실전송은 다음 토렌트 시 확인
+
+## [0.18.0] - 2026-09-07 (미배포, 디버그 검증 중)
+
+### Added [android] — v0.18 담기↔소비 완성 (PLAN_v0.18_media-share_android)
+- **T-940 브라우저 직접 재생**: `GET /stream/{name...}` Range(206) inline 스트리밍(`serveFile` inline+Content-Type 확장, `StreamContentType` 매핑) + 보관함 재생 가능 파일 ▶ 버튼 + video 오버레이 플레이어
+- **T-941 Share Intent 받기**: `ACTION_SEND text/plain` 인텐트 필터(singleTop) → URL/magnet 추출 → 다운로드/토렌트 등록 + 스낵바 확인
+- **T-942 토렌트 파일 선택**: `TorrentEngine.setFileSelection` + `prioritizeFiles(IGNORE/DEFAULT)` + 재매핑 시 영속 선택 복원 + `POST /api/torrents/{id}/files` + 웹 상세 모달 체크박스(즉시 적용) + 앱 TorrentItem 파일 목록/선택
+- **검증**: compileDebugKotlin + testDebugUnitTest GREEN(`StreamContentTypeTest` 3건) + assembleDebug 설치. 실기기 E2E: `/stream/` Range 206(`Content-Range`+`video/mp4`+inline, 1024B 정확 일치·전체 GET 일치) PASS, Share SEND 필터 `dumpsys` 등록 확인, 파일 선택 API는 live torrent 없어 미실시(재시작 복원 로직은 코드 리뷰). 테스트 파일 업로드→삭제→휴지통 비우기로 정리
+
+## [0.17.0] - 2026-09-07
+
+### Added/Fixed [android] — T-937 웹 토렌트 삭제 UX + T-938 폴더 다운로드
+- **T-937 웹 삭제 컨펌**: 토렌트 삭제 버튼 즉시 삭제 → `confirmPopup('토렌트 삭제')` 경유. 본문 `'이름' torrent를 목록에서 삭제할까요?` + 미완료 시 `다운로드 중이던 파일도 함께 삭제됩니다.` (앱 문구와 정합)
+- **T-937 버튼 앱 통일**: 추출중 일시정지 추가·실패 재개 추가·시딩 일시정지 제거 (앱 TorrentScreen 규칙과 동일)
+- **T-937 잔존 정리**: 미완료 삭제 시 `saveDir/<infohash>/` 후보 디렉토리도 제거 (추출중 단계 job.name 불일치로 남던 쓰레기 해소)
+- **T-938 폴더 다운로드**: `GET /dl-folder/{name...}` ZIP 실시간 스트리밍(임시파일 없음·canonical 탈출 차단·한글 UTF-8) + 웹 폴더행 📦 버튼 (`폴더명.zip`)
+- **T-939 폴더 다운로드 속도 개선**: 영상 등 기압축 파일 재압축이 CPU 병목 → `ZipOutputStream.setLevel(0)` 패스스루 + 256KB 버퍼(`BufferedOutputStream`) + 완료 로그(파일 수·원본 MB·소요 s·MB/s). 버튼/파일명/내부 구조 변경 없음
+- **검증**: compileDebugKotlin + ktlint GREEN, assembleDebug 완료. 실기기 설치·동작 검증 대기 (기기 미연결)
+- **T-939 실기기 실측(2026-09-07)**: 850.8MB 폴더 → 서버 15.7초(54.1MB/s), 맥 curl 12.5초(71MB/s·570Mbps·HTTP 200). Wi-Fi 실효 상한 근처로 정상 확정
+
+### Refactor [android] — 리팩토링 4묶음 (PLAN_v0.17_refactor_android)
+- **Phase1 긴급 버그(T-933)**: 웹 MCP/스케줄 저장 `toast()` 미정의 → `showDlToast` 교체; 숫자 `||기본값` falsy로 0(끔/무제한) 소실 → `!=null` 판별 + `num()` NaN 가드; 전역 속도 슬라이더 저장 바인딩 누락 → input/change 바인딩; TLS 키스토어 PW 하드코딩 → `tls.properties`+`BuildConfig.TLS_KEYSTORE_PASSWORD` (git 미추적); DeviceGate `f.get()` 무타임아웃 → 60초 타임아웃 후 거부
+- **Phase2 T-931 후속(T-934)**: 3종 alert handle transient 수명 주석 명시; FINISHED 파일 이동+영속을 게이트 밖으로; `register/unregisterMapping` 단일 헬퍼 (cancel 원자화·polling 무효제거 job.infoHash 폴백·수동매핑 3곳 통합·removedHash 제거); apply* 3종 session null 체크 게이트 안; seedWaitSince 누수 정리
+- **Phase3 설정 단일화(T-935)**: `SettingsConstraints` 단일 진실 (업로드 0~1024/step32/기본 512·다운로드 0~20480/step1024/기본 0·동시수 1~4/기본 2·최대활성 1~10/기본 3·upload/downloadLabel·randomEphemeralPort); 앱 속도 UI 프리셋→연속 슬라이더 통일; Repo 기본값 512/2 정합; 서버/앱 reset 리터럴 상수화; 웹 `kblabel()` 0=끔/무제한 표시
+- **Phase4 구조 분리(T-936)**: RelayServer 1897→519줄 (TorrentRoutes/JobRoutes/SettingsRoutes/StorageRoutes+StorageGuard/DebugRoutes, serveFile·toJson internal 승격); WebAssets switchTab 중복 삭제·`apiGet/apiPost` 도입(save* 8함수 교체); error_message_ko.json 미등록 8종 추가 + Stor 태그 교정
+- **검증**: compileDebugKotlin + ktlint(스크립트 제외) GREEN, assembleDebug 설치. 실기기 API 스모크는 앱 실행 후 진행 예정
+- **버전**: versionCode 24 → **25**, versionName **0.17.0**
+
+## [0.16.6] - 2026-09-06
+
+### Fixed [android] — magnet 추가 시 SIGSEGV 근본 원인(alert.handle() dangling) + libtorrent JNI 직렬화 게이트
+- **재현(크래시 2건 분석)**: magnet 추가 → ADD_TORRENT 매핑 수백 ms 후 netty 웹 스레드(`eventLoopGroupP`)에서 SIGSEGV. v0.16.5는 `torrent_status::state()`(status 경유), v0.16.6 게이트 적용 후엔 `torrent_handle_is_valid`(`pieceInfo → torrentFile()`)로 crash 지점 변경 — **스레드 경합이 아니라 native handle 수명 문제**임을 확인
+- **근본 원인(libtorrent4j SWIG 소유권)**: `AddTorrentAlert.handle()`은 `new torrent_handle(cPtr, false)`(swigCMemOwn=false) — **alert C++ 객체 내부 멤버 메모리를 가리키는 참조**를 반환. 이를 `handleMap`에 long-lived로 보관하면 alert가 `pop_alerts` 후 소멸되며 **dangling** → 이후 장기 보관된 handle로 JNI 호출 시 `__shared_weak_count::lock()` UAF → SIGSEGV. 반면 `session.find(hash)`는 `new torrent_handle(cPtr, true)`로 **독립 heap 카피**를 만들며 세션·알림 수명과 무관하게 안전(공식 문서 "alert handle may be invalid" + 알려진 이슈 확인). T-930(T-996) 게이트 serialization만으로는 UAF를 막을 수 없음
+- **수정(T-931)**: `ADD_TORRENT`에서 alert handle을 저장하지 않고 `session.find(Sha1Hash.parseHex(hash))` 기반 handle로 `handleMap`에 보관(`session.find` null이면 폴링 자동 매핑 대기). alert 내 handle은 id/hash 추출(`infoHash()`)에만 사용 → alert 생존 기간 내 일시 사용으로 제한
+- **함께 적용**: T-930 libtorrent JNI 전체 ReentrantLock 직렬화(sessionGate + withGate/withGateAlert(tryLock 300ms)), RelayService `onDestroy/onTaskRemoved`의 `stopForeground(STOP_FOREGROUND_REMOVE)`(FGS DidNotStopInTime 방어), 업로드 속도 프리셋 32KB/s 추가(설정 화면)
+- **검증**: assembleDebug GREEN → `R5CT215F4QK` debug 재설치(데이터 기존 유지, 서명 동일 업그레이드). **이전 크래시를 일으킨 동일 magnet으로 재현 테스트**: 취소→재추가→즉시 폴링 20회 연속 HTTP 200 + 프로세스 생존, `ADD_TORRENT 매핑(id=find 기반)` 로그 확인, 메타데이터 수신 → DOWNLOADING → pieceInfo(5/1267) 정상
+- **버전**: versionCode 24, versionName **0.16.6** (현재 디버그 설치본)
+
+## [0.16.5] - 2026-09-05
+
+### Fixed [android] — v0.16.4 방어 코드의 한계 극복: FGS 5초 의무 타임아웃 크래시 + 배터리 UI 개선
+- **발견(v0.16.4 재현 테스트 후 실사용 70분 만에 크래시)**: `MainActivity.onCreate`의 `startForegroundService()` 호출에 대해 서비스 생성 시점 `startForeground()`가 **백그라운드 시작 제한으로 DENIED**되면, v0.16.4처럼 try-catch로 `ForegroundServiceStartNotAllowedException`을 삼켜도 **시스템의 5초 `startForeground()` 의무 타이머는 취소되지 않음** → 이후 `ForegroundServiceDidNotStartInTimeException`(스택 `MainActivity.kt:69 → RelayService.start`)으로 앱 전체가 강제 종료. `dumpsys activity services`에서 `infoAllowStartForeground=[code:DENIED]`, `isForeground=false`인 좀비 ServiceRecord로 확정
+- **근본 수정**: `startForegroundService()`의 5초 의무 타이머 자체를 회피 — `RelayService.start()`는 **일반 `startService()`를 기본**으로 사용하고, `onStartCommand` 첫 줄에서 `startInForeground()`로 **기회적 FGS 승격**(허용 시 알림 복구, 거부 시 백그라운드로 무해하게 동작). `service.onCreate`에서도 채널 생성보다 FGS 승격을 먼저 실행(5초 창 최대 확보). 백그라운드 start가 제한되는 경우만(IllegalStateException) `startForegroundService`로 재시도
+- **배터리 UI 개선**: 허용 상태 시 "배터리 무제한 **해제**" 버튼 추가(`ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS`), 설정 화면에 `LifecycleEventObserver`(ON_RESUME)로 `isIgnoringBatteryOptimizations` **재조회 → 시스템 화면에서 돌아오면 상태/버튼 즉시 갱신**
+- **검증**: 빌드 3종 GREEN → `R5CT215F4QK` 설치(versionCode 23). 배터리 whitelist 허용 확인(`dumpsys deviceidle whitelist`), 배터리 예외 허용 UI로 최적화 예외 상태 표시
+- **버전**: versionCode 22 → **23**, versionName **0.16.5**
+
+## [0.16.4] - 2026-09-05
+
+### Fixed [android] — FGS 크래시 루프(백그라운드 사망) + 배터리 최적화 예외 유도
+- **원인(로그 확정)**: 프로세스가 시스템(삼성/Android 16 배터리 최적화)에 강제 종료되면 `START_STICKY`로 `RelayService`가 재생성 → `onCreate`의 `startForeground()`가 **백그라운드 FGS 시작 제한(`ForegroundServiceStartNotAllowedException`)에 걸려 예외 미처리로 프로세스 즉시 사망 → 무한 재시작 루프**. 실기기 logcat: 09:19/13:32(서비스 재시작)·13:42(활동 시작) 크래시 확인
+- **수정**: `startInForeground()`를 try-catch로 방어 → FGS 시작 거부 시에도 **백그라운드로 계속 구동**(크래시 루프 중단, `[W] FGS 시작 거부 — 백그라운드 모드로 계속 동작: ... (E-AND-SRV-0101)`). `onStartCommand`에서 매 실행 시 `startInForeground()` 재시도(사용자 재진입/재시작 시 알림 복구, `isForeground` 플래그). `RelayService.start()`의 `startForegroundService` 호출도 try-catch + `startService` fallback(`E-AND-SRV-0102`)
+- **배터리 최적화 예외 유도**: 설정 화면 '서버' 섹션에 상태 표시(허용됨/미허용) + 미허용 시 "**배터리 무제한 허용 요청**" 버튼(`ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`). `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` 권한 추가 — 삼성/Android 16에서 밤새 안정 동작의 전제
+- **검증**: 빌드 3종 GREEN → `R5CT215F4QK` 설치(versionCode 22) → **`adb shell am crash` 재현 테스트**: 강제 크래시 후 1초 만에 시스템이 `for service`로 재생성, 크래시 없이 전 프로세스에서 `onCreate` 완료 → 생존 확인(이전엔 재시작 시 재사망)
+- **버전**: versionCode 21 → **22**, versionName **0.16.4**
+
+## [0.16.3] - 2026-08-31
+
+### Added [android] — 다운로드 QR 확대/축소 토글
+- **서버 주소 QR 이미지를 탭하면** 전체 화면 반투명(검정 alpha 0.6) 오버레이에 화면 폭 80% 크기로 **확대 표시**, 오버레이 아무 곳(QR 포함)을 다시 클릭하거나 우상단 **닫기 버튼**을 누르면 사라짐
+- 확대 전환 시 0.85f→1f **scale 모션**(tween 180ms) 적용, 닫기 아이콘은 `Close`
+- **QR 비트맵 1회 캐시 재사용**: `qrBitmap()` 인코딩(512×512, CPU 작업)을 재컴포지션마다 하던 것을 `remember`로 1회만 수행, 축소 이미지(96dp)·공유·확대 오버레이가 같은 비트맵 공유
+- **버전**: versionCode 20 → **21**, versionName **0.16.3**, 릴리즈 서명 APK `R5CT215F4QK` 실기기 인플레이스 설치(성능 영향 없음, 재인코딩 폐기로 오히려 개선)
+
+## [0.16.2] - 2026-08-31
+
+### Added [android] — 웹 설정 미러 2차: 스케줄 · Debrid · 터널 · MCP · 기본값 복원 (PLAN_v0.16_settings-mirror_android.md)
+- 웹 대시보드 설정 탭의 남은 항목을 앱 설정으로 이전(백엔드 필드/setter/라우트 기존 완비, UI만 추가)
+- **스케줄**(신규 섹션): 활성화 스위치, Cron 입력+적용(`CronParser.isValid`로 실시간 유효성 표시), Wi-Fi 연결 시에만/충전 중에만 스위치, 최소 배터리 슬라이더(5~100%)
+- **Debrid**(신규 섹션): 활성화 스위치, 제공자 FilterChip 3종(Real-Debrid/AllDebrid/Premiumize), API 키 저장
+- **터널**(신규 섹션): 활성화 스위치, 제공자 FilterChip 2종(Tailscale/Cloudflare Tunnel)
+- **MCP 서버 권한**(신규 섹션): 프라이버시 모드 스위치, 도구 5종 활성화 스위치(file_list/file_read/download_add/download_list/download_control → `setMcpToolDisabled`)
+- **기본값 복원**(신규 섹션): 다운로드/토렌트/전체 초기화 버튼 → **경고 AlertDialog 확인 후** 서버 `/api/settings/reset`과 동일한 조합 실행(다운로드: 동시2·속도해제·알림On; 토렌트: 업로드512·다운무제한·활성3·ratio2.0·DHT/PEX On·랜덤 포트 49152~65535·저장경로 기본) + RelayApp 엔진 즉시적용
+- **버전**: versionCode 19 → **20**, versionName **0.16.2**, 릴리즈 서명 APK `R5CT215F4QK` 실기기 인플레이스 설치(성능/캐시 영향 없음, 설정 UI 추가)
+
+## [0.16.1] - 2026-08-31
+
+### Changed [android] — MD3 디자인 전면 정돈 (PLAN_v0.16_settings-mirror_android.md)
+- **TopAppBar 도입**: `RootApp`에 탭 타이틀 + 우상단 **디버그 패널 아이콘(BugReport)** 추가, 하단 탭 라벨 한글화("Torrent"→"토렌트")
+- **디버그 패널 이전**: DownloadsScreen의 "📡 DroidRelay + 제목 5연속 탭" 숨김 진입 제거 → `RootApp`의 `ModalBottomSheet`로 이동, `ui/DebugPanel.kt` 공용화(다중 선택 복사/전체 복사/비우기 동일)
+- **다운로드**: 중첩 `LazyColumn`(Column+하단 리스트) 제거 → **단일 LazyColumn**(서버카드→URL→비디오→작업 목록→빈 상태 아이콘 안내), 비디오 잡에 `VideoLibrary` 아이콘, ⚡/⏱ 이모지 제거
+- **Torrent**: 중첩 `Scaffold` 제거 → `Box`+하단 우측 FAB(스크롤 끝에 80dp 마진), 스낵바를 Root 콜백(`onShowSnack`)으로 이관, ⏱ 제거
+- **보관함**: 헤더 이모지 제거, 목록 카드 색 `surfaceContainerHigh`→`surfaceContainer` 통일(강조 카드만 high 유지), 스낵바 콜백 이관, 빈 상태 아이콘 정돈
+- **Theme.kt**: `surfaceContainer*` 표면 토큰 Light/Dark 명시 지정, 셰이프 MD3 기본값(4/8/12/16/28) 정렬 — Material You(dynamicColor)는 기기 테마 따라감 유지
+- **버전**: versionCode 18 → **19**, versionName **0.16.1**, 릴리즈 서명 APK `R5CT215F4QK` 실기기 인플레이스 설치(성능/캐시 영향 없음, UI 개편)
+
+## [0.16.0] - 2026-08-31
+
+### Added [android] — 웹 설정 미러 1차: 전역 속도 제한 · 토렌트 고급 · 가드 (PLAN_v0.16_settings-mirror_android.md)
+- 웹 대시보드 설정 탭에만 있고 앱에 없던 항목을 앱 설정으로 이전(백엔드 필드/setter는 기존 완비, UI만 추가)
+- **전역 속도 제한**('다운로드' 섹션): 다운로드/업로드 Mbps 각각 스위치+슬라이더(1~10) → `setMaxDownloadBps/setMaxUploadBps`(1_048_576 단위, 0=무제한)
+- **토렌트 고급**('Torrent' 섹션): 시퀀셜 다운로드 스위치, 시더 부재 대기(0~3600초), 리슨 포트(1024~65535, 랜덤 버튼), 저장 경로(존재/생성 확인) → 각 setter
+- **가드 보호**(신규 섹션): 활성화 스위치, 임계값 슬라이더(열 50~70°C / 배터리 5~50% / 스토리지 50~99%), watchdog 주기(15~3600초), HTTP→HTTPS 강제 스위치
+- **버전**: versionCode 17 → **18**, versionName **0.16.0**, 릴리즈 서명 APK `R5CT215F4QK` 실기기 인플레이스 설치(성능/캐시 영향 없음)
+
+## [0.15.1] - 2026-08-31
+
+### Fixed [web] — 비디오 분석 주소 초기화 · 업로드 대상 라벨 제거 · 분석 카드 UX 압축
+- **비디오 분석 주소 초기화**: 분석 후 다운로드(추가)/재시도 성공 시 `#vurl` 주소 입력란이 남아있던 문제 → `clearVideoUrlInput()`로 초기화(+ `__videoState`/해상도 선택 리셋)
+- **업로드 대상 라벨 제거**: 파일 올리기 버튼 옆 항상 표시되던 "대상: 📁 폴더명"(`#uploadTargetLabel`) 요소·갱신 코드 삭제 — 파일 올리기는 항상 현재 폴더로 동작해 정보가 상태 표시와 중복되고, 폴더명이 길면 지저분했음
+- **분석 카드 UX 압축**: 스트림 주소를 화면에 길게 표시하던 meta 제거 → **📋 주소 복사** 버튼 하나로 대체(`copyVideoUrl`, execCommand + clipboard 폴백), 해상도 선택 radio → `<select>`(큰 목록도 한 줄), 파일명·복사·다운로드를 **한 줄 flex** 배치로 간결화
+- **0206 차단 안내 1회·단문화**: `E-AND-VID-0206`(브라우저 외 접근 차단)이 **빨간 실패 메시지 + 💡 안내 2개로 중복 출력**되던 문제 → `showVideoBlocked()`로 💡 안내 **1개만** 표시. 문구를 `"💡 해당 사이트는 폰/앱(비브라우저) 접근을 차단하고 있습니다."`로 단축하고, analyze/create/retry 전 경로에 동일 적용. `StreamDetector.fetch`의 예외 메시지·`error_message_ko.json`도 같은 짧은 문구로 통일
+- **버전**: versionCode 16 → **17**, versionName **0.15.1**, 릴리즈 서명 APK `R5CT215F4QK` 실기기 인플레이스 업데이트
+
+## [0.15.0] - 2026-08-31
+
+### Fixed [android+web] — 비디오 분석 403 조기 노출 + fetch 최적화 (PLAN_v0.15_analyze-403_android.md)
+- **원인**: `StreamDetector.fetch`는 403을 `VideoException`으로 던지지만 **직접 m3u8/mpd 분석 경로의 `parseManifestVariants`/`resolveSegmentsCount`/`mediaDurationMsFromUrl`이 예외를 `catch`로 삼켜** "분석 성공"처럼 표시. 이후 `VideoApi.create`가 같은 403 URL을 4~5회 재fetch하며 조용히 실패 → FFmpeg로 보내 "다운로드 실패(E-AND-VID-0202)"만 노출되어 원인 불명의 혼동을 유발 (wowstream2.cloud m3u8 진단에서 확인)
+- **해결**: `parseManifest()` 신설 — 매니페스트 **fetch 1회**(마스터면 첫 variant 1회 추가)로 variant/세그먼트 개수/총 재생시간을 계측하고 실패를 그대로 전파. `analyze` 직접/페이지 경로에 적용, `Found.durationMs` 추가, fetch 403은 새 코드 **`E-AND-VID-0206`**(브라우저 외 접근 차단 안내)으로 변경
+- **create 재사용**: 다운로드 대상이 분석 대상과 동일하면 재fetch 없이 계측값 재사용 — 403 사이트는 분석 단계에서 즉시 실패(조용한 3회 실패 제거), 정상 사이트도 요청 수 감소
+- **웹**: analyze 오류 시 0206이면 차단 원인/대안(브라우저에서 m3u8 직접 복사 or PageKit) 안내 박스 표시
+- **테스트**: `ManifestFetchTest` 신규 3건 — JDK 내장 HttpServer 스텁으로 403 전파(0206)·미디어 플레이리스트 계측·마스터 첫 variant 팔로우 검증
+- **버전**: versionCode 15 → **16**, versionName **0.15.0**, 릴리즈 서명 APK `R5CT215F4QK` 실기기 인플레이스 업데이트
+
+## [0.14.1] - 2026-08-31
+
+### Fixed [android+web] — 보관함(웹) 다운로드 비영문 파일명 깨짐
+- **원인**: `/dl-file`(RelayServer.kt)과 `serveFile`이 `Content-Disposition: attachment; filename="${file.name}"`으로 **비ASCII(한글/일본어/중국어) 파일명을 raw로 헤더에 삽입** — HTTP 헤더는 ASCII 계열이라 브라우저가 인코딩 정보 없이 바이트를 해석, 웨일(Chromium)에서 저장 파일명이 다르게 나옴
+- **해결**: RFC 6266 준수 `DispositionHeader.make()` 추가 — `attachment; filename="<ASCII percent-encoded>"; filename*=UTF-8''<percent-encoded>` 형태로 `/dl-file`·`serveFile`에 적용. 최신 브라우저는 `filename*`에서 원본 복원, 구형 fallback은 ASCII 안전
+- **웹 보강**: `<a download="파일명">`에 실제 파일명 힌트 추가 + `dlBase` 하드코딩(`https://host:8443`) → **현재 프로토콜 따라 자동 선택**(HTTP 폴백 모드 `forceHttpsRedirect=false`에서도 다운로드가 자체서명 인증서로 막히는 별개 문제 동시 해결)
+- **테스트**: `ContentDispositionTest` 신규 4건(한글/일본어/중국어/이모지/특수문자) — 결과 ASCII-only + `filename*` percent-decode 시 원본 복원 확인
+- **버전**: versionCode 14 → **15**, versionName 0.14.1, 릴리즈 서명 APK `R5CT215F4QK` 실기기 인플레이스 업데이트
+
+## [0.14.0] - 2026-08-31
+
+### Added [android] — 안정성 7개 이슈 (PLAN_v0.14_stability_android.md)
+- **부팅 자동시작 + watchdog**: `BootReceiver`(BOOT_COMPLETED → `autoStart` 확인 후 RelayService.start) + 서버 헬스체크(`isHealthy()` 127.0.0.1/api/info) 1분 주기 실패 시 `restart()` — 24시간 연속 동작 문제 해소. 주기 `watchdogIntervalSec`(기본 60, 15~3600)으로 설정 가능
+- **토렌트 교차 매핑 레이스**: 받는 중 동일 마그넷 추가 시 `FETCHING_METADATA` 영구잔류 → `addMagnet` 중복 가드 + `findJobIdForNewTorrent`가 `infoHash==hash && FETCHING_METADATA` 정확 일치 우선(빈 hash FIFO 폴백) + `/api/torrents/add` 중복 시 409 + 웹 alert
+- **속도제한 오버플로우**: `applySpeedLimit`/`applyRateLimits`/`applySettings`의 `*1024 .toInt()` Long→Int 오버플로우 → `coerceIn(0, Int.MAX_VALUE.toLong())` (설정 시 무기한 다운로드 제한 미반영 증상 해소)
+- **시더 부재 자동 중단**: 웹 토렌트 상세 피어 행에 `progress` %(100%면 초록·굵게 "시더") 표시 + `torrentMinSeedWaitSec`(기본 0=꺼짐) 경과 후 `pause()` — 씨앗 없는 개인 시더 토렌트가 무한 업로드로 배터리 소모하는 문제
+- **업로드 진행률**: `uploadFiles`를 XHR + `xhr.upload.onprogress`로 전환(진행률 바 + 완료/실패 toast), multipart→**raw-upload 스트리밍**(`X-File-Name`/`X-File-Path` encodeURIComponent) + 웹 `#uploadTargetLabel`(대상 폴더)·`#uploadProgressLabel`
+- **폴더 날짜 표시**: `/api/storage`의 `modified`를 웹 보관함(`count개 · 날짜`)·앱 FilesScreen 메타 텍스트로 표시
+
+### Fixed [android] — 웨일(Whale) HTTPS 접속 불가
+- **증상**: iPad 사파리는 경고 후 접속(GitHub Pages와 다른 엔드포인트), **웨일은 접속 불가**
+- **원인**: HTTP→HTTPS 강제 301 리다이렉트 + **mkcert 자체서명 인증서** — Chromium(웨일/크롬)은 `NET::ERR_CERT_AUTHORITY_INVALID`로 하드 차단
+- **해결**: `forceHttpsRedirect`(기본 **false**) 신규 설정 — 꺼짐이면 LAN HTTP를 그대로 서빙(자체서명 미신뢰 브라우저 호환), 켜짐이면 기존 301→HTTPS(8443). 리다이렉트 대상 호스트도 `lanAddress()`(핫스팟 swlan0) 우선 보정
+- **버전**: versionCode 13→14, versionName 0.13.3→0.14.0, 릴리즈 서명 v0.14.0 실기기 재설치
+
 ## [0.13.3] - 2026-08-28
 
 ### Release — 공개 배포 시작

@@ -287,7 +287,9 @@ object McpServer {
             } catch (_: Exception) { url }
         } else url
 
-        val job = RelayApp.engine?.enqueue(finalUrl)
+        val job = JobsRepository.findDuplicateUrl(finalUrl)?.also {
+            DebugLogger.i(TAG, "downloadAdd 중복 → 기존 id=${it.id} 반환")
+        } ?: RelayApp.engine?.enqueue(finalUrl)
             ?: error("엔진 미초기화")
 
         DebugLogger.i(TAG, "downloadAdd 완료 id=${job.id} file=${job.filename}")

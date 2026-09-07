@@ -246,6 +246,8 @@ class VideoDownloadManager(
                     )
                 }
                 DebugLogger.perf(TAG, "비디오 완료 id=$jobId '${out.name}' ${size / 1024}KB") {}
+                // 보관함 자동 운영 (분류·쿼터, v0.19)
+                runCatching { StorageJanitor.onCompleted(context, java.io.File(StorageGuard.dlRoot, out.name)) }
             }
             else -> {
                 val log = runCatching { session.allLogsAsString }.getOrDefault("")

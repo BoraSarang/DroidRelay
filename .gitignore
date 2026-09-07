@@ -16,6 +16,8 @@ captures/
 *.jks
 *.keystore
 keystore.properties
+# 보안 — HTTPS 자체서명 키스토어 비밀번호 (절대 커밋 금지)
+tls.properties
 
 # 스크린샷 — 개발 용도 (저장소 제외)
 docs/screenshots/

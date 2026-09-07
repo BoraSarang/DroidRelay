@@ -250,3 +250,107 @@ T-001~T-008 전부 완료 (커밋 7574486).
 | T-878 | 실기기 검증(스트림 분석→다운로드→진행률) + CHANGELOG/TODO/세션 로그 + 커밋 — *(유튜브 검증은 0.12.2에서 폐기)* | ✅ |
 | T-879 | **실패 알림 반복+무의미 재시도 루프 차단** — RelayService 실패 알림을 상태 전이 시 1회로 + 동일 원인(에러코드+메시지) 재발신 금지, DownloadEngine.retryFailed에서 `type=="video"` 제외. 실기기 2초 무한 알림 소멸 확인 + HTTP 404 FAILED 알림 **1회만**(커밋 `df41ba6`) | ✅ |
 | T-880 | ~~**웹 UI 유튜브 포맷/해상도 선택**~~ — ❌ **0.12.2 T-883에서 제거**(포맷 선택 UI 폐기, 스트림 "원본 그대로" 단일 버튼 유지) | ❌ |
+
+## v0.14 (2026-08-31) — 안정성 7종 + 웨일 HTTPS 접속 복구 (PLAN_v0.14_stability_android.md)
+> 실사용 중 보고된 7개 이슈. 실기기 검증(이슈7·웨일 접속·토렌트 409 등)은 사용자 직접 진행 예정.
+
+| T-번호 | 내용 | 상태 |
+|--------|------|------|
+| T-899 | 부팅 자동시작(BootReceiver + RECEIVE_BOOT_COMPLETED) + 서버 watchdog(RelayService 1분 헬스체크→restart, `watchdogIntervalSec`) | ✅ |
+| T-900 | 토렌트 교차 매핑 레이스 해결 — infohash 정확 일치 우선 + 빈 hash FIFO 폴백, addMagnet 중복 가드, `/api/torrents/add` 중복 409 + 웹 alert | ✅ |
+| T-901 | 속도제한 오버플로우 방지 — `*1024 .toInt()` → `coerceIn(0, Int.MAX_VALUE)` | ✅ |
+| T-902 | 시더 부재 자동 중단 — 피어 progress% 표시 + `torrentMinSeedWaitSec`(기본 0=꺼짐) 경과 후 pause | ✅ |
+| T-903 | 보관함 업로드 진행률 — XHR `upload.onprogress` + raw-upload 스트리밍, 대상 폴더 라벨 | ✅ |
+| T-904 | 보관함 폴더 날짜 표시(`modified`) — 웹 + FilesScreen | ✅ |
+| T-905 | HTTPS 리다이렉트 호스트 보정(lanAddress 우선) + `forceHttpsRedirect`(기본 false) 도입으로 웨일/크롬 자체서명 차단 회피(HTTP 폴백) | ✅ |
+| T-906 | **보관함 다운로드 비영문 파일명 깨짐** — Content-Disposition RFC 6266(`filename*=UTF-8''`) 적용(/dl-file·serveFile) + 웹 dlBase 프로토콜 자동 보정 + `<a download>` 파일명 힌트 + DispositionHeader 단위 테스트 | ✅ |
+
+## v0.15 (2026-08-31) — 비디오 분석 403 조기 노출 + fetch 최적화 (PLAN_v0.15_analyze-403_android.md)
+> wowstream2 m3u8 진단에서 발견: `parseManifestVariants`/`resolveSegmentsCount`/`mediaDurationMsFromUrl`이 403을 삼키고, `VideoApi.create`가 같은 403 URL을 4~5회 재fetch하며 조용히 실패. "분석 성공 → 다운로드 실패" 혼동 원인.
+
+| T-번호 | 내용 | 상태 |
+|--------|------|------|
+| T-907 | **403/차단 즉시 전파** — `parseManifest` 신설(실패 삼킴 제거), fetch 403 → `E-AND-VID-0206`, 직접/검출 매니페스트·페이지 스니핑 경로 적용 | ✅ |
+| T-908 | **fetch 중복 제거** — analyze 매니페스트 1회(+마스터 첫 variant 1회), `Found.durationMs` 추가, `VideoApi.create`가 동일 스트림이면 재사용 | ✅ |
+| T-909 | **에러 문구** — `error_message_ko.json` E-AND-VID-0206 신설 + WebAssets analyze 오류 안내 보강 | ✅ |
+| T-910 | **테스트** — 로컬 HttpServer 스텁(403 전파·미디어·마스터 variant 팔로우) + 풀 게이트(unit/ktlint/node/assembleRelease) | ✅ |
+| T-911 | v0.15.0(versionCode 16) 릴리즈 인스톨 + CHANGELOG + 세션 로그 | ✅ |
+| T-912 | **웹 비디오 분석 주소 초기화** — 다운로드(추가)·재시도 성공 시 `#vurl` 입력란 비움(`clearVideoUrlInput`) | ✅ |
+| T-913 | **업로드 대상 라벨 제거** — "대상: 📁 폴더명"(`#uploadTargetLabel`) 요소·갱신 코드 삭제 (파일 올리기 동작과 정보 중복) | ✅ |
+| T-914 | **비디오 카드 UX 압축** — 스트림 주소 길게 표시 제거 → 📋 주소 복사 버튼, 해상도 라디오 → `<select>`, 파일명/복사/다운로드를 한 줄 flex로 | ✅ |
+| T-915 | **0206 차단 안내 1회·단문화** — analyze/create/retry 실패 시 💡 안내 1개만(짧은 문구), fetch/error_message_ko.json 문구 단축 | ✅ |
+
+> v0.15 실기기 동작 검증(403 사이트 0206 즉시 안내 + 정상 m3u8 회귀)은 **사용자 직접** 진행 예정.
+
+## v0.16 (2026-08-31) — 앱 설정 미러 1차 + MD3 디자인 개편 (PLAN_v0.16_settings-mirror_android.md)
+> 웹 대시보드 설정에만 있고 앱에 없는 항목 중 **1차(전역 속도 제한·토렌트 고급·가드)**를 앱 설정 화면에 추가(백엔드 필드/setter는 이미 완비, UI만). 이후 MD3 전면 정돈(디자인 개편)로 확장.
+
+| T-번호 | 내용 | 상태 |
+|--------|------|------|
+| T-916 | PLAN_v0.16 작성 + TODO 등록 + v0.16.0 versionCode 18 | ✅ |
+| T-917 | **전역 속도 제한** — SettingsScreen '다운로드' 섹션에 다운로드/업로드 Mbps 스위치+슬라이더(1~10) → `setMaxDownloadBps/setMaxUploadBps`(0=무제한) | ✅ |
+| T-918 | **토렌트 고급** — SettingsScreen Torrent 섹션에 시퀀셜 다운로드 switch / 시더 부재 대기(초) / 리슨 포트(+랜덤) / 저장 경로(+테스트) | ✅ |
+| T-919 | **가드 섹션** — 활성화 switch + 열/배터리/스토리지 임계 슬라이더 + watchdog 주기(초) + HTTP→HTTPS 강제 switch | ✅ |
+| T-920 | v0.16.0 검증(unit/ktlint/assembleRelease) + 실기기 인플레이스 설치 | ✅ |
+| T-921 | v0.16.1 MD3 디자인 개편 — TopAppBar 도입·디버그 패널 이전·다운로드 단일 LazyColumn·Torrent 중첩 Scaffold 제거·카드색 통일·이모지→아이콘·Theme 표면 토큰·공용 DebugPanel | ✅ |
+| T-922 | **웹 설정 미러 2차 — 스케줄** — 활성화 스위치 + Cron 입력+적용(`CronParser.isValid` 유효성 표시) + Wi-Fi/충전 중만 스위치 + 최소 배터리 슬라이더(5~100) → `setSchedule*` | ✅ |
+| T-923 | **2차 — Debrid** — 활성화 스위치 + 제공자 FilterChip(REALDEBRID/ALLDEBRID/PREMIUMIZE) + API 키 저장 → `setDebrid*` | ✅ |
+| T-924 | **2차 — 터널** — 활성화 스위치 + 제공자 FilterChip(TAILSCALE/CLOUDFLARE) → `setTunnelEnabled/setTunnelProvider` | ✅ |
+| T-925 | **2차 — MCP** — 프라이버시 스위치 + 도구 5종 활성화(file_list/file_read/download_add/download_list/download_control) → `setMcpPrivacyMode/setMcpToolDisabled` | ✅ |
+| T-926 | **2차 — 기본값 복원** — 다운로드/토렌트/전체 버튼 + 경고 AlertDialog → 서버 reset과 동일 조합 + RelayApp 즉시적용 | ✅ |
+| T-927 | v0.16.2(versionCode 20) 검증(unit/ktlint/assembleRelease) + 실기기 인플레이스 설치 + CHANGELOG/TODO 갱신 | ✅ |
+| T-928 | **다운로드 QR 확대/축소 토글** — QR 탭 → 전체 화면 반투명 오버레이에 확대 표시(scale 모션), 화면 아무 곳/닫기 버튼 재클릭 시 축소. qr 비트맵 1회 캐시 재사용 | ✅ |
+| T-929 | **FGS 크래시 루프 수정(v0.16.4)** — 백그라운드 재시작 시 `ForegroundServiceStartNotAllowedException` → `startInForeground()` try-catch + onStartCommand 재시도 + start() 안전화. 배터리 최적화 예외 UI(상태+무제한 허용 요청 버튼) 추가 | ✅ |
+| T-930 | **libtorrent JNI 직렬화 게이트(v0.16.6)** — ReentrantLock sessionGate로 모든 세션/핸들 접근 직렬화 + alert 콜백 tryLock(300ms) → GC가 netty 스레드를 정리하지 못해 크래시 지속 확인 | ✅ ⚠️ |
+| T-931 | **alert.handle() dangling root fix(v0.16.6)** — `AddTorrentAlert.handle()`은 alert C++ 객체 내부 메모리 참조(swigCMemOwn=false, GC 후 dangling) → `handleMap` 장기 보관을 `session.find(hash)` 기반 독립 heap 카피로 교체. 실기기 동일 magnet 재현 테스트 20회 연속 200 + 프로세스 생존 | ✅ |
+| T-932 | **웹 토렌트 업로드 32KB/s 선택** — 웹 설정 `torrentUploadLimit` 슬라이더 step 64 → 32 (앱 SettingsScreen 프리셋에 맞춘 동일 단위) | ✅ |
+| T-933 | **Phase1 긴급 버그** — 웹 toast 미정의·`||`falsy 0소실·전역슬라이더 바인딩·키스토어PW BuildConfig·DeviceGate 타임아웃 (PLAN_v0.17) | ✅ |
+| T-934 | **Phase2 T-931 후속 안정화** — 3종 alert transient 명시·FINISHED IO 게이트 밖·register/unregisterMapping·session 체크 게이트 안·seedWait 정리 | ✅ |
+| T-935 | **Phase3 설정 단일화** — SettingsConstraints 단일 진실·앱 슬라이더 통일·Repo 기본값 512/2·reset 상수화·웹 kblabel | ✅ |
+| T-936 | **Phase4 구조 분리** — RelayServer 1897→519 (Torrent/Job/Settings/Storage/DebugRoutes+StorageGuard)·WebAssets 중복삭제·apiGet/apiPost·num/kblabel·에러코드 8종 등록 | ✅ |
+| T-937 | **웹 토렌트 삭제 UX + 잔존 정리** — 삭제 컨펌('목록에서 삭제+파일 동반안내')·버튼 앱 통일(추출중 일시정지·실패 재개·시딩 삭제만)·cancel() infohash 잔존 디렉토리 정리 | 🔄 |
+| T-938 | **보관함 폴더 다운로드** — `GET /dl-folder/` ZIP 실시간 스트리밍 + 웹 폴더행 📦 버튼 | 🔄 |
+| T-939 | **폴더 다운로드 속도 개선** — `setLevel(0)` 패스스루 + 256KB 버퍼 + 계측 로그 (PLAN_v0.17_dl-folder-speed) | ✅ |
+
+## v0.18 (2026-09-07) — 담기↔소비 완성 (PLAN_v0.18_media-share_android.md)
+
+| T-번호 | 내용 | 상태 |
+|--------|------|------|
+| T-940 | **브라우저 직접 재생** — `GET /stream/` Range(206) + 보관함 ▶ 버튼 + video 오버레이 | ✅ |
+| T-941 | **Share Intent 받기** — ACTION_SEND URL/magnet 수신 → 기존 등록 경로 | ✅ |
+| T-942 | **토렌트 파일 선택** — 목록 조회 + file_priority API + 웹/앱 체크박스 UI | ✅ |
+| T-943 | **검증·문서** — test/lint/assembleDebug + 실기기 E2E + CHANGELOG + 커밋 | ✅ |
+
+## v0.19 (2026-09-07) — 외부 재생 + 자동 운영 (PLAN_v0.19_dav-quota_android.md)
+
+| T-번호 | 내용 | 상태 |
+|--------|------|------|
+| T-944 | **WebDAV 읽기** — PROPFIND+GET Range, VLC 연동 | ✅ |
+| T-945 | **보관함 쿼터** — 상한 초과 시 오래된 파일 자동 휴지통 | ✅ |
+| T-946 | **자동 분류** — 확장자별 폴더 자동 이동 | ✅ |
+| T-947 | **중복 감지** — 동일 URL/magnet 등록 차단·안내 | ✅ |
+| T-948 | **검증·문서** — test/lint/assembleDebug + 실기기 E2E + CHANGELOG + 커밋 | ✅ |
+
+## v0.20 (2026-09-07) — 미리보기·검색·공유 (PLAN_v0.20_thumb-search-share_android.md)
+
+| T-번호 | 내용 | 상태 |
+|--------|------|------|
+| T-949 | **영상 썸네일** — FFmpeg 추출+캐시+목록 미리보기 | ✅ |
+| T-950 | **토렌트 검색** — Jackett/Prowlarr Torznab 연동 | ✅ |
+| T-951 | **만료 공유 링크** — 토큰+유효시간 발급/다운로드 | ✅ |
+| T-952 | **게스트 읽기전용** — 열람·다운로드만 허용 | ✅ |
+| T-953 | **위젯/퀵타일** — 서버 토글 | ✅ |
+| T-954 | **검증·문서** — test/lint/assembleDebug + 실기기 E2E + CHANGELOG + 커밋 | ✅ |
+
+## v0.21 (2026-09-07) — 설정 감사 + 업로드 최소화 (PLAN_v0.21_settings-audit_android.md)
+
+| T-번호 | 내용 | 상태 |
+|--------|------|------|
+| T-955 | **설정 감사** — 53필드 전수, 데드 4종 확정 | ✅ |
+| T-956 | **시드 비율 강제** — 도달 시 자동 일시정지 | ✅ |
+| T-957 | **DHT 토글 배선** — start/stopDht 반영 | ✅ |
+| T-958 | **저장 경로 배선** — 설정값 사용 | ✅ |
+| T-959 | **PEX 안내 + 업로드 최소화 프리셋** | ✅ |
+| T-960 | **검증·문서** — test/lint/assembleDebug + 실기기 E2E + CHANGELOG + 커밋 | ✅ |
+
+> v0.16.0(설정 1차)·v0.16.1(디자인 개편) 실기기 **직접 확인 대기**(사용자). 이후 **2차 확장** 예약: 스케줄(ScheduleRepository) / Debrid / 터널 / MCP / 기본값 복원. RSS CRUD는 별도 저장소(2차와 분리 검토).

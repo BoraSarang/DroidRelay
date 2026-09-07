@@ -29,9 +29,12 @@ import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
@@ -39,10 +42,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarDuration
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -53,6 +52,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import com.borasarang.droidrelay.relay.TorznabClient
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -64,18 +67,20 @@ import com.borasarang.droidrelay.relay.RelayApp
 import com.borasarang.droidrelay.relay.TorrentJob
 import com.borasarang.droidrelay.relay.TorrentRepository
 import com.borasarang.droidrelay.relay.TorrentState
-import kotlinx.coroutines.launch
 
 @Composable
-fun TorrentScreen() {
+fun TorrentScreen(onShowSnack: (String) -> Unit = {}) {
     val context = LocalContext.current
     val engine = remember { RelayApp.getTorrent(context) }
     val torrents by TorrentRepository.torrents.collectAsState()
-    val snackbarHostState = remember { SnackbarHostState() }
-    val scope = rememberCoroutineScope()
 
     var showMagnetDialog by remember { mutableStateOf(false) }
     var showDeleteDialog by remember { mutableStateOf<TorrentJob?>(null) }
+    // 토렌트 검색 (T-950)
+    var searchQuery by remember { mutableStateOf("") }
+    var searchResults by remember { mutableStateOf<List<TorznabClient.Result>?>(null) }
+    var searching by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
 
     val filePicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
@@ -85,10 +90,10 @@ fun TorrentScreen() {
                 val bytes = context.contentResolver.openInputStream(it)?.use { s -> s.readBytes() } ?: return@let
                 val filename = it.lastPathSegment?.substringAfterLast('/') ?: "torrent"
                 engine.addTorrentFile(bytes, filename)
-                scope.launch { snackbarHostState.showSnackbar("torrent 파일 추가됨: $filename") }
+                onShowSnack("torrent 파일 추가됨: $filename")
             } catch (e: Exception) {
                 DebugLogger.e("TorrentUI", "torrent 파일 읽기 실패", e)
-                scope.launch { snackbarHostState.showSnackbar("torrent 파일 읽기 실패") }
+                onShowSnack("torrent 파일 읽기 실패")
             }
         }
     }
@@ -100,31 +105,9 @@ fun TorrentScreen() {
         }
     }
 
-    Scaffold(
-        floatingActionButton = {
-            Column {
-                FloatingActionButton(
-                    onClick = { showMagnetDialog = true },
-                    containerColor = MaterialTheme.colorScheme.primaryContainer,
-                ) {
-                    Icon(Icons.Filled.Link, "magnet 추가")
-                }
-                Spacer(Modifier.height(12.dp))
-                FloatingActionButton(
-                    onClick = { filePicker.launch(arrayOf("application/x-bittorrent")) },
-                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                ) {
-                    Icon(Icons.Filled.Add, "파일 추가")
-                }
-            }
-        },
-        snackbarHost = { SnackbarHost(snackbarHostState) },
-    ) { inner ->
+    Box(Modifier.fillMaxSize()) {
         if (torrents.isEmpty()) {
-            Box(
-                Modifier.fillMaxSize().padding(inner),
-                contentAlignment = Alignment.Center,
-            ) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Icon(
                         Icons.Filled.CloudDownload,
@@ -140,9 +123,88 @@ fun TorrentScreen() {
             }
         } else {
             LazyColumn(
-                Modifier.fillMaxSize().padding(inner),
+                Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
+                item {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        OutlinedTextField(
+                            value = searchQuery,
+                            onValueChange = { searchQuery = it },
+                            label = { Text("토렌트 검색") },
+                            singleLine = true,
+                            shape = MaterialTheme.shapes.small,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Button(
+                            onClick = {
+                                if (searchQuery.isBlank() || searching) return@Button
+                                searching = true
+                                scope.launch(Dispatchers.IO) {
+                                    val res = runCatching { engine.search(searchQuery.trim()) }
+                                    withContext(Dispatchers.Main) {
+                                        searching = false
+                                        res.onSuccess {
+                                            searchResults = it
+                                            if (it.isEmpty()) onShowSnack("검색 결과 없음")
+                                        }.onFailure { e ->
+                                            DebugLogger.e("TorrentUI", "검색 실패", e)
+                                            onShowSnack("검색 실패: ${e.message}")
+                                        }
+                                    }
+                                }
+                            },
+                            enabled = !searching,
+                            shape = MaterialTheme.shapes.small,
+                        ) {
+                            Icon(Icons.Filled.Search, "검색")
+                        }
+                    }
+                }
+                searchResults?.let { results ->
+                    items(results) { r ->
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceContainer,
+                            ),
+                        ) {
+                            Row(
+                                Modifier.fillMaxWidth().padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(
+                                        r.title,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    Text(
+                                        "${fmtSize(r.size)} · 시드 ${r.seeders}${if (r.indexer.isNotBlank()) " · ${r.indexer}" else ""}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.outline,
+                                    )
+                                }
+                                TextButton(onClick = {
+                                    scope.launch(Dispatchers.IO) {
+                                        val ok = runCatching {
+                                            if (r.magnet != null) engine.addMagnet(r.magnet)
+                                            else engine.addTorrentUrl(r.url!!)
+                                        }
+                                        withContext(Dispatchers.Main) {
+                                            ok.onSuccess { onShowSnack("토렌트 추가됨") }
+                                                .onFailure { e -> onShowSnack("추가 실패: ${e.message}") }
+                                        }
+                                    }
+                                }) {
+                                    Text("받기")
+                                }
+                            }
+                        }
+                    }
+                }
                 items(torrents, key = { it.id }) { job ->
                     TorrentItem(
                         job = job,
@@ -151,8 +213,31 @@ fun TorrentScreen() {
                         onDelete = { showDeleteDialog = job },
                         onMoveUp = { engine.reorder(job.id, -1) },
                         onMoveDown = { engine.reorder(job.id, 1) },
+                        onSelectFiles = { sel ->
+                            if (engine.setFileSelection(job.id, sel)) onShowSnack("파일 선택 적용됨 (${sel.size}/${job.files.size}개)")
+                            else onShowSnack("파일 목록 없음 — 메타데이터 수신 후 시도")
+                        },
                     )
                 }
+                item { Spacer(Modifier.height(80.dp)) }
+            }
+        }
+
+        Column(
+            Modifier.align(Alignment.BottomEnd).padding(20.dp),
+        ) {
+            FloatingActionButton(
+                onClick = { showMagnetDialog = true },
+                containerColor = MaterialTheme.colorScheme.primaryContainer,
+            ) {
+                Icon(Icons.Filled.Link, "magnet 추가")
+            }
+            Spacer(Modifier.height(12.dp))
+            FloatingActionButton(
+                onClick = { filePicker.launch(arrayOf("application/x-bittorrent")) },
+                containerColor = MaterialTheme.colorScheme.secondaryContainer,
+            ) {
+                Icon(Icons.Filled.Add, "파일 추가")
             }
         }
     }
@@ -162,7 +247,7 @@ fun TorrentScreen() {
             onDismiss = { showMagnetDialog = false },
             onConfirm = { magnet ->
                 engine.addMagnet(magnet)
-                scope.launch { snackbarHostState.showSnackbar("magnet 추가됨") }
+                onShowSnack("magnet 추가됨")
                 showMagnetDialog = false
             },
         )
@@ -198,8 +283,10 @@ private fun TorrentItem(
     onDelete: () -> Unit,
     onMoveUp: () -> Unit,
     onMoveDown: () -> Unit,
+    onSelectFiles: (Set<Int>) -> Unit,
 ) {
     val now = System.currentTimeMillis()
+    var filesExpanded by remember(job.id) { mutableStateOf(false) }
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -249,7 +336,7 @@ private fun TorrentItem(
                                 if (etaParts.isNotEmpty()) {
                                     Spacer(Modifier.height(2.dp))
                                     Text(
-                                        "⏱ ${etaParts.joinToString(" · ")}",
+                                        etaParts.joinToString(" · "),
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
@@ -295,6 +382,43 @@ private fun TorrentItem(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.outline,
                     )
+                }
+            }
+            // 파일 선택 (T-942)
+            if (job.files.isNotEmpty()) {
+                Spacer(Modifier.height(4.dp))
+                TextButton(onClick = { filesExpanded = !filesExpanded }) {
+                    Text("파일 ${job.files.size}개 (${job.files.count { it.selected }}개 선택)")
+                }
+                if (filesExpanded) {
+                    Column {
+                        job.files.forEach { f ->
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Checkbox(
+                                    checked = f.selected,
+                                    onCheckedChange = { checked ->
+                                        onSelectFiles(
+                                            job.files.filter { if (it.index == f.index) checked else it.selected }
+                                                .map { it.index }.toSet(),
+                                        )
+                                    },
+                                )
+                                Column(Modifier.weight(1f)) {
+                                    Text(
+                                        f.path,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    Text(
+                                        fmtSize(f.size),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.outline,
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }

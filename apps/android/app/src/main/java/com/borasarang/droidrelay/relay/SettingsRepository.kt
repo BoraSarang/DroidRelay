@@ -31,7 +31,7 @@ data class AppSettings(
     val port: Int = 8080,
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
     val dynamicColor: Boolean = true,
-    val concurrency: Int = 1,
+    val concurrency: Int = SettingsConstraints.DEFAULT_CONCURRENCY,
     val autoStart: Boolean = true,
     val notifications: Boolean = true,
     val webAuthEnabled: Boolean = false,
@@ -43,7 +43,7 @@ data class AppSettings(
     val allowedIps: Set<String> = emptySet(),
     val accessScope: AccessScope = AccessScope.SUBNET_ONLY,
     val torrentSavePath: String = "",
-    val torrentUploadLimit: Long = 0L,
+    val torrentUploadLimit: Long = SettingsConstraints.DEFAULT_TORRENT_UPLOAD_KBPS.toLong(),
     val torrentDownloadLimit: Long = 0L,
     val torrentMaxActive: Int = 3,
     val torrentSeedRatio: Float = 2.0f,
@@ -76,6 +76,19 @@ data class AppSettings(
     val scheduleWifiOnly: Boolean = true,
     val scheduleChargingOnly: Boolean = false,
     val scheduleBatteryMin: Int = 30,
+    val watchdogIntervalSec: Int = 60,
+    val torrentMinSeedWaitSec: Int = 0,
+    val forceHttpsRedirect: Boolean = false,
+    // 보관함 자동 운영 (v0.19)
+    val storageQuotaGb: Int = 0, // 0=끔
+    val autoClassify: Boolean = false,
+    // 토렌트 검색 Torznab (v0.20)
+    val searchEnabled: Boolean = false,
+    val searchUrl: String = "",
+    val searchApiKey: String = "",
+    // 게스트 읽기전용 (v0.20) — 웹 인증 켜짐 + 비밀번호 설정 시에만 유효
+    val guestEnabled: Boolean = false,
+    val guestPassword: String = "",
 )
 
 private val Context.settingsDataStore by preferencesDataStore("droidrelay_settings")
@@ -140,6 +153,19 @@ class SettingsRepository(private val context: Context) {
         val SCHED_WIFI = booleanPreferencesKey("sched_wifi_only")
         val SCHED_CHARGING = booleanPreferencesKey("sched_charging_only")
         val SCHED_BATTERY_MIN = intPreferencesKey("sched_battery_min")
+        val WATCHDOG_INTERVAL_SEC = intPreferencesKey("watchdog_interval_sec")
+        val TORRENT_MIN_SEED_WAIT_SEC = intPreferencesKey("torrent_min_seed_wait_sec")
+        val FORCE_HTTPS_REDIRECT = booleanPreferencesKey("force_https_redirect")
+        // 보관함 자동 운영 (v0.19)
+        val STORAGE_QUOTA_GB = intPreferencesKey("storage_quota_gb")
+        val AUTO_CLASSIFY = booleanPreferencesKey("auto_classify")
+        // 토렌트 검색 (v0.20)
+        val SEARCH_ENABLED = booleanPreferencesKey("search_enabled")
+        val SEARCH_URL = stringPreferencesKey("search_url")
+        val SEARCH_API_KEY = stringPreferencesKey("search_api_key")
+        // 게스트 (v0.20)
+        val GUEST_ENABLED = booleanPreferencesKey("guest_enabled")
+        val GUEST_PASSWORD = stringPreferencesKey("guest_password")
     }
 
     val settings: Flow<AppSettings> = context.settingsDataStore.data.map { p ->
@@ -148,7 +174,8 @@ class SettingsRepository(private val context: Context) {
             themeMode = runCatching { ThemeMode.valueOf(p[Keys.THEME] ?: ThemeMode.SYSTEM.name) }
                 .getOrDefault(ThemeMode.SYSTEM),
             dynamicColor = p[Keys.DYNAMIC] ?: true,
-            concurrency = (p[Keys.CONCURRENCY] ?: 1).coerceIn(1, 4),
+            concurrency = (p[Keys.CONCURRENCY] ?: SettingsConstraints.DEFAULT_CONCURRENCY)
+                .coerceIn(SettingsConstraints.CONCURRENCY_MIN, SettingsConstraints.CONCURRENCY_MAX),
             autoStart = p[Keys.AUTO_START] ?: true,
             notifications = p[Keys.NOTIFICATIONS] ?: true,
             webAuthEnabled = p[Keys.WEB_AUTH] ?: false,
@@ -161,7 +188,7 @@ class SettingsRepository(private val context: Context) {
             accessScope = runCatching { AccessScope.valueOf(p[Keys.ACCESS_SCOPE] ?: AccessScope.SUBNET_ONLY.name) }
                 .getOrDefault(AccessScope.SUBNET_ONLY),
             torrentSavePath = p[Keys.TORRENT_SAVE_PATH] ?: "",
-            torrentUploadLimit = (p[Keys.TORRENT_UPLOAD_LIMIT] ?: 0).toLong().coerceAtLeast(0),
+            torrentUploadLimit = (p[Keys.TORRENT_UPLOAD_LIMIT] ?: SettingsConstraints.DEFAULT_TORRENT_UPLOAD_KBPS).toLong().coerceAtLeast(0),
             torrentDownloadLimit = (p[Keys.TORRENT_DOWNLOAD_LIMIT] ?: 0).toLong().coerceAtLeast(0),
             torrentMaxActive = (p[Keys.TORRENT_MAX_ACTIVE] ?: 3).coerceIn(1, 10),
             torrentSeedRatio = (p[Keys.TORRENT_SEED_RATIO] ?: 200).toInt().coerceIn(0, 1000) / 100f,
@@ -188,6 +215,16 @@ class SettingsRepository(private val context: Context) {
             scheduleWifiOnly = p[Keys.SCHED_WIFI] ?: true,
             scheduleChargingOnly = p[Keys.SCHED_CHARGING] ?: false,
             scheduleBatteryMin = (p[Keys.SCHED_BATTERY_MIN] ?: 30).coerceIn(5, 100),
+            watchdogIntervalSec = (p[Keys.WATCHDOG_INTERVAL_SEC] ?: 60).coerceIn(15, 3600),
+            torrentMinSeedWaitSec = (p[Keys.TORRENT_MIN_SEED_WAIT_SEC] ?: 0).coerceAtLeast(0),
+            forceHttpsRedirect = p[Keys.FORCE_HTTPS_REDIRECT] ?: false,
+            storageQuotaGb = (p[Keys.STORAGE_QUOTA_GB] ?: 0).coerceIn(0, 1024),
+            autoClassify = p[Keys.AUTO_CLASSIFY] ?: false,
+            searchEnabled = p[Keys.SEARCH_ENABLED] ?: false,
+            searchUrl = p[Keys.SEARCH_URL] ?: "",
+            searchApiKey = p[Keys.SEARCH_API_KEY] ?: "",
+            guestEnabled = p[Keys.GUEST_ENABLED] ?: false,
+            guestPassword = p[Keys.GUEST_PASSWORD] ?: "",
         )
     }
 
@@ -204,7 +241,9 @@ class SettingsRepository(private val context: Context) {
         context.settingsDataStore.edit { it[Keys.DYNAMIC] = b }
 
     suspend fun setConcurrency(n: Int) =
-        context.settingsDataStore.edit { it[Keys.CONCURRENCY] = n.coerceIn(1, 4) }
+        context.settingsDataStore.edit {
+            it[Keys.CONCURRENCY] = n.coerceIn(SettingsConstraints.CONCURRENCY_MIN, SettingsConstraints.CONCURRENCY_MAX)
+        }
 
     suspend fun setAutoStart(b: Boolean) =
         context.settingsDataStore.edit { it[Keys.AUTO_START] = b }
@@ -227,6 +266,39 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun setMaxUploadBps(bps: Long) =
         context.settingsDataStore.edit { it[Keys.MAX_UPLOAD_BPS] = bps.coerceAtLeast(0) }
+
+    suspend fun setWatchdogIntervalSec(sec: Int) =
+        context.settingsDataStore.edit { it[Keys.WATCHDOG_INTERVAL_SEC] = sec.coerceIn(15, 3600) }
+
+    suspend fun setTorrentMinSeedWaitSec(sec: Int) =
+        context.settingsDataStore.edit { it[Keys.TORRENT_MIN_SEED_WAIT_SEC] = sec.coerceAtLeast(0) }
+
+    suspend fun setForceHttpsRedirect(b: Boolean) =
+        context.settingsDataStore.edit { it[Keys.FORCE_HTTPS_REDIRECT] = b }
+
+    // 보관함 자동 운영 setters (v0.19)
+    suspend fun setStorageQuotaGb(gb: Int) =
+        context.settingsDataStore.edit { it[Keys.STORAGE_QUOTA_GB] = gb.coerceIn(0, 1024) }
+
+    suspend fun setAutoClassify(enabled: Boolean) =
+        context.settingsDataStore.edit { it[Keys.AUTO_CLASSIFY] = enabled }
+
+    // 토렌트 검색 setters (v0.20)
+    suspend fun setSearchEnabled(enabled: Boolean) =
+        context.settingsDataStore.edit { it[Keys.SEARCH_ENABLED] = enabled }
+
+    suspend fun setSearchUrl(url: String) =
+        context.settingsDataStore.edit { it[Keys.SEARCH_URL] = url.trim().trimEnd('/') }
+
+    suspend fun setSearchApiKey(key: String) =
+        context.settingsDataStore.edit { it[Keys.SEARCH_API_KEY] = key.trim() }
+
+    // 게스트 setters (v0.20)
+    suspend fun setGuestEnabled(enabled: Boolean) =
+        context.settingsDataStore.edit { it[Keys.GUEST_ENABLED] = enabled }
+
+    suspend fun setGuestPassword(pass: String) =
+        context.settingsDataStore.edit { if (pass.isNotBlank()) it[Keys.GUEST_PASSWORD] = pass }
 
     suspend fun addAllowedIp(ip: String) =
         context.settingsDataStore.edit { it[Keys.ALLOWED_IPS] = (it[Keys.ALLOWED_IPS] ?: emptySet()) + ip }

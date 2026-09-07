@@ -9,6 +9,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
+import androidx.core.app.ServiceCompat
 import com.borasarang.droidrelay.R
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -35,12 +36,14 @@ class RelayService : Service() {
     private var webhookManager: WebhookManager? = null
     private var tunnelManager: TunnelManager? = null
     private var schedulerManager: SchedulerManager? = null
+    private var isForeground = false
 
     override fun onCreate() {
         super.onCreate()
         DebugLogger.i(TAG, "서비스 생성 시작")
-        createChannel()
+        // FGS 승격을 가장 먼저 시도 — startForegroundService fallback 경로의 5초 의무 창 확보
         startInForeground()
+        createChannel()
 
         val settingsRepo = SettingsRepository.get(applicationContext)
         val engine = RelayApp.get(applicationContext)
@@ -127,6 +130,45 @@ class RelayService : Service() {
                         }
                         lastPort = s.port
                         updateRunningNotification(s.port)
+                    }
+                }
+            }
+        }
+
+        // ② watchdog — 서버 헬스체크 주기 수행 (이슈 1의 24시간 안정성)
+        scope.launch {
+            var lastInterval = -1
+            var healthyCount = 0
+            settingsRepo.settings.collectLatest { s ->
+                val intervalMs = s.watchdogIntervalSec * 1000L
+                while (true) {
+                    delay(intervalMs)
+                    if (s.watchdogIntervalSec != lastInterval) {
+                        lastInterval = s.watchdogIntervalSec
+                        DebugLogger.i(TAG, "watchdog 주기 ${s.watchdogIntervalSec}초 시작")
+                    }
+                    val current = server
+                    if (current == null) {
+                        // 서버가 아예 없으면 새로 기동
+                        DebugLogger.w(TAG, "watchdog: 서버가 없음 → 기동 시도")
+                        healthyCount = 0
+                        runCatching {
+                            val s2 = settingsRepo.firstBlocking()
+                            server = RelayServer(applicationContext, s2.port).also { it.updateSettings(s2); it.start() }
+                            val url = lanAddress()?.let { "http://$it:${s2.port}" }
+                            settingsRepo.updateServerState(ServerState(running = true, port = s2.port, url = url))
+                        }.onFailure { e ->
+                            DebugLogger.e(TAG, "watchdog 서버 기동 실패: ${e.message}")
+                        }
+                        continue
+                    }
+                    if (current.isHealthy()) {
+                        healthyCount++
+                        if (healthyCount == 1) DebugLogger.d(TAG, "watchdog: 서버 정상")
+                    } else {
+                        healthyCount = 0
+                        DebugLogger.w(TAG, "watchdog: 서버 무응답 → 재시작")
+                        current.restart()
                     }
                 }
             }
@@ -232,6 +274,8 @@ class RelayService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // 재시작/재실행 시 FGS 허용 타이밍이면 알림 복구 (이미 포그라운드면 no-op)
+        startInForeground()
         when (intent?.action) {
             ACTION_ALLOW -> {
                 val ip = intent.getStringExtra(EXTRA_IP) ?: return START_NOT_STICKY
@@ -247,6 +291,11 @@ class RelayService : Service() {
 
     override fun onDestroy() {
         DebugLogger.i(TAG, "서비스 종료 시작 — 컴포넌트 정리")
+        // FGS로 승격된 경우 반드시 제거 — 누락 시 ForegroundServiceDidNotStopInTimeException(E-AND-SRV-0110)
+        if (isForeground) {
+            ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+            isForeground = false
+        }
         server?.stop()
         server = null
         networkMonitor?.unregister()
@@ -276,17 +325,31 @@ class RelayService : Service() {
         val jobs = com.borasarang.droidrelay.relay.JobsRepository.all()
         JobsPersistence(applicationContext).save(jobs)
         TorrentRepository.all().let { TorrentPersistence(applicationContext).save(it) }
+        // FGS 제거 누락 시 시스템에 의해 타임아웃 크래시 발생 — 스와이프 종료 시에도 명시적으로 해제 (E-AND-SRV-0110)
+        if (isForeground) {
+            ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+            isForeground = false
+        }
         super.onTaskRemoved(rootIntent)
     }
 
     override fun onBind(intent: Intent?) = null
 
     private fun startInForeground() {
+        if (isForeground) return
         val notif = runningNotification(lanAddress())
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(NOTIF_ID, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
-        } else {
-            startForeground(NOTIF_ID, notif)
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(NOTIF_ID, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+            } else {
+                startForeground(NOTIF_ID, notif)
+            }
+            isForeground = true
+            DebugLogger.i(TAG, "포그라운드 서비스 시작 완료")
+        } catch (e: Exception) {
+            // Android 12+ 백그라운드 시작 제한(ForegroundServiceStartNotAllowedException) 등 —
+            // 무시해도 서비스는 백그라운드로 계속 동작하며, 이후 재시도 시 알림 복구된다.
+            DebugLogger.w(TAG, "FGS 시작 거부 — 백그라운드 모드로 계속 동작: ${e.message} (E-AND-SRV-0101)")
         }
     }
 
@@ -426,7 +489,18 @@ class RelayService : Service() {
         const val EXTRA_IP = "ip"
 
         fun start(context: Context) {
-            context.startForegroundService(Intent(context, RelayService::class.java))
+            // 주의: startForegroundService()는 5초 내 startForeground() 성공이 의무다.
+            // 실패(백그라운드 시작 제한) 시 시스템이 ForegroundServiceDidNotStartInTimeException으로
+            // 앱 전체를 죽이므로, 기본은 일반 startService()로 시작해
+            // onStartCommand에서 기회적으로 startForeground()로 승격한다 (의무 타이머 없음).
+            try {
+                context.startService(Intent(context, RelayService::class.java))
+            } catch (e: IllegalStateException) {
+                // API 26+ 백그라운드 start 제한 — FGS 경유 재시도 (허용 시점만 호출되므로 안전)
+                DebugLogger.w("RelayService", "startService 거부 — startForegroundService 재시도: ${e.message} (E-AND-SRV-0102)")
+                runCatching { context.startForegroundService(Intent(context, RelayService::class.java)) }
+                    .onFailure { DebugLogger.e("RelayService", "startForegroundService 실패: ${it.message}", it) }
+            }
         }
 
         fun stop(context: Context) {

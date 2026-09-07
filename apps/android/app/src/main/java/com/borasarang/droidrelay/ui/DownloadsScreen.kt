@@ -4,13 +4,21 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.graphics.Bitmap
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -23,20 +31,19 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.ArrowDropUp
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.VideoLibrary
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -47,20 +54,16 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableLongStateOf
-import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -85,62 +88,101 @@ import org.json.JSONObject
 @Composable
 fun DownloadsScreen(onCopyAddress: (String) -> Unit) {
     val jobs by JobsRepository.jobs.collectAsState()
-    var showPanel by remember { mutableStateOf(false) }
-    var taps by remember { mutableIntStateOf(0) }
-    var lastTapAt by remember { mutableLongStateOf(0L) }
+    val qr = remember { qrBitmap("http://${lanAddress()}:${RelayService.PORT}") }
+    var qrFull by remember { mutableStateOf(false) }
+    val qrScale by animateFloatAsState(if (qrFull) 1f else 0.85f, animationSpec = tween(180), label = "qrScale")
 
-    fun onTitleTap() {
-        val now = System.currentTimeMillis()
-        taps = if (now - lastTapAt < 2000) taps + 1 else 1
-        lastTapAt = now
-        if (taps >= 5) {
-            taps = 0
-            showPanel = true
-            DebugLogger.i("UI", "5탭 감지 → 디버그 패널 열림 (${DebugLogger.count()}줄)")
-        }
-    }
-
-    Column(Modifier.fillMaxWidth()) {
-        Spacer(Modifier.height(8.dp))
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .combinedClickable(onClick = { onTitleTap() }),
+    Box(Modifier.fillMaxSize()) {
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Text("📡 DroidRelay", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.headlineSmall)
-            Text("제목 5연속 탭 → 디버그 로그 패널", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
+            item { ServerCard(onCopyAddress, qr, onQrClick = { qrFull = true }) }
+            item { AddRow() }
+            item { VideoAddRow(onDlStarted = { }) }
+            item {
+                Text(
+                    "작업 목록 (${jobs.size})",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.labelMedium,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+            }
+            if (jobs.isEmpty()) {
+                item {
+                    Column(
+                        Modifier.fillMaxWidth().padding(vertical = 40.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        Icon(
+                            Icons.Filled.Download,
+                            contentDescription = null,
+                            modifier = Modifier.size(40.dp),
+                            tint = MaterialTheme.colorScheme.outline,
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            "다운로드한 작업이 없습니다",
+                            color = MaterialTheme.colorScheme.outline,
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    }
+                }
+            } else {
+                items(jobs, key = { it.id }) { JobCard(it) }
+            }
+            item { Spacer(Modifier.height(24.dp)) }
         }
-        Spacer(Modifier.height(10.dp))
 
-        ServerCard(onCopyAddress)
-        Spacer(Modifier.height(12.dp))
-        AddRow()
-        Spacer(Modifier.height(10.dp))
-        VideoAddRow(
-            onDlStarted = { /* 목록은 StateFlow로 자동 갱신 */ },
-        )
-        Spacer(Modifier.height(8.dp))
-        Text("작업 목록 (${jobs.size})", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelMedium)
-
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            items(jobs, key = { it.id }) { JobCard(it) }
-            item { Spacer(Modifier.height(20.dp)) }
-        }
-    }
-
-    if (showPanel) {
-        ModalBottomSheet(onDismissRequest = {
-            showPanel = false
-            DebugLogger.d("UI", "디버그 패널 닫힘")
-        }, containerColor = MaterialTheme.colorScheme.surfaceContainerHigh) {
-            DebugPanelContent()
+        if (qrFull) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.6f))
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = { qrFull = false },
+                    ),
+                contentAlignment = Alignment.Center,
+            ) {
+                val cs = MaterialTheme.colorScheme
+                Card(
+                    shape = MaterialTheme.shapes.large,
+                    colors = CardDefaults.cardColors(containerColor = cs.surface),
+                ) {
+                    Box(Modifier.padding(16.dp)) {
+                        qr?.let {
+                            Image(
+                                bitmap = it.asImageBitmap(),
+                                contentDescription = "접속 주소 QR 코드 (확대)",
+                                modifier = Modifier
+                                    .fillMaxWidth(0.8f)
+                                    .aspectRatio(1f)
+                                    .scale(qrScale)
+                                    .clickable(
+                                        interactionSource = remember { MutableInteractionSource() },
+                                        indication = null,
+                                        onClick = { qrFull = false },
+                                    ),
+                            )
+                        }
+                        IconButton(
+                            onClick = { qrFull = false },
+                            modifier = Modifier.align(Alignment.TopEnd),
+                        ) {
+                            Icon(Icons.Filled.Close, contentDescription = "닫기", tint = cs.onSurfaceVariant)
+                        }
+                    }
+                }
+            }
         }
     }
 }
 
 /** 서버 주소·QR·저장공간 카드 + 네트워크 타입 + 공유 */
 @Composable
-private fun ServerCard(onCopyAddress: (String) -> Unit) {
+private fun ServerCard(onCopyAddress: (String) -> Unit, qr: Bitmap?, onQrClick: () -> Unit) {
     val ctx = LocalContext.current
     val engine = remember { RelayApp.get(ctx) }
     val ip = remember { lanAddress() }
@@ -198,7 +240,7 @@ private fun ServerCard(onCopyAddress: (String) -> Unit) {
                                 addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
                             }
                             // QR 비트맵을 jpg로 저장 후 공유
-                            qrBitmap(addr)?.let { bmp ->
+                            qr?.let { bmp ->
                                 val file = java.io.File(ctx.cacheDir, "droidrelay_qr.jpg")
                                 file.outputStream().use { bmp.compress(android.graphics.Bitmap.CompressFormat.JPEG, 90, it) }
                                 val uri = androidx.core.content.FileProvider.getUriForFile(
@@ -211,8 +253,12 @@ private fun ServerCard(onCopyAddress: (String) -> Unit) {
                         }) { Text("공유") }
                     }
                 }
-                qrBitmap(addr)?.let { bmp ->
-                    Image(bitmap = bmp.asImageBitmap(), contentDescription = "QR", modifier = Modifier.size(96.dp))
+                qr?.let { bmp ->
+                    Image(
+                        bitmap = bmp.asImageBitmap(),
+                        contentDescription = "QR",
+                        modifier = Modifier.size(96.dp).clickable(onClick = onQrClick),
+                    )
                 }
             }
 
@@ -238,6 +284,7 @@ private fun ServerCard(onCopyAddress: (String) -> Unit) {
 @Composable
 private fun AddRow() {
     var text by remember { mutableStateOf("") }
+    var dupWarn by remember { mutableStateOf(false) }
     val engine = RelayApp.get(LocalContext.current)
     val cs = MaterialTheme.colorScheme
 
@@ -261,12 +308,25 @@ private fun AddRow() {
         Button(onClick = {
             if (text.isNotBlank()) {
                 DebugLogger.i("UI", "추가 클릭 url=${text.trim()}")
-                engine.enqueue(text.trim())
-                text = ""
+                if (JobsRepository.findDuplicateUrl(text.trim()) != null) {
+                    dupWarn = true
+                    DebugLogger.i("UI", "중복 URL 추가 시도 → 안내")
+                } else {
+                    dupWarn = false
+                    engine.enqueue(text.trim())
+                    text = ""
+                }
             }
         }, shape = MaterialTheme.shapes.small) {
             Icon(Icons.Filled.Add, "추가")
         }
+    }
+    if (dupWarn) {
+        Text(
+            "이미 등록된 다운로드입니다",
+            color = MaterialTheme.colorScheme.error,
+            style = MaterialTheme.typography.bodySmall,
+        )
     }
 }
 
@@ -335,7 +395,7 @@ private fun VideoAddRow(onDlStarted: () -> Unit) {
 
     Card(colors = CardDefaults.cardColors(containerColor = cs.surfaceContainerHigh), shape = MaterialTheme.shapes.medium) {
         Column(Modifier.fillMaxWidth().padding(14.dp)) {
-            Text("🎬 비디오 (스트림)", color = cs.primary, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.titleSmall)
+            Text("비디오 (스트림)", color = cs.primary, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.titleSmall)
             Text("스트림 주소(m3u8/mpd) 또는 스트리밍 웹페이지", color = cs.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
             Spacer(Modifier.height(8.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -462,10 +522,17 @@ private fun JobCard(job: Job) {
                 Column(Modifier.weight(1f)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
-                            Text(
-                                "${if (job.type == "video") "🎬 " else ""}${job.filename}",
-                                color = cs.onSurface, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                            )
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                if (job.type == "video") {
+                                    Icon(Icons.Filled.VideoLibrary, null, tint = cs.primary, modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(4.dp))
+                                }
+                                Text(
+                                    job.filename,
+                                    modifier = Modifier.weight(1f),
+                                    color = cs.onSurface, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                )
+                            }
                             Spacer(Modifier.height(2.dp))
                             Text(stateLabel(job), color = cs.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
                             if (job.state == JobState.RUNNING && job.speedBps > 0) {
@@ -480,7 +547,7 @@ private fun JobCard(job: Job) {
                                 }
                                 if (etaParts.isNotEmpty()) {
                                     Spacer(Modifier.height(1.dp))
-                                    Text("⏱ ${etaParts.joinToString(" · ")}", color = cs.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
+                                    Text(etaParts.joinToString(" · "), color = cs.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
                                 }
                             }
                         }
@@ -535,87 +602,11 @@ private fun JobCard(job: Job) {
     }
 }
 
-/** 디버그 패널 — 다중 선택 후 복사 (AGENTS.md 10.2 필수) */
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-private fun DebugPanelContent() {
-    val lines = remember { mutableStateListOf<String>().apply { addAll(DebugLogger.lines().asReversed()) } }
-    val selected = remember { mutableStateListOf<Int>() }
-    val clipboard = LocalClipboardManager.current
-    val context = LocalContext.current
-    val cs = MaterialTheme.colorScheme
-
-    fun copyToClip(text: String, label: String) {
-        clipboard.setText(AnnotatedString(text))
-        android.widget.Toast.makeText(context, "$label 완료", android.widget.Toast.LENGTH_SHORT).show()
-        DebugLogger.i("Panel", "$label (${text.lines().size}줄)")
-    }
-
-    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
-        Text(
-            "🛠 디버그 로그 (${lines.size}줄 · 최신순)",
-            color = cs.primary,
-            fontWeight = FontWeight.SemiBold,
-            style = MaterialTheme.typography.titleMedium,
-        )
-        Spacer(Modifier.height(8.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(
-                onClick = {
-                    val text = selected.sorted().mapNotNull { lines.getOrNull(it) }.joinToString("\n")
-                    if (text.isNotEmpty()) copyToClip(text, "선택 복사")
-                },
-                enabled = selected.isNotEmpty(),
-            ) { Text("선택 복사 (${selected.size})") }
-            OutlinedButton(onClick = { copyToClip(DebugLogger.dump(), "전체 복사") }) { Text("전체 복사") }
-            OutlinedButton(onClick = {
-                DebugLogger.clear(); lines.clear(); selected.clear()
-            }) { Text("비우기") }
-        }
-        Spacer(Modifier.height(8.dp))
-
-        LazyColumn(modifier = Modifier.fillMaxWidth().height(420.dp)) {
-            items(lines.size) { idx ->
-                val line = lines[idx]
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.fillMaxWidth().combinedClickable(onClick = {
-                        if (idx in selected) selected.remove(idx) else selected.add(idx)
-                    }),
-                ) {
-                    Checkbox(
-                        checked = idx in selected,
-                        onCheckedChange = { checked ->
-                            if (checked) selected.add(idx) else selected.remove(idx)
-                        },
-                        modifier = Modifier.size(30.dp),
-                    )
-                    Text(
-                        line,
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 11.sp,
-                        lineHeight = 15.sp,
-                        color = when {
-                            line.contains("[E]") -> cs.error
-                            line.contains("[W]") -> Color(0xFFFFD59E)
-                            line.contains("[I]") -> cs.onSurface
-                            else -> cs.onSurfaceVariant
-                        },
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-            }
-        }
-        Spacer(Modifier.height(24.dp))
-    }
-}
-
 private fun stateLabel(j: Job): String {
     val badge = when (j.state) {
         JobState.QUEUED -> "대기"
         JobState.RUNNING -> {
-            val sp = if (j.speedBps > 0) " ⚡${j.speedBps / 1024}KB/s" else ""
+            val sp = if (j.speedBps > 0) " · ${j.speedBps / 1024}KB/s" else ""
             "진행 중 ${"%.0f".format(j.progress * 100)}%$sp"
         }
         JobState.PAUSED -> "일시정지"

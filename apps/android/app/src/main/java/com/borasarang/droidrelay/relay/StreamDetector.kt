@@ -40,6 +40,14 @@ object StreamDetector {
         val kind: String, // stream | mp4 | page
         val qualities: List<Quality> = emptyList(),
         val segmentsTotal: Int = 0, // HLS 세그먼트 전체 개수 (0이면 미지원/미측정)
+        val durationMs: Long = 0, // HLS 총 재생 시간(ms), -progress 진행률 분모 (0이면 미지원/미측정)
+    )
+
+    /** 매니페스트 1회 수신 결과 — variant(해상도) + 실측 세그먼트 개수 + 총 재생 시간 */
+    data class ManifestResult(
+        val variants: List<Quality>,
+        val segments: Int,
+        val durationMs: Long,
     )
 
     private val client by lazy {
@@ -59,8 +67,8 @@ object StreamDetector {
         }
         if (directManifest.containsMatchIn(url)) {
             DebugLogger.i(TAG, "[FEATURE] 직접 매니페스트 url=${url.take(90)}")
-            val qs = parseManifestVariants(url)
-            return Found(url, "스트림 (직접 주소)", true, "stream", qs, resolveSegmentsCount(url))
+            val m = parseManifest(url)
+            return Found(url, "스트림 (직접 주소)", true, "stream", m.variants, m.segments, m.durationMs)
         }
         if (!url.startsWith("http://") && !url.startsWith("https://")) {
             throw VideoException("E-AND-VID-0200", "스트림 주소(m3u8/mpd) 또는 웹페이지 URL이 아닙니다")
@@ -83,28 +91,28 @@ object StreamDetector {
             "페이지에서 스트림(m3u8/mpd)을 찾지 못했습니다. 스트림 주소를 직접 입력해 주세요.",
         )
         val abs = resolve(url, found)
-        val qs = parseManifestVariants(abs)
-        DebugLogger.i(TAG, "검출 성공 title='$title' url=${abs.take(90)} quality=${qs.size}")
-        return Found(abs, title, false, "stream", qs, resolveSegmentsCount(abs))
+        val m = parseManifest(abs)
+        DebugLogger.i(TAG, "검출 성공 title='$title' url=${abs.take(90)} quality=${m.variants.size}")
+        return Found(abs, title, false, "stream", m.variants, m.segments, m.durationMs)
     }
 
-    /** 매니페스트 URL을 GET해 variant(해상도) 및 프로토콜 판정 */
-    private fun parseManifestVariants(manifestUrl: String): List<Quality> {
-        val protocol = when {
-            manifestUrl.contains(".mpd", true) -> "dash"
-            else -> "hls"
+    /** 매니페스트 URL을 GET해 variant(해상도)·세그먼트 개수·총 재생 시간을 1회 수신으로 계산.
+     *  403/네트워크 실패는 삼키지 않고 VideoException을 그대로 전파한다 (E-AND-VID-0206 등).
+     *  마스터면 첫 variant 1회만 추가 fetch(세그먼트/재생시간 실측). DASH는 variant 파싱만. */
+    fun parseManifest(manifestUrl: String): ManifestResult {
+        val body = fetch(manifestUrl)
+        val isDash = manifestUrl.contains(".mpd", true)
+        val variants = if (isDash) parseDashManifest(body, manifestUrl) else parseHlsMaster(body, manifestUrl)
+        var mediaBody: String? = null
+        if (!isDash) {
+            mediaBody = if (countHlsSegments(body) > 0) body
+            else variants.firstOrNull()?.url?.let { fetch(it) }
         }
-        return try {
-            val body = fetch(manifestUrl)
-            if (body.isBlank()) emptyList()
-            else when (protocol) {
-                "dash" -> parseDashManifest(body, manifestUrl)
-                else -> parseHlsMaster(body, manifestUrl)
-            }
-        } catch (e: Exception) {
-            DebugLogger.w(TAG, "매니페스트 variant 파싱 실패 (${e.message}) → 원본만 사용")
-            emptyList()
-        }
+        return ManifestResult(
+            variants,
+            mediaBody?.let { countHlsSegments(it) } ?: 0,
+            mediaBody?.let { playlistDurationMs(it) } ?: 0,
+        )
     }
 
     /** 입력 URL이 무엇인지 판정 — kindOf: stream(m3u8/mpd) / mp4 / page(그 외 웹페이지) */
@@ -137,28 +145,6 @@ object StreamDetector {
             if (t.startsWith("#EXT-X-ENDLIST")) break
         }
         return total
-    }
-
-    /** 매니페스트 URL에서 미디어 총 재생 시간(ms) 추정 — 마스터면 첫 variant 팔로우, 측정 불가 시 0 */
-    fun mediaDurationMsFromUrl(url: String): Long = try {
-        val body = fetch(url)
-        val d = playlistDurationMs(body)
-        if (d > 0) d
-        else parseHlsMaster(body, url).firstOrNull()?.let { q -> playlistDurationMs(fetch(q.url)) } ?: 0
-    } catch (_: Exception) {
-        0
-    }
-
-    /** 직접 매니페스트/검출 매니페스트에서 실측 세그먼트 전체 개수 추정 (미디어 플레이리스트, 실패 시 마스터 첫 variant 팔로우) */
-    fun resolveSegmentsCount(url: String): Int = try {
-        val body = fetch(url)
-        val cnt = countHlsSegments(body)
-        if (cnt > 0) cnt
-        else parseHlsMaster(body, url).firstOrNull()?.let { q ->
-            countHlsSegments(fetch(q.url))
-        } ?: 0
-    } catch (_: Exception) {
-        0
     }
 
     /** HLS 마스터 매니페스트에서 #EXT-X-STREAM-INF(RESOLUTION) variant를 해상도별로 추출 */
@@ -225,8 +211,8 @@ object StreamDetector {
                 if (!resp.isSuccessful) {
                     if (resp.code == 403) {
                         throw VideoException(
-                            "E-AND-VID-0200",
-                            "접근이 차단되었습니다(403 — Cloudflare/봇 차단). 브라우저에서 재생해 m3u8/mpd 주소를 직접 복사해 입력해 주세요.",
+                            "E-AND-VID-0206",
+                            "해당 사이트가 브라우저 외 접근을 차단하고 있습니다.",
                         )
                     }
                     throw VideoException(

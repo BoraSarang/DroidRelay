@@ -14,32 +14,39 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.BugReport
+import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.CloudDownload
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.Modifier
-import androidx.compose.material3.Text
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.IconButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.core.app.ActivityCompat
 import com.borasarang.droidrelay.relay.DebugLogger
 import com.borasarang.droidrelay.relay.RelayService
 import com.borasarang.droidrelay.relay.SettingsRepository
+import com.borasarang.droidrelay.ui.DebugPanelContent
 import com.borasarang.droidrelay.ui.DownloadsScreen
 import com.borasarang.droidrelay.ui.FilesScreen
 import com.borasarang.droidrelay.ui.SettingsScreen
@@ -55,6 +62,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         DebugLogger.i("UI", "앱 실행 onCreate")
+        handleSharedIntent(intent)
 
         val settingsRepo = SettingsRepository.get(this)
         val initial = settingsRepo.firstBlocking()
@@ -71,6 +79,28 @@ class MainActivity : ComponentActivity() {
             ) {
                 RootApp()
             }
+        }
+    }
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleSharedIntent(intent)
+    }
+
+    /** 공유 받기: ACTION_SEND 텍스트에서 URL/magnet 추출 (T-941) */
+    private fun handleSharedIntent(intent: android.content.Intent?) {
+        if (intent?.action != android.content.Intent.ACTION_SEND) return
+        if (intent.type != "text/plain") return
+        val text = intent.getStringExtra(android.content.Intent.EXTRA_TEXT) ?: return
+        val match = Regex("""(magnet:\?\S+|https?://\S+)""").find(text)?.value
+            ?.trimEnd('.', ',', ')', ']', '>', '"', '\'') ?: return
+        if (match.startsWith("magnet:")) {
+            DebugLogger.i("UI", "[FEATURE] 공유 받기 magnet")
+            pendingSharedMagnet = match
+        } else {
+            DebugLogger.i("UI", "[FEATURE] 공유 받기 url=${match.take(90)}")
+            pendingSharedUrl = match
         }
     }
 
@@ -117,19 +147,24 @@ class MainActivity : ComponentActivity() {
 
     companion object {
         @Volatile var pendingClipUrl: String? = null
+        @Volatile var pendingSharedUrl: String? = null
+        @Volatile var pendingSharedMagnet: String? = null
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RootApp() {
     var tab by remember { mutableIntStateOf(0) }
+    var showDebug by remember { mutableStateOf(false) }
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
     val context = androidx.compose.ui.platform.LocalContext.current
     val engine = com.borasarang.droidrelay.relay.RelayApp.get(context)
+    val tabTitles = listOf("다운로드", "토렌트", "보관함", "설정")
 
-    // 클립보드 URL 감지 제안 (T-110)
+    // 클립보드 URL 감지 제안 (T-110) + 공유 받기 (T-941)
     LaunchedEffect(Unit) {
         while (true) {
             kotlinx.coroutines.delay(1500)
@@ -143,7 +178,35 @@ fun RootApp() {
                 )
                 if (result == androidx.compose.material3.SnackbarResult.ActionPerformed) {
                     DebugLogger.i("UI", "클립보드 제안 수락 → $url")
+                    if (com.borasarang.droidrelay.relay.JobsRepository.findDuplicateUrl(url) != null) {
+                        scope.launch { snackbar.showSnackbar("이미 등록된 다운로드입니다") }
+                    } else {
+                        engine.enqueue(url)
+                    }
+                }
+            }
+            MainActivity.pendingSharedUrl?.let { url ->
+                MainActivity.pendingSharedUrl = null
+                if (com.borasarang.droidrelay.relay.JobsRepository.findDuplicateUrl(url) != null) {
+                    scope.launch { snackbar.showSnackbar("이미 등록된 다운로드입니다") }
+                } else {
                     engine.enqueue(url)
+                    scope.launch { snackbar.showSnackbar("공유받은 URL을 다운로드에 추가했습니다") }
+                }
+            }
+            MainActivity.pendingSharedMagnet?.let { magnet ->
+                MainActivity.pendingSharedMagnet = null
+                val torrentEngine = com.borasarang.droidrelay.relay.RelayApp.getTorrent(context)
+                if (torrentEngine.isDuplicateMagnet(magnet)) {
+                    tab = 1
+                    scope.launch { snackbar.showSnackbar("이미 등록된 토렌트입니다") }
+                } else {
+                    runCatching { torrentEngine.addMagnet(magnet) }
+                        .onSuccess { tab = 1 }
+                        .onFailure { e ->
+                            DebugLogger.e("UI", "공유 magnet 추가 실패: ${e.message}")
+                            scope.launch { snackbar.showSnackbar("magnet 추가 실패: ${e.message}") }
+                        }
                 }
             }
         }
@@ -151,6 +214,19 @@ fun RootApp() {
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
+        topBar = {
+            TopAppBar(
+                title = { Text(tabTitles[tab]) },
+                actions = {
+                    IconButton(onClick = {
+                        showDebug = true
+                        DebugLogger.i("UI", "디버그 패널 열림 (${DebugLogger.count()}줄)")
+                    }) {
+                        Icon(Icons.Filled.BugReport, "디버그 로그 패널")
+                    }
+                },
+            )
+        },
         snackbarHost = { SnackbarHost(snackbar) },
         bottomBar = {
             NavigationBar(containerColor = MaterialTheme.colorScheme.surfaceContainer) {
@@ -164,7 +240,7 @@ fun RootApp() {
                     selected = tab == 1,
                     onClick = { tab = 1 },
                     icon = { Icon(Icons.Filled.CloudDownload, null) },
-                    label = { Text("Torrent") },
+                    label = { Text("토렌트") },
                 )
                 NavigationBarItem(
                     selected = tab == 2,
@@ -184,8 +260,7 @@ fun RootApp() {
         Column(
             Modifier
                 .fillMaxSize()
-                .padding(inner)
-                .padding(horizontal = 16.dp),
+                .padding(inner),
         ) {
             when (tab) {
                 0 -> DownloadsScreen(
@@ -195,10 +270,22 @@ fun RootApp() {
                         DebugLogger.d("UI", "주소 복사 → $addr")
                     },
                 )
-                1 -> TorrentScreen()
-                2 -> FilesScreen()
+                1 -> TorrentScreen(onShowSnack = { msg -> scope.launch { snackbar.showSnackbar(msg) } })
+                2 -> FilesScreen(onShowSnack = { msg -> scope.launch { snackbar.showSnackbar(msg) } })
                 else -> SettingsScreen(onPortChanged = {})
             }
+        }
+    }
+
+    if (showDebug) {
+        ModalBottomSheet(
+            onDismissRequest = {
+                showDebug = false
+                DebugLogger.d("UI", "디버그 패널 닫힘")
+            },
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+        ) {
+            DebugPanelContent()
         }
     }
 }
