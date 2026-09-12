@@ -29,7 +29,9 @@ class DownloadEngine(
     private val TAG = "Engine"
     private val maxDownloadBps = AtomicLong(0L)
     private val maxUploadBps = AtomicLong(0L)
-    private val throttleInterceptor = ThrottleInterceptor(maxDownloadBps, maxUploadBps)
+    private val throttleInterceptor = ThrottleInterceptor(maxDownloadBps, maxUploadBps) { id ->
+        JobsRepository.get(id)?.maxDownBps ?: 0L
+    }
     private val client = OkHttpClient.Builder()
         .connectTimeout(java.time.Duration.ofSeconds(30))
         .readTimeout(java.time.Duration.ofSeconds(90))
@@ -132,6 +134,13 @@ class DownloadEngine(
         tryStart()
     }
 
+    /** 작업별 다운로드 상한 (B/s, 0=무제한) — 실행 중에도 즉시 반영 */
+    fun setTaskLimit(id: String, bps: Long) {
+        val v = bps.coerceIn(0L, 1_000_000_000L)
+        JobsRepository.update(id) { it.copy(maxDownBps = v) }
+        DebugLogger.i(TAG, "[FEATURE] 작업별 제한 id=$id ${if (v <= 0) "무제한" else "${v / 1024}KB/s"}")
+    }
+
     fun cancel(id: String) {
         val job = JobsRepository.get(id) ?: run {
             DebugLogger.w(TAG, "취소 실패(대상 없음) id=$id"); return
@@ -139,6 +148,7 @@ class DownloadEngine(
         if (job.state == JobState.DONE) return
         pending.remove(id)
         JobsRepository.update(id) { it.copy(state = JobState.CANCELED, speedBps = 0L) }
+        throttleInterceptor.forget(id)
         DebugLogger.i(TAG, "취소 id=$id '${job.filename}' (${fmt(job.downloadedBytes)} 시점)")
         scope.launch {
             partialFile(job).takeIf { it.exists() }?.delete()
@@ -226,6 +236,7 @@ class DownloadEngine(
 
         val req = Request.Builder().url(job.url).apply {
             if (start > 0) header("Range", "bytes=$start-")
+            tag(JobTag::class.java, JobTag(id))
         }.build()
 
         try {
@@ -342,6 +353,7 @@ class DownloadEngine(
                         totalBytes = finalSize, speedBps = 0L, finishedAt = System.currentTimeMillis(),
                     )
                 }
+                throttleInterceptor.forget(id)
                 DebugLogger.perf(TAG, "다운로드 id=$id '${done.name}' ${fmt(finalSize)} 평균=${fmt(finalSize * 1000 / elapsed)}/s") {}
                 // 보관함 자동 운영 (분류·쿼터, v0.19)
                 runCatching { StorageJanitor.onCompleted(context, java.io.File(StorageGuard.dlRoot, job.filename)) }

@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.25.0] - 2026-09-12 (미배포, Phase D)
+
+### Added [android+web] — Phase D 작업별 속도 제한 (PLAN_v0.25_task-limit_android)
+- **T-983 코어**: `Job.maxDownBps`(0=무제한) + 영속(구파일 호환) + `ThrottleInterceptor` 작업별 버킷(JobTag·단일 버퍼 유지) + `setTaskLimit` + DONE/cancel 시 정리
+- **T-984 API**: `GET /api/jobs` 포함 + `POST /api/jobs/{id}/limit` (0~1GB/s, video 400)
+- **T-985 UI**: 웹 카드별 select(무제한/256K/512K/1M/5M) + 앱 제한 다이얼로그 (video·DONE 제외)
+- **수정 (기존 버그)**: 토큰 버킷 수면분 이중 적립 → 실제 2배速으로 동작하던 전역/작업 제한을 정정 (`accountSleep`), sleepMs 올림으로 고속 상한 초과 해소
+- **검증**: unit 7건 GREEN(전체 99건: ThrottleChain 타이밍 포함) + ktlint 본문 GREEN + JS node --check + assembleDebug GREEN
+
 ## [0.24.0] - 2026-09-12 (미배포, Phase C)
 
 ### Added [android+web] — Phase C 운영 완성 (PLAN_v0.24_phaseC_android)

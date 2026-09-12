@@ -841,6 +841,11 @@ function clearVideoUrlInput(){
   window.__videoState=null;
   window.__videoQIdx=-1;
 }
+function setJobLimit(id,bps){
+  apiPost('/api/jobs/'+id+'/limit',{maxDownBps:Number(bps)})
+    .then(function(d){if(d.ok){showDlToast('작업 속도 제한 적용됨');refresh();}else alert('적용 실패');})
+    .catch(function(e){alert('적용 실패: '+e);});
+}
 function currentVideoUrl(){
   var j=__videoState||{};if(!j)return'';
   var idx=window.__videoQIdx;
@@ -926,12 +931,22 @@ function render(jobs){
     if(j.type!=='video'&&(j.state==='PAUSED'||j.state==='FAILED'))pause='<button class="ghost" onclick="act(\''+j.id+'\',\'resume\')">재개</button>';
     if(j.type==='video'&&j.state==='FAILED')pause='<button class="ghost" onclick="retryVideo(\''+esc(j.url).replace(/\\/g,'\\\\').replace(/'/g,"\\'")+'\')">재시도</button>';
     var cancel='<button class="ghost" onclick="delJobConfirm(\''+j.id+'\')">삭제</button>';
+    var limit='';
+    if(j.type!=='video'&&j.state!=='DONE'&&j.state!=='CANCELED'){
+      var cur=j.maxDownBps||0;
+      limit='<select class="ghost" style="width:100%;box-sizing:border-box" onchange="setJobLimit(\''+j.id+'\',this.value)">'
+        +'<option value="0"'+(cur<=0?' selected':'')+'>무제한</option>'
+        +'<option value="262144"'+(cur===262144?' selected':'')+'>256KB/s</option>'
+        +'<option value="524288"'+(cur===524288?' selected':'')+'>512KB/s</option>'
+        +'<option value="1048576"'+(cur===1048576?' selected':'')+'>1MB/s</option>'
+        +'<option value="5242880"'+(cur===5242880?' selected':'')+'>5MB/s</option></select>';
+    }
     h+='<div class="card" draggable="true" data-id="'+j.id+'">'
       +'<div style="flex:1;min-width:0;padding:14px">'
       +'<div class="name">'+esc(j.filename)+'</div>'
       +'<div class="meta"><span class="badges"><span class="badge '+j.state+'">'+label(j.state)+'</span>'+vbadge+'</span><span>'+size+'</span><span>'+pct+'%</span>'+sp+eta+'</div>'
       +'<div class="bar"><div class="fill" style="width:'+pct+'%"></div></div>'+err
-      +'</div><div class="card-acts">'+act+pause+cancel+'</div></div>';
+      +'</div><div class="card-acts">'+act+pause+limit+cancel+'</div></div>';
   });
   if(window.__lastJobsH!==h){window.__lastJobsH=h;el.innerHTML=h;}
   window.__jobs=jobs;

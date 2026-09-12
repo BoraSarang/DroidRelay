@@ -35,6 +35,7 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.VideoLibrary
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -49,6 +50,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -635,11 +637,69 @@ private fun JobCard(job: Job) {
                     trackColor = cs.surfaceVariant,
                 )
             }
+            if (job.type != "video" && job.state != JobState.DONE && job.state != JobState.CANCELED) {
+                TaskLimitRow(job)
+            }
             job.errorMessage?.let {
                 Spacer(Modifier.height(4.dp))
                 Text(it, color = cs.error, style = MaterialTheme.typography.labelSmall)
             }
         }
+    }
+}
+
+/** 작업별 다운로드 상한 선택 (v0.25, http 전용) */
+@Composable
+private fun TaskLimitRow(job: Job) {
+    val ctx = LocalContext.current
+    val engine = RelayApp.get(ctx)
+    val cs = MaterialTheme.colorScheme
+    var showDialog by remember { mutableStateOf(false) }
+    val options = listOf(
+        0L to "무제한",
+        262144L to "256KB/s",
+        524288L to "512KB/s",
+        1048576L to "1MB/s",
+        5242880L to "5MB/s",
+    )
+    val label = options.firstOrNull { it.first == job.maxDownBps }?.second
+        ?: "${job.maxDownBps / 1024}KB/s"
+
+    TextButton(onClick = { showDialog = true }) {
+        Text("제한: $label", color = cs.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
+    }
+    if (showDialog) {
+        AlertDialog(
+            onDismissRequest = { showDialog = false },
+            title = { Text("작업 속도 제한") },
+            text = {
+                Column {
+                    options.forEach { (bps, name) ->
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth().combinedClickable(onClick = {
+                                DebugLogger.i("UI", "작업별 제한 id=${job.id} ${if (bps <= 0) "무제한" else name}")
+                                engine.setTaskLimit(job.id, bps)
+                                showDialog = false
+                            }),
+                        ) {
+                            RadioButton(
+                                selected = job.maxDownBps == bps,
+                                onClick = {
+                                    engine.setTaskLimit(job.id, bps)
+                                    showDialog = false
+                                },
+                            )
+                            Text(name, color = cs.onSurface, style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { showDialog = false }) { Text("닫기") }
+            },
+        )
     }
 }
 

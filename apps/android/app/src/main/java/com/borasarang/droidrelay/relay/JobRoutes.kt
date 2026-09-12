@@ -31,6 +31,7 @@ internal fun Route.jobRoutes(context: Context, serverRef: RelayServer) {
                 put("order", j.order)
                 put("errorMessage", j.errorMessage ?: JSONObject.NULL)
                 put("type", j.type)
+                put("maxDownBps", j.maxDownBps)
                 put("segmentsTotal", j.segmentsTotal)
                 put("segmentsDone", j.segmentsDone)
                 put("totalDurationMs", j.totalDurationMs)
@@ -107,6 +108,28 @@ internal fun Route.jobRoutes(context: Context, serverRef: RelayServer) {
             "resume" -> { engine.resume(id); call.respondText("ok") }
             else -> call.respondText("지원 없는 동작", ContentType.Text.Plain, HttpStatusCode.BadRequest)
         }
+    }
+
+    /** 작업별 다운로드 상한 (v0.25, http 전용) — {maxDownBps} B/s, 0=무제한 */
+    post("/api/jobs/{id}/limit") {
+        val id = call.parameters["id"]!!
+        val job = JobsRepository.get(id)
+        if (job == null) {
+            call.respondText("없음", ContentType.Text.Plain, HttpStatusCode.NotFound)
+            return@post
+        }
+        if (job.type == "video") {
+            call.respondText("비디오 작업은 작업별 제한 미지원", ContentType.Text.Plain, HttpStatusCode.BadRequest)
+            return@post
+        }
+        val json = try { JSONObject(call.receiveText()) } catch (_: Exception) { null }
+        val bps = json?.optLong("maxDownBps", -1) ?: -1L
+        if (bps < 0 || bps > 1_000_000_000L) {
+            call.respondText("잘못된 요청", ContentType.Text.Plain, HttpStatusCode.BadRequest)
+            return@post
+        }
+        RelayApp.get(context).setTaskLimit(id, bps)
+        call.respondText("""{"ok":true}""", ContentType.Application.Json)
     }
 
     delete("/api/jobs/{id}") {

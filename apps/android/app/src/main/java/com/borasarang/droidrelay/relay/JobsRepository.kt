@@ -22,6 +22,7 @@ data class Job(
     val finishedAt: Long = 0L,
     val order: Int = 0,
     val type: String = "http",
+    val maxDownBps: Long = 0L, // 작업별 다운로드 상한 (B/s, 0=무제한) — v0.25
     val segmentsTotal: Int = 0, // HLS 세그먼트 전체 (0=미지원) — video 전용
     val segmentsDone: Int = 0, // 처리된 세그먼트 수 — video 전용 (진행률 근거)
     val totalDurationMs: Long = 0L, // HLS 총 재생 시간(ms) — video 전용 (-progress 기반 진행률 근거)

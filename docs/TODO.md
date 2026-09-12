@@ -390,3 +390,13 @@ T-001~T-008 전부 완료 (커밋 7574486).
 | T-979 | 알림 딥링크(pendingOpenTab) + completionAction | ✅ |
 | T-980 | 버전 단일 진실 + bump-version.sh | ✅ |
 | T-981 | 검증(게이트) + CHANGELOG + 세션 로그 + E2E | ✅ |
+
+## v0.25 (2026-09-12) — Phase D 작업별 속도 제한 (PLAN_v0.25_task-limit_android.md)
+
+| T-번호 | 내용 | 상태 |
+|--------|------|------|
+| T-982 | PLAN 작성 + TODO 등록 | ✅ |
+| T-983 | 코어 (Job 필드+영속+스로틀+엔진) + 테스트 6건 | ✅ |
+| T-984 | API (GET 포함 + POST limit) | ✅ |
+| T-985 | UI 웹 카드 select + 앱 다이얼로그 | ✅ |
+| T-986 | 검증(게이트) + CHANGELOG + 세션 로그 + E2E | ✅ |

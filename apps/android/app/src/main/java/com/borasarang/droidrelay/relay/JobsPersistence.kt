@@ -38,6 +38,7 @@ class JobsPersistence(
                     if (j.startedAt > 0) put("startedAt", j.startedAt)
                     if (j.finishedAt > 0) put("finishedAt", j.finishedAt)
                     if (j.type != "http") put("type", j.type)
+                    if (j.maxDownBps > 0) put("maxDownBps", j.maxDownBps)
                 })
             }
             val tmp = File(file.parentFile, file.name + ".tmp")
@@ -70,6 +71,7 @@ class JobsPersistence(
                     startedAt = o.optLong("startedAt", 0L),
                     finishedAt = o.optLong("finishedAt", 0L),
                     type = o.optString("type", "http"),
+                    maxDownBps = o.optLong("maxDownBps", 0L).coerceAtLeast(0L),
                 )
                 when (job.state) {
                     JobState.RUNNING, JobState.QUEUED ->
