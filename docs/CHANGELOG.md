@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.26.0] - 2026-09-12 (미배포, Phase E)
+
+### Added [android+web] — Phase E 트래커 프로빙 (PLAN_v0.26_tracker-probe_android)
+- **T-988 코어**: `TrackerProbe`(UDP BEP15 핸드셰이크 + TCP connect, 병렬 8·4초 타임아웃) + 테스트 10건
+- **T-989 캐시+엔진+API**: `trackers_probe.txt`(24h) + 주입 도달 우선 정렬 + GET 확장(probed/probing/probeAgeMs) + POST probe + refresh 연쇄 자동 측정
+- **T-990 UI**: 웹 도달 표시+측정 버튼 + 앱 측정 행
+- **검증**: unit 10건 GREEN(전체 109건) + ktlint 본문 GREEN + JS node --check + assembleDebug GREEN
+
 ## [0.25.0] - 2026-09-12 (미배포, Phase D)
 
 ### Added [android+web] — Phase D 작업별 속도 제한 (PLAN_v0.25_task-limit_android)

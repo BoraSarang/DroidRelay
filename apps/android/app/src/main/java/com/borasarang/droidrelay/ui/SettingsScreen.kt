@@ -530,6 +530,7 @@ fun SettingsScreen(onPortChanged: (Int) -> Unit) {
                 color = cs.onSurfaceVariant,
                 style = MaterialTheme.typography.labelSmall,
             )
+            TrackerProbeRow()
 
             var seedWait by remember(s.torrentMinSeedWaitSec) { mutableStateOf(s.torrentMinSeedWaitSec.toString()) }
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
@@ -1013,6 +1014,38 @@ private fun resetSettings(ctx: android.content.Context, repo: SettingsRepository
     }
 }
 
+/** 트래커 도달성 측정 행 (v0.26) */
+@Composable
+private fun TrackerProbeRow() {
+    val ctx = LocalContext.current
+    val cs = MaterialTheme.colorScheme
+    var status by remember { mutableStateOf("확인 중…") }
+    fun refresh() {
+        kotlinx.coroutines.MainScope().launch {
+            status = runCatching {
+                val engine = com.borasarang.droidrelay.relay.RelayApp.getTorrent(ctx)
+                val cached = com.borasarang.droidrelay.relay.TrackerProbe.getProbeCached(ctx)
+                val ok = cached.values.count { it.result.reachable }
+                if (engine.probingTrackers) "측정 중…"
+                else if (cached.isEmpty()) "미측정"
+                else "도달 $ok/${cached.size}개"
+            }.getOrDefault("확인 실패")
+        }
+    }
+    androidx.compose.runtime.LaunchedEffect(Unit) { refresh() }
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+        Text(status, color = cs.onSurfaceVariant, style = MaterialTheme.typography.labelSmall, modifier = Modifier.weight(1f))
+        OutlinedButton(onClick = {
+            status = "측정 시작됨"
+            DebugLogger.i("Settings", "[FEATURE] 트래커 프로브 수동 시작")
+            kotlinx.coroutines.MainScope().launch {
+                com.borasarang.droidrelay.relay.RelayApp.getTorrent(ctx).probeTrackers()
+                kotlinx.coroutines.delay(6000)
+                refresh()
+            }
+        }) { Text("도달 측정") }
+    }
+}
 /** 속도 스케줄 목록 + 추가 다이얼로그 (v0.24) */
 @Composable
 private fun SpeedScheduleSection(windows: List<com.borasarang.droidrelay.relay.SpeedWindow>) {

@@ -74,7 +74,7 @@ class TorrentEngine(
         applyExtraTrackers(id)
     }
 
-    /** 동기된 트래커를 핸들에 추가 — 없는 것만 최대 20개. 전체 try-catch (T-931 교훈). */
+    /** 동기된 트래커를 핸들에 추가 — 도달 우선 최대 20개. 전체 try-catch (T-931 교훈). */
     internal fun applyExtraTrackers(id: String) {
         try {
             if (!settings.firstBlocking().torrentTrackerSync) return
@@ -82,7 +82,8 @@ class TorrentEngine(
             if (extra.isEmpty()) return
             val th = handleMap[id] ?: return
             val existing = withGate { th.trackers().map { it.url() }.toSet() }
-            val missing = extra.filter { it !in existing }.take(20)
+            val probe = TrackerProbe.getProbeCached(context)
+            val missing = TrackerProbe.orderByProbe(extra.filter { it !in existing }, probe).take(20)
             if (missing.isEmpty()) return
             withGate {
                 missing.forEach { u ->
@@ -93,6 +94,25 @@ class TorrentEngine(
         } catch (e: Exception) {
             DebugLogger.e(TAG, "트래커 주입 실패 id=$id (무시)", e)
         }
+    }
+
+    /** 트래커 도달성 백그라운드 측정 (v0.26) — 중복 실행 가드, never throw */
+    @Volatile var probingTrackers = false
+        private set
+
+    fun probeTrackers(): Boolean {
+        if (probingTrackers) return false
+        probingTrackers = true
+        scope.launch {
+            try {
+                val urls = TrackerListProvider.getCached(context)
+                DebugLogger.i(TAG, "[FEATURE] 트래커 프로브 시작 ${urls.size}개")
+                TrackerProbe.probeAndCache(context, urls)
+            } finally {
+                probingTrackers = false
+            }
+        }
+        return true
     }
 
     /** 영속된 파일 선택을 libtorrent 우선순위로 적용 (T-942) */
@@ -259,6 +279,7 @@ class TorrentEngine(
                 scope.launch {
                     if (runCatching { settings.firstBlocking().torrentTrackerSync }.getOrDefault(true)) {
                         TrackerListProvider.refresh(context)
+                        probeTrackers()
                     }
                 }
             } catch (e: Exception) {

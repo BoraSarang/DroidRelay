@@ -201,12 +201,25 @@ internal fun Route.torrentRoutes(context: Context, serverRef: RelayServer) {
 
     get("/api/torrents/trackers") {
         val list = TrackerListProvider.getCached(context)
+        val probe = TrackerProbe.getProbeCached(context)
+        val engine = RelayApp.getTorrent(context)
         call.respondText(
             JSONObject().apply {
                 put("count", list.size)
                 put("trackers", JSONArray(list))
                 put("cacheAgeMs", TrackerListProvider.cacheAgeMs(context))
                 put("source", TrackerListProvider.SOURCE_URL)
+                put("probing", engine.probingTrackers)
+                put("probeAgeMs", TrackerProbe.probeAgeMs(context))
+                put("probeOk", probe.values.count { it.result.reachable })
+                put("probed", JSONObject().apply {
+                    probe.forEach { (u, c) ->
+                        put(u, JSONObject().apply {
+                            put("reachable", c.result.reachable)
+                            put("rttMs", c.result.rttMs)
+                        })
+                    }
+                })
             }.toString(),
             ContentType.Application.Json,
         )
@@ -215,11 +228,20 @@ internal fun Route.torrentRoutes(context: Context, serverRef: RelayServer) {
     post("/api/torrents/trackers/refresh") {
         val list = TrackerListProvider.refresh(context)
         DebugLogger.i("Http", "[FEATURE] 트래커 수동 동기 ${list.size}개")
+        RelayApp.getTorrent(context).probeTrackers()
         call.respondText(
             JSONObject().apply {
                 put("count", list.size)
                 put("trackers", JSONArray(list))
             }.toString(),
+            ContentType.Application.Json,
+        )
+    }
+
+    post("/api/torrents/trackers/probe") {
+        val started = RelayApp.getTorrent(context).probeTrackers()
+        call.respondText(
+            JSONObject().apply { put("started", started) }.toString(),
             ContentType.Application.Json,
         )
     }

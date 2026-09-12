@@ -472,6 +472,7 @@ object WebAssets {
           <div class="ck"><input type="checkbox" id="torrentTrackerSync" checked><label for="torrentTrackerSync">커뮤니티 트래커 목록 자동 동기 (24시간)</label></div>
           <div class="fp" style="margin-top:6px">
             <button class="ghost sm" onclick="refreshTrackers()">🔄 지금 동기화</button>
+            <button class="ghost sm" onclick="probeTrackers()">📡 도달 측정</button>
             <span class="sb" id="trackerCountLabel"></span>
           </div>
         </div>
@@ -2013,6 +2014,7 @@ function refreshTrackers(){
   fetch('/api/torrents/trackers/refresh',{method:'POST'}).then(function(r){return r.json();}).then(function(j){
     if(el)el.textContent='트래커 '+(j.count||0)+'개 동기화됨';
     showDlToast('트래커 '+(j.count||0)+'개 동기화됨');
+    probeTrackers();
   }).catch(function(e){
     if(el)el.textContent='동기화 실패';
     alert('동기화 실패: '+e);
@@ -2021,8 +2023,15 @@ function refreshTrackers(){
 function loadTrackerCount(){
   fetch('/api/torrents/trackers').then(function(r){return r.json();}).then(function(j){
     var el=document.getElementById('trackerCountLabel');
-    if(el)el.textContent='트래커 '+(j.count||0)+'개';
+    if(el)el.textContent='트래커 '+(j.count||0)+'개'+(j.probing?' (측정 중…)':' (도달 '+(j.probeOk||0)+'개)');
   }).catch(function(){});
+}
+function probeTrackers(){
+  var el=document.getElementById('trackerCountLabel');
+  if(el)el.textContent='도달성 측정 중…';
+  fetch('/api/torrents/trackers/probe',{method:'POST'}).then(function(r){return r.json();}).then(function(){
+    setTimeout(loadTrackerCount,5000);
+  }).catch(function(e){alert('측정 시작 실패: '+e);});
 }
 
 // 업로드 최소화 프리셋 (T-959)
