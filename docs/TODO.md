@@ -447,3 +447,9 @@ T-001~T-008 전부 완료 (커밋 7574486).
 | T-번호 | 내용 | 상태 |
 |--------|------|------|
 | T-1003 | 비디오 분석·토렌트 검색 접이식 (기본접힘+상태기억+검색OFF 숨김) | ✅ |
+
+## v0.32 (2026-09-13) — Content-Disposition 파일명 우선 (PLAN_v0.32_content-disposition_android.md)
+
+| T-번호 | 내용 | 상태 |
+|--------|------|------|
+| T-1004 | 쿼리 response-content-disposition + 응답 Content-Disposition 헤더 우선, 폴백명 1회 교정 (UI 변경 없음) | ✅ |

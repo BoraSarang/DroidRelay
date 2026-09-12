@@ -43,4 +43,25 @@ class ContentDispositionTest {
         assertTrue(h.contains("%20"))
         assertEquals("My File 100%.txt", decode(h.substringAfter("''")))
     }
+
+    @Test
+    fun `filename 파싱이 따옴표 여부를 처리한다`() {
+        assertEquals("a.tpz", DispositionHeader.parse("attachment; filename=\"a.tpz\""))
+        assertEquals("b.bin", DispositionHeader.parse("attachment; filename=b.bin"))
+    }
+
+    @Test
+    fun `filename 스타가 우선 파싱된다`() {
+        assertEquals(
+            "한글파일.mp4",
+            DispositionHeader.parse("attachment; filename=\"x.mp4\"; filename*=UTF-8''%ED%95%9C%EA%B8%80%ED%8C%8C%EC%9D%BC.mp4"),
+        )
+    }
+
+    @Test
+    fun `빈 헤더는 null이다`() {
+        assertEquals(null, DispositionHeader.parse(null))
+        assertEquals(null, DispositionHeader.parse(""))
+        assertEquals(null, DispositionHeader.parse("attachment"))
+    }
 }
