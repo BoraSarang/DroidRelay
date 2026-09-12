@@ -67,6 +67,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -216,11 +217,12 @@ private fun ServerCard(onCopyAddress: (String) -> Unit, qr: Bitmap?, onQrClick: 
                     Text("테더링 기기 접속 주소", color = cs.onSurfaceVariant, style = MaterialTheme.typography.labelMedium)
                     Text(
                         addr.ifEmpty { "LAN 주소 탐지 중..." },
-                        color = cs.onSurface,
+                        color = cs.primary,
                         fontWeight = FontWeight.Bold,
-                        style = MaterialTheme.typography.titleMedium,
+                        style = MaterialTheme.typography.titleMedium.copy(textDecoration = TextDecoration.Underline),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.clickable(enabled = addr.isNotEmpty()) { openUrlInBrowser(ctx, addr) },
                     )
                     Spacer(Modifier.height(4.dp))
                     val nt = netType.value

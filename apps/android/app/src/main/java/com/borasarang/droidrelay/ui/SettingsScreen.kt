@@ -5,6 +5,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.PowerManager
 import android.provider.Settings
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -36,6 +37,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
@@ -128,7 +130,13 @@ fun SettingsScreen(onPortChanged: (Int) -> Unit) {
                     modifier = Modifier.weight(1f),
                 )
                 if (serverState.running && serverState.url != null) {
-                    Text(serverState.url!!, color = cs.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
+                    val addr = serverState.url!!
+                    Text(
+                        addr,
+                        color = cs.primary,
+                        style = MaterialTheme.typography.labelSmall.copy(textDecoration = TextDecoration.Underline),
+                        modifier = Modifier.clickable { openUrlInBrowser(ctx, addr) },
+                    )
                 }
             }
 
