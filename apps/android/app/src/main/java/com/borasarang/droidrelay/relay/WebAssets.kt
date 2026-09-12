@@ -8,161 +8,188 @@ object WebAssets {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>DroidRelay</title>
 <style>
-  :root{color-scheme:dark}
-  body{margin:0;background:#0A1428;color:#E6EEF8;font:15px/1.5 -apple-system,'Malgun Gothic',sans-serif}
+  :root{color-scheme:dark;
+    --bg:#070B07;--surface:#0C130C;--surface2:#131C13;--track:#1C2A1C;--line:#223A22;--line2:#2E5230;
+    --text:#E9FFE9;--muted:#93B795;--dim:#4E6B50;--accent:#39FF14;--on-accent:#061206;--accent2:#00E5FF;
+    --accentbg:#0F3311;--ok:#39FF14;--okbg:#0E2F12;--err:#FF5470;--danger:#3A0F18;--warn:#FFE14D;
+    --sel:#122A12;--glow:rgba(57,255,20,.28)}
+  body[data-theme=navy]{--bg:#0A1428;--surface:#101E3A;--surface2:#12203D;--track:#1B2B4D;--line:#22345A;
+    --line2:#2A3B5C;--text:#E6EEF8;--muted:#8FA3BF;--dim:#55688C;--accent:#2F80ED;--on-accent:#FFFFFF;
+    --accent2:#8FD8FF;--accentbg:#123A63;--ok:#69E29B;--okbg:#12402F;--err:#FF8A93;--danger:#40191C;
+    --warn:#FFD59E;--sel:#122A4D;--glow:transparent}
+  body[data-theme=midnight]{--bg:#050508;--surface:#0D0D14;--surface2:#15151F;--track:#1E1E2A;--line:#26263A;
+    --line2:#34345A;--text:#F2EDFF;--muted:#9D94C0;--dim:#5E5578;--accent:#B537F2;--on-accent:#FFFFFF;
+    --accent2:#E879F9;--accentbg:#2A1245;--ok:#4ADE80;--okbg:#0B2E1D;--err:#FB7185;--danger:#3A0F16;
+    --warn:#FBBF24;--sel:#1D1030;--glow:rgba(181,55,242,.22)}
+  body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 -apple-system,'Malgun Gothic',sans-serif}
   .wrap{max-width:760px;margin:0 auto;padding:20px;min-width:480px}
-  h1{font-size:20px;margin:0 0 4px} .sub{color:#8FA3BF;font-size:13px;margin-bottom:14px}
-  .info{display:flex;align-items:center;justify-content:space-between;gap:14px;color:#9FB4D4;font-size:12px;background:#101E3A;border:1px solid #22345A;
+  h1{font-size:20px;margin:0}
+  .hd{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:14px}
+  .hd-acts{display:flex;align-items:center;gap:8px}
+  #btnRefresh{font-size:16px;padding:8px 13px;line-height:1}
+  #btnRefresh.spin{animation:spin .8s linear}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  #themeSel{background:var(--surface2);border:1px solid var(--line2);color:var(--text);border-radius:10px;
+    padding:8px 10px;font-size:13px;outline:none;cursor:pointer}
+  .fill{background:linear-gradient(90deg,var(--accent),var(--accent2),var(--accent));background-size:200% 100%;
+    animation:flow 2.5s linear infinite}
+  @keyframes flow{to{background-position:-200% 0}}
+  body[data-theme=toxic] h1{text-shadow:0 0 18px var(--glow)}
+  body[data-theme=midnight] h1{text-shadow:0 0 18px var(--glow)}
+  body[data-theme=toxic] .card,body[data-theme=toxic] .file-row{box-shadow:0 0 14px rgba(57,255,20,.12)}
+  body[data-theme=midnight] .card,body[data-theme=midnight] .file-row{box-shadow:0 0 16px var(--glow)}
+  body[data-theme=toxic] .tab.active,body[data-theme=midnight] .tab.active{box-shadow:0 0 14px var(--glow)}
+  .info{display:flex;align-items:center;justify-content:space-between;gap:14px;color:var(--muted);font-size:12px;background:var(--surface);border:1px solid var(--line);
         border-radius:12px;padding:10px 14px;margin-bottom:16px}
   .info-left{display:flex;align-items:center;gap:16px;flex:1;min-width:0;white-space:nowrap;overflow:hidden}
   .info-right{display:flex;align-items:center;gap:12px;flex-shrink:0;white-space:nowrap}
-  .info-item b{color:#8FD8FF;font-weight:600}
-  .info-item.speed{color:#8FD8FF;font-weight:600}.info-item.speed b{color:#69E29B}
-  .info-item.idle{color:#55688C}
-  .info-item.temp-ok b{color:#69E29B}.info-item.temp-warn b{color:#FF8A93}
-  .info-item.temp-off{color:#55688C}
-  .info-item .throttle-badge{color:#FF8A93;font-weight:700}
+  .info-item b{color:var(--accent2);font-weight:600}
+  .info-item.speed{color:var(--accent2);font-weight:600}.info-item.speed b{color:var(--ok)}
+  .info-item.idle{color:var(--dim)}
+  .info-item.temp-ok b{color:var(--ok)}.info-item.temp-warn b{color:var(--err)}
+  .info-item.temp-off{color:var(--dim)}
+  .info-item .throttle-badge{color:var(--err);font-weight:700}
   .row{display:flex;gap:8px}
   .row-torrent{display:flex;gap:8px;align-items:stretch}
-  input[type=text],input[type=url]{flex:1;padding:11px 14px;border-radius:10px;border:1px solid #2A3B5C;background:#12203D;color:#fff;font-size:14px}
-  button{padding:11px 18px;border-radius:10px;border:0;background:#2F80ED;color:#fff;font-weight:600;cursor:pointer;white-space:nowrap}
-  button.ghost{background:#22335433;border:1px solid #2A3B5C;color:#9FB4D4;padding:6px 12px;font-weight:500}
+  input[type=text],input[type=url]{flex:1;padding:11px 14px;border-radius:10px;border:1px solid var(--line2);background:var(--surface2);color:var(--text);font-size:14px}
+  button{padding:11px 18px;border-radius:10px;border:0;background:var(--accent);color:var(--on-accent);font-weight:600;cursor:pointer;white-space:nowrap}
+  button.ghost{background:#22335433;border:1px solid var(--line2);color:var(--muted);padding:6px 12px;font-weight:500}
   button.sm{padding:5px 10px;font-size:12px;border-radius:8px}
-  .btn-dl{background:#12402F;border:1px solid #1A5C3A;color:#69E29B;padding:5px 10px;font-size:12px;border-radius:8px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;text-decoration:none}
+  .btn-dl{background:var(--okbg);border:1px solid #1A5C3A;color:var(--ok);padding:5px 10px;font-size:12px;border-radius:8px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;text-decoration:none}
   .card-acts{display:flex;flex-direction:column;gap:6px;width:112px;flex-shrink:0;padding:14px}
   .card-acts .ghost,.card-acts .btn-dl{box-sizing:border-box;width:100%;font-size:12px;padding:7px 0;justify-content:center}
   .file-row .acts a.btn-dl,.file-row .acts .ghost{box-sizing:border-box;width:34px;padding:5px 0;justify-content:center;text-align:center}
-  .card{background:#101E3A;border:1px solid #22345A;border-radius:14px;margin-top:14px;display:flex;align-items:stretch}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:14px;margin-top:14px;display:flex;align-items:stretch}
   .name{font-weight:600;word-break:break-all}
-  .meta{color:#8FA3BF;font-size:12px;margin-top:2px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
-  .bar{height:10px;background:#1B2B4D;border-radius:99px;margin-top:8px;overflow:hidden}
-  .fill{height:100%;background:linear-gradient(90deg,#2F80ED,#8FD8FF);border-radius:99px;width:0%;transition:width .4s}
-  .badge{font-size:11px;padding:2px 8px;border-radius:99px;background:#22335A;display:inline-flex;align-items:center}
-  .RUNNING{background:#123A63;color:#8FD8FF}.DONE{background:#12402F;color:#69E29B}.FAILED{background:#40191C;color:#FF8A93}
-  .QUEUED{background:#22335A}.PAUSED{background:#3A3312;color:#FFD59E}.CANCELED{background:#333}
+  .meta{color:var(--muted);font-size:12px;margin-top:2px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  .bar{height:10px;background:var(--track);border-radius:99px;margin-top:8px;overflow:hidden}
+  .fill{height:100%;background:linear-gradient(90deg,var(--accent),var(--accent2));border-radius:99px;width:0%;transition:width .4s}
+  .badge{font-size:11px;padding:2px 8px;border-radius:99px;background:var(--line);display:inline-flex;align-items:center}
+  .RUNNING{background:var(--accentbg);color:var(--accent2)}.DONE{background:var(--okbg);color:var(--ok)}.FAILED{background:var(--danger);color:var(--err)}
+  .QUEUED{background:var(--line)}.PAUSED{background:#3A3312;color:var(--warn)}.CANCELED{background:#333}
   .badge.video{background:#0A3A2F;color:#6FE3C4}
   .badges{display:inline-flex;gap:6px;align-items:center}
   .overlay{position:fixed;inset:0;background:rgba(5,10,20,.62);backdrop-filter:blur(2px);display:flex;align-items:center;justify-content:center;z-index:9998}
-  .popup{background:#0E1B33;border:1px solid #22345A;border-radius:14px;padding:18px;max-width:340px;width:calc(100% - 40px);box-shadow:0 12px 40px rgba(0,0,0,.5)}
-  .popup h3{margin:0 0 6px;font-size:15px;color:#E8F0FF}
-  .popup .msg{color:#8FA3BF;font-size:13px;margin:0 0 14px;white-space:pre-line;word-break:break-word}
+  .popup{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px;max-width:340px;width:calc(100% - 40px);box-shadow:0 12px 40px rgba(0,0,0,.5)}
+  .popup h3{margin:0 0 6px;font-size:15px;color:var(--text)}
+  .popup .msg{color:var(--muted);font-size:13px;margin:0 0 14px;white-space:pre-line;word-break:break-word}
   .popup.wide{max-width:640px}
   .popup video{width:100%;max-height:70vh;background:#000;border-radius:8px}
-  .popup input{width:100%;box-sizing:border-box;padding:9px 10px;border-radius:8px;border:1px solid #2A3B5C;background:#101E3A;color:#E8F0FF;font-size:14px;margin:0 0 14px;outline:none}
-  .popup input:focus{border-color:#2F80ED}
+  .popup input{width:100%;box-sizing:border-box;padding:9px 10px;border-radius:8px;border:1px solid var(--line2);background:var(--surface);color:var(--text);font-size:14px;margin:0 0 14px;outline:none}
+  .popup input:focus{border-color:var(--accent)}
   .popup .pbtns{display:flex;gap:8px;justify-content:flex-end}
-  .popup .pbtns button{padding:7px 16px;border-radius:8px;border:1px solid #2A3B5C;background:#101E3A;color:#C7D4F0;font-size:13px;cursor:pointer}
-  .popup .pbtns button.ok{background:#2F80ED;border-color:#2F80ED;color:#fff;font-weight:600}
-  .popup .pbtns button.danger{background:#40191C;border-color:#40191C;color:#FF8A93;font-weight:600}
-  .vcard{background:#101E3A;border:1px solid #22345A;border-radius:12px;padding:12px;margin-top:10px}
-  .err{color:#FF8A93;font-size:12px;margin-top:4px}
-  .empty{color:#55688C;text-align:center;padding:26px 0}
-  .speed{color:#8FD8FF;font-weight:600}
-  .eta{color:#8FA3BF;font-size:12px}
+  .popup .pbtns button{padding:7px 16px;border-radius:8px;border:1px solid var(--line2);background:var(--surface);color:var(--text);font-size:13px;cursor:pointer}
+  .popup .pbtns button.ok{background:var(--accent);border-color:var(--accent);color:var(--on-accent);font-weight:600}
+  .popup .pbtns button.danger{background:var(--danger);border-color:var(--danger);color:var(--err);font-weight:600}
+  .vcard{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px;margin-top:10px}
+  .err{color:var(--err);font-size:12px;margin-top:4px}
+  .empty{color:var(--dim);text-align:center;padding:26px 0}
+  .speed{color:var(--accent2);font-weight:600}
+  .eta{color:var(--muted);font-size:12px}
   .tabs{display:flex;gap:4px;margin-bottom:16px}
-  .tab{flex:1;padding:10px;border-radius:10px;border:1px solid #2A3B5C;background:#101E3A;color:#8FA3BF;text-align:center;
+  .tab{flex:1;padding:10px;border-radius:10px;border:1px solid var(--line2);background:var(--surface);color:var(--muted);text-align:center;
        font-weight:600;font-size:14px;cursor:pointer;transition:all .15s}
-  .tab.active{background:#2F80ED;border-color:#2F80ED;color:#fff}
+  .tab.active{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
   .panel{display:none}.panel.active{display:block}
   .file-icon{font-size:20px;margin-right:8px;flex-shrink:0}
-  .file-thumb{width:40px;height:40px;object-fit:cover;border-radius:8px;margin-right:8px;flex:none;background:#0A1428}
-  .file-meta{color:#8FA3BF;font-size:12px;margin-top:2px}
+  .file-thumb{width:40px;height:40px;object-fit:cover;border-radius:8px;margin-right:8px;flex:none;background:var(--bg)}
+  .file-meta{color:var(--muted);font-size:12px;margin-top:2px}
   input[type=file]{display:none}
-  .breadcrumb{display:flex;align-items:center;gap:4px;margin-bottom:12px;color:#8FA3BF;font-size:13px;flex-wrap:wrap}
-  .breadcrumb span{cursor:pointer;color:#8FD8FF}
+  .breadcrumb{display:flex;align-items:center;gap:4px;margin-bottom:12px;color:var(--muted);font-size:13px;flex-wrap:wrap}
+  .breadcrumb span{cursor:pointer;color:var(--accent2)}
   .breadcrumb span:hover{text-decoration:underline}
-  #breadcrumb span.drop-target{outline:2px dashed #2F80ED;outline-offset:2px;border-radius:4px;background:#122A4D}
-  .file-row{display:flex;align-items:center;gap:10px;padding:10px 14px;background:#101E3A;border:1px solid #22345A;border-radius:12px;margin-top:8px;
+  #breadcrumb span.drop-target{outline:2px dashed var(--accent);outline-offset:2px;border-radius:4px;background:var(--sel)}
+  .file-row{display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--surface);border:1px solid var(--line);border-radius:12px;margin-top:8px;
             cursor:pointer;transition:border-color .15s}
-  .file-row:hover{border-color:#2F80ED}
-  .file-row.selected{border-color:#2F80ED;background:#122A4D}
+  .file-row:hover{border-color:var(--accent)}
+  .file-row.selected{border-color:var(--accent);background:var(--sel)}
   .file-row[draggable=true]{cursor:grab}
   .file-row.dragging{opacity:.45}
-  .file-row.drop-target{outline:2px dashed #2F80ED;outline-offset:-2px;background:#122A4D}
+  .file-row.drop-target{outline:2px dashed var(--accent);outline-offset:-2px;background:var(--sel)}
   .card,.file-row{user-select:none;-webkit-user-select:none}
   .card.dragging{opacity:.4}
-  .card.drop-before{box-shadow:0 -3px 0 0 #2F80ED}
-  .card.drop-after{box-shadow:0 3px 0 0 #2F80ED}
+  .card.drop-before{box-shadow:0 -3px 0 0 var(--accent)}
+  .card.drop-after{box-shadow:0 3px 0 0 var(--accent)}
   .file-row .acts{margin-left:auto;display:flex;gap:6px;flex-shrink:0}
   .toolbar{display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap}
   .toolbar button{font-size:13px;padding:8px 14px}
-  .drop-zone{border:2px dashed #2A3B5C;border-radius:12px;padding:24px;text-align:center;color:#55688C;margin-top:12px;transition:all .2s}
-  .drop-zone.dragover{border-color:#2F80ED;background:#12203D;color:#8FD8FF}
+  .drop-zone{border:2px dashed var(--line2);border-radius:12px;padding:24px;text-align:center;color:var(--dim);margin-top:12px;transition:all .2s}
+  .drop-zone.dragover{border-color:var(--accent);background:var(--surface2);color:var(--accent2)}
   .modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:1000;justify-content:center;align-items:flex-start;padding:60px 20px;overflow-y:auto}
   .modal-overlay.show{display:flex}
-  .modal{background:#181F2E;border:1px solid #2A3B5C;border-radius:14px;width:100%;max-width:600px;max-height:80vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.5)}
-  .modal-header{display:flex;align-items:center;justify-content:space-between;padding:18px 20px;border-bottom:1px solid #2A3B5C;position:sticky;top:0;background:#181F2E;z-index:1}
-  .modal-header h3{margin:0;font-size:15px;color:#E3E8EF;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .modal-close{background:none;border:none;color:#66788C;font-size:20px;cursor:pointer;padding:4px 8px;border-radius:6px;transition:all .15s}
-  .modal-close:hover{background:#22335A;color:#E3E8EF}
+  .modal{background:var(--surface);border:1px solid var(--line2);border-radius:14px;width:100%;max-width:600px;max-height:80vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.5)}
+  .modal-header{display:flex;align-items:center;justify-content:space-between;padding:18px 20px;border-bottom:1px solid var(--line2);position:sticky;top:0;background:var(--surface);z-index:1}
+  .modal-header h3{margin:0;font-size:15px;color:var(--text);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .modal-close{background:none;border:none;color:var(--dim);font-size:20px;cursor:pointer;padding:4px 8px;border-radius:6px;transition:all .15s}
+  .modal-close:hover{background:var(--line);color:var(--text)}
   .modal-body{padding:16px 20px}
   .modal-section{margin-bottom:16px}
-  .modal-section-title{font-size:12px;font-weight:700;color:#55688C;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px}
+  .modal-section-title{font-size:12px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px}
   .modal-stat{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
-  .modal-stat-item{background:#1A2540;border-radius:8px;padding:10px 12px}
-  .modal-stat-label{font-size:11px;color:#55688C;margin-bottom:2px}
-  .modal-stat-value{font-size:14px;font-weight:600;color:#E3E8EF}
+  .modal-stat-item{background:var(--surface2);border-radius:8px;padding:10px 12px}
+  .modal-stat-label{font-size:11px;color:var(--dim);margin-bottom:2px}
+  .modal-stat-value{font-size:14px;font-weight:600;color:var(--text)}
   .modal-stat-value.green{color:#6a8}
   .modal-stat-value.red{color:#f86}
-  .modal-stat-value.blue{color:#8FD8FF}
+  .modal-stat-value.blue{color:var(--accent2)}
   .modal-peer-list{max-height:200px;overflow-y:auto}
-  .modal-peer-row{display:flex;align-items:center;padding:6px 8px;border-radius:6px;font-size:12px;color:#A0AABB;gap:8px}
-  .modal-peer-row:nth-child(odd){background:#1A2540}
-  .modal-peer-ip{color:#8FD8FF;font-weight:600;min-width:120px}
-  .modal-peer-client{color:#66788C;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .modal-peer-row{display:flex;align-items:center;padding:6px 8px;border-radius:6px;font-size:12px;color:var(--dim);gap:8px}
+  .modal-peer-row:nth-child(odd){background:var(--surface2)}
+  .modal-peer-ip{color:var(--accent2);font-weight:600;min-width:120px}
+  .modal-peer-client{color:var(--dim);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .modal-peer-speed{color:#6a8;min-width:70px;text-align:right}
-  .modal-file-row{display:flex;align-items:center;padding:6px 8px;border-radius:6px;font-size:12px;color:#A0AABB;gap:8px}
-  .modal-file-row:nth-child(odd){background:#1A2540}
+  .modal-file-row{display:flex;align-items:center;padding:6px 8px;border-radius:6px;font-size:12px;color:var(--dim);gap:8px}
+  .modal-file-row:nth-child(odd){background:var(--surface2)}
   .modal-file-path{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .modal-file-size{color:#55688C;min-width:60px;text-align:right}
-  .modal-refresh{background:#22335A;border:1px solid #2A3B5C;color:#8FA3BF;padding:6px 12px;border-radius:8px;cursor:pointer;font-size:12px;transition:all .15s}
-  .modal-refresh:hover{background:#2A3B5C;color:#E3E8EF}
+  .modal-file-size{color:var(--dim);min-width:60px;text-align:right}
+  .modal-refresh{background:var(--line);border:1px solid var(--line2);color:var(--muted);padding:6px 12px;border-radius:8px;cursor:pointer;font-size:12px;transition:all .15s}
+  .modal-refresh:hover{background:var(--line2);color:var(--text)}
   .card{cursor:pointer}
-  #treePanel{width:172px;flex-shrink:0;background:#0D1830;border:1px solid #22345A;border-radius:12px;padding:8px;max-height:62vh;overflow-y:auto;font-size:13px}
-  .tree-title{font-size:11px;font-weight:700;color:#55688C;text-transform:uppercase;letter-spacing:.5px;padding:2px 8px 6px}
-  .tree-item{padding:5px 8px;border-radius:6px;cursor:pointer;color:#9FB4D4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .tree-item:hover{background:#122A4D;color:#E6EEF8}
-  .tree-item.active{background:#2F80ED;color:#fff;font-weight:600}
-  .tree-children{padding-left:12px;border-left:1px solid #1B2B4D;margin-left:8px}
-  .tree-empty{color:#55688C;font-size:12px;padding:4px 8px}
+  #treePanel{width:172px;flex-shrink:0;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:8px;max-height:62vh;overflow-y:auto;font-size:13px}
+  .tree-title{font-size:11px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.5px;padding:2px 8px 6px}
+  .tree-item{padding:5px 8px;border-radius:6px;cursor:pointer;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .tree-item:hover{background:var(--sel);color:var(--text)}
+  .tree-item.active{background:var(--accent);color:var(--on-accent);font-weight:600}
+  .tree-children{padding-left:12px;border-left:1px solid var(--track);margin-left:8px}
+  .tree-empty{color:var(--dim);font-size:12px;padding:4px 8px}
   /* ── 보관함 콘텐츠 (설정 스타일 통일) ── */
   .storage-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:12px}
   .storage-main .breadcrumb{margin-bottom:8px}
   .storage-main .toolbar{margin-bottom:0}
-  #fileList .file-row{border-radius:6px;border:1px solid transparent;background:transparent;padding:10px 10px;margin-top:0;border-bottom:1px solid #1B2B4D}
+  #fileList .file-row{border-radius:6px;border:1px solid transparent;background:transparent;padding:10px 10px;margin-top:0;border-bottom:1px solid var(--track)}
   #fileList .file-row:last-child{border-bottom-color:transparent}
-  #fileList .file-row:hover{border-color:transparent;background:#122A4D}
-  #fileList .file-row.selected{background:#122A4D;box-shadow:inset 3px 0 0 #2F80ED}
+  #fileList .file-row:hover{border-color:transparent;background:var(--sel)}
+  #fileList .file-row.selected{background:var(--sel);box-shadow:inset 3px 0 0 var(--accent)}
   #panel-storage .empty{padding:22px 8px 6px}
   /* ── 설정 탭 전용 ── */
-  .sg{background:#101E3A;border:1px solid #22345A;border-radius:14px;padding:16px}
-  .sh{font-size:14px;font-weight:700;color:#8FD8FF;padding-left:10px;border-left:3px solid #2F80ED;margin-bottom:14px}
+  .sg{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px}
+  .sh{font-size:14px;font-weight:700;color:var(--accent2);padding-left:10px;border-left:3px solid var(--accent);margin-bottom:14px}
   .sr{display:flex;flex-wrap:wrap;gap:16px}
   .si{flex:1;min-width:220px}
-  .sl{display:block;margin-bottom:5px;font-size:12px;color:#8FA3BF;font-weight:500}
+  .sl{display:block;margin-bottom:5px;font-size:12px;color:var(--muted);font-weight:500}
   .sv{display:flex;align-items:center;gap:8px}
   .sv span:last-child{min-width:60px;text-align:right;font-weight:600;font-size:13px}
-  .sv input[type=range]{flex:1;accent-color:#2F80ED}
+  .sv input[type=range]{flex:1;accent-color:var(--accent)}
   .ck{display:flex;align-items:center;gap:8px}
-  .ck input[type=checkbox]{width:18px;height:18px;accent-color:#2F80ED}
-  .ck label{font-size:13px;color:#E6EEF8;cursor:pointer}
-  .sb{font-size:11px;color:#55688C;margin-top:3px;line-height:1.4}
-  .ti{font-weight:600;font-size:13px;color:#E6EEF8;margin:12px 0 6px}
+  .ck input[type=checkbox]{width:18px;height:18px;accent-color:var(--accent)}
+  .ck label{font-size:13px;color:var(--text);cursor:pointer}
+  .sb{font-size:11px;color:var(--dim);margin-top:3px;line-height:1.4}
+  .ti{font-weight:600;font-size:13px;color:var(--text);margin:12px 0 6px}
   .ti:first-child{margin-top:0}
-  .ss{font-size:12px;padding:8px 10px;border-radius:8px;background:#12203D;color:#55688C;margin-top:8px;line-height:1.5}
+  .ss{font-size:12px;padding:8px 10px;border-radius:8px;background:var(--surface2);color:var(--dim);margin-top:8px;line-height:1.5}
   .ft{display:flex;align-items:center;gap:8px}
-  .ft input[type=number]{width:90px;padding:7px 10px;border-radius:8px;border:1px solid #2A3B5C;background:#12203D;color:#fff;font-size:13px}
+  .ft input[type=number]{width:90px;padding:7px 10px;border-radius:8px;border:1px solid var(--line2);background:var(--surface2);color:var(--text);font-size:13px}
   .fp{display:flex;gap:8px}
-  .fp input[type=text]{flex:1;padding:8px 12px;border-radius:8px;border:1px solid #2A3B5C;background:#12203D;color:#fff;font-size:13px}
+  .fp input[type=text]{flex:1;padding:8px 12px;border-radius:8px;border:1px solid var(--line2);background:var(--surface2);color:var(--text);font-size:13px}
   .rb{display:flex;gap:8px;flex-wrap:wrap}
   .rb button{flex-shrink:0}
   /* ── 설정 사이드바 ── */
   .settings-layout{display:flex;gap:12px;align-items:flex-start}
-  .settings-nav{width:140px;flex-shrink:0;background:#0D1830;border:1px solid #22345A;border-radius:12px;padding:8px;font-size:13px}
-  .settings-nav-title{font-size:11px;font-weight:700;color:#55688C;text-transform:uppercase;letter-spacing:.5px;padding:2px 8px 6px}
-  .settings-nav-item{padding:6px 10px;border-radius:6px;cursor:pointer;color:#9FB4D4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:all .15s}
-  .settings-nav-item:hover{background:#122A4D;color:#E6EEF8}
-  .settings-nav-item.active{background:#2F80ED;color:#fff;font-weight:600}
+  .settings-nav{width:140px;flex-shrink:0;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:8px;font-size:13px}
+  .settings-nav-title{font-size:11px;font-weight:700;color:var(--dim);text-transform:uppercase;letter-spacing:.5px;padding:2px 8px 6px}
+  .settings-nav-item{padding:6px 10px;border-radius:6px;cursor:pointer;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transition:all .15s}
+  .settings-nav-item:hover{background:var(--sel);color:var(--text)}
+  .settings-nav-item.active{background:var(--accent);color:var(--on-accent);font-weight:600}
   .settings-content{flex:1;min-width:0;display:none}
   .settings-content.active{display:block}
   /* ── 모바일 대응 (640px 이하) ── */
@@ -186,13 +213,22 @@ object WebAssets {
     .si{min-width:0}
     .row,.row-torrent{flex-wrap:wrap}
     .row input,.row-torrent input{flex:1 1 100%}
+    #panel-dl>.row{flex-wrap:nowrap}
+    #panel-dl>.row input{flex:1 1 auto;min-width:0}
     .row button,.row-torrent button{flex-shrink:0}
     .tabs .tab{padding:9px 2px;font-size:13px}
+    .hd{flex-wrap:wrap;margin-bottom:12px}
+    #btnRefresh{padding:12px 16px;min-height:44px}
+    #themeSel{min-height:44px;max-width:130px}
+    body[data-theme=toxic] h1,body[data-theme=midnight] h1{text-shadow:none}
+    body[data-theme=toxic] .card,body[data-theme=toxic] .file-row,
+    body[data-theme=midnight] .card,body[data-theme=midnight] .file-row,
+    body[data-theme=toxic] .tab.active,body[data-theme=midnight] .tab.active{box-shadow:none}
+    .fill{animation:none}
   }
 </style></head><body>
 <div class="wrap">
-  <h1>📡 DroidRelay</h1>
-  <div class="sub">휴대폰이 직접 다운로드합니다 · 끊겨도 이어받기됩니다</div>
+  <div class="hd"><h1>📡 DroidRelay</h1><div class="hd-acts"><button id="btnRefresh" class="ghost" onclick="manualRefresh()" title="새로고침 (R)">⟳</button><select id="themeSel" onchange="setTheme(this.value)" title="테마"><option value="toxic">⚡ Toxic</option><option value="midnight">🌌 Midnight</option><option value="navy">🌊 Navy</option></select></div></div>
   <div class="info" id="info">서버 정보 로딩 중…</div>
 
   <div class="tabs">
@@ -210,7 +246,7 @@ object WebAssets {
     </div>
 
     <!-- 비디오 분석 섹션 -->
-    <div class="sg" id="videoSection" style="margin:14px 0 10px;padding:14px;background:#101E3A;border:1px solid #22345A;border-radius:12px">
+    <div class="sg" id="videoSection" style="margin:14px 0 10px;padding:14px;background:var(--surface);border:1px solid var(--line);border-radius:12px">
       <div class="sh">🎬 비디오 분석 & 다운로드</div>
       <div class="row" style="margin-top:10px">
         <input id="vurl" type="url" placeholder="스트림 페이지 또는 m3u8/mpd 직접 주소" style="flex:1">
@@ -243,7 +279,7 @@ object WebAssets {
       <button onclick="searchTorrents()">검색</button>
     </div>
     <div id="searchResults"></div>
-    <div id="torrentInfo" style="padding:10px 16px;font-size:13px;color:#66788C;border-bottom:1px solid #E3E8EF"></div>
+    <div id="torrentInfo" style="padding:10px 16px;font-size:13px;color:var(--dim);border-bottom:1px solid var(--text)"></div>
     <div id="torrentList"></div>
     <div class="empty" id="torrentEmpty">토렌트 작업이 없습니다</div>
   </div>
@@ -259,14 +295,14 @@ object WebAssets {
           <div class="toolbar" id="storageToolbar">
             <button class="ghost" onclick="createFolder()">📁 폴더 만들기</button>
             <button class="ghost" onclick="document.getElementById('uploadFile').click()">⬆ 파일 올리기</button>
-            <span class="sb" id="uploadProgressLabel" style="flex-shrink:0;color:#8FD8FF"></span>
+            <span class="sb" id="uploadProgressLabel" style="flex-shrink:0;color:var(--accent2)"></span>
             <input type="file" id="uploadFile" multiple onchange="uploadFiles(this)">
             <button class="ghost" onclick="deleteSelected()" id="deleteBtn" style="display:none">🗑 삭제</button>
             <button class="ghost" onclick="toggleTrash()" style="margin-left:auto">🗑️ 휴지통</button>
           </div>
           <div class="toolbar" id="trashToolbar" style="display:none">
             <button class="ghost" onclick="toggleTrash()">← 보관함 돌아가기</button>
-            <button class="ghost" id="trashEmptyBtn" onclick="emptyTrash()" style="color:#FF8A93;border-color:#40191C">🔥 비우기</button>
+            <button class="ghost" id="trashEmptyBtn" onclick="emptyTrash()" style="color:var(--err);border-color:var(--danger)">🔥 비우기</button>
           </div>
         </div>
         <div class="sg">
@@ -714,7 +750,7 @@ object WebAssets {
           <div class="rb">
             <button class="ghost" onclick="resetSettings('download')">↩ 다운로드 기본값</button>
             <button class="ghost" onclick="resetSettings('torrent')">↩ 토렌트 기본값</button>
-            <button class="ghost" onclick="resetSettings('all')" style="margin-left:auto;color:#FF8A93;border-color:#40191C">🔄 전체 초기화</button>
+            <button class="ghost" onclick="resetSettings('all')" style="margin-left:auto;color:var(--err);border-color:var(--danger)">🔄 전체 초기화</button>
           </div>
         </div>
       </div>
@@ -728,7 +764,7 @@ object WebAssets {
       <button class="modal-close" onclick="closeTorrentModal()">✕</button>
     </div>
     <div class="modal-body" id="tmBody">
-      <div style="padding:20px;color:#55688C;text-align:center">로딩 중…</div>
+      <div style="padding:20px;color:var(--dim);text-align:center">로딩 중…</div>
     </div>
   </div>
 </div>
@@ -740,7 +776,7 @@ var curTab='dl';
 var trashMode=false;
 window.__dragActiveAt=0;
 function dragActive(){return window.__dragActive&&(Date.now()-window.__dragActiveAt)<5000;}
-window.onerror=function(msg,src,line){var t=document.createElement('div');t.textContent='⚠ JS 오류: '+msg+' @'+line;t.style.cssText='position:fixed;top:10px;left:50%;transform:translateX(-50%);background:#5c1a1a;color:#ff8a93;padding:8px 14px;border-radius:8px;font-size:12px;z-index:99999';document.body.appendChild(t);setTimeout(function(){t.remove()},6000);};
+window.onerror=function(msg,src,line){var t=document.createElement('div');t.textContent='⚠ JS 오류: '+msg+' @'+line;t.style.cssText='position:fixed;top:10px;left:50%;transform:translateX(-50%);background:#5c1a1a;color:var(--err);padding:8px 14px;border-radius:8px;font-size:12px;z-index:99999';document.body.appendChild(t);setTimeout(function(){t.remove()},6000);};
 
 function esc(s){return (s||'').replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
 function num(v,d){v=parseFloat(v);return isFinite(v)?v:d;}
@@ -774,7 +810,7 @@ function videoErr(msg){
 }
 function showVideoBlocked(){
   var _a=document.getElementById('videoArea');
-  if(_a)_a.innerHTML='<div class="info" style="margin-top:6px;border:1px solid #B36B00;border-radius:8px;padding:8px 10px;background:rgba(255,170,0,.08)">💡 해당 사이트는 폰/앱(비브라우저) 접근을 차단하고 있습니다.</div>';
+  if(_a)_a.innerHTML='<div class="info" style="margin-top:6px;border:1px solid var(--warn);border-radius:8px;padding:8px 10px;background:rgba(255,170,0,.08)">💡 해당 사이트는 폰/앱(비브라우저) 접근을 차단하고 있습니다.</div>';
 }
 function isVideoBlocked(m){return (m||'').indexOf('E-AND-VID-0206')>=0;}
 function videoExtra(){
@@ -862,7 +898,7 @@ function retryVideo(v){
     if(!r.ok)return r.text().then(function(t){throw new Error(t);});
     return r.json();
   }).then(function(){
-    if(area){area.innerHTML='<div class="info" style="color:#69E29B">✓ 재다운로드 시작됨 — 목록에서 확인</div>';setTimeout(function(){area.innerHTML='';},3000);}
+    if(area){area.innerHTML='<div class="info" style="color:var(--ok)">✓ 재다운로드 시작됨 — 목록에서 확인</div>';setTimeout(function(){area.innerHTML='';},3000);}
     clearVideoUrlInput();clearVideoExtra();
     refresh();
   }).catch(function(e){
@@ -882,7 +918,7 @@ function createVideo(v){
     if(!r.ok)return r.text().then(function(t){throw new Error(t);});
     return r.json();
   }).then(function(){
-    area.innerHTML='<div class="info" style="color:#69E29B">✓ 다운로드 시작됨 — 위 목록에서 진행률 확인</div>';
+    area.innerHTML='<div class="info" style="color:var(--ok)">✓ 다운로드 시작됨 — 위 목록에서 진행률 확인</div>';
     setTimeout(function(){ area.innerHTML=''; }, 3000);
     clearVideoUrlInput();clearVideoExtra();
     refresh();
@@ -949,7 +985,8 @@ function render(jobs){
       +'<div class="bar"><div class="fill" style="width:'+pct+'%"></div></div>'+err
       +'</div><div class="card-acts">'+act+pause+limit+cancel+'</div></div>';
   });
-  if(window.__lastJobsH!==h){window.__lastJobsH=h;el.innerHTML=h;}
+  // 틱 리렌더 중 사용자 입력 보호 (T-998) — select/체크박스 조작 중엔 목록 교체 skip
+  if(!uiBusy(el)&&window.__lastJobsH!==h){window.__lastJobsH=h;el.innerHTML=h;}
   window.__jobs=jobs;
   updateInfoBar();
 }
@@ -986,7 +1023,7 @@ function updateInfoBar(){
   }else{
     right+='<span class="info-item temp-off">가드 끔</span>';
   }
-  if(info&&info.version)right+='<span class="info-item" style="color:#55688C">v'+info.version+'</span>';
+  if(info&&info.version)right+='<span class="info-item" style="color:var(--dim)">v'+info.version+'</span>';
   right+='</div>';
   document.getElementById('info').innerHTML=left+right;
 }
@@ -1056,7 +1093,7 @@ function shareFile(key){
   var o=makeOverlay();
   o.innerHTML='<div class="popup"><h3>공유 링크</h3>'
     +'<p class="msg">링크 유지 시간을 선택해 주세요 (만료 후 자동 무효)</p>'
-    +'<select id="shareHours" style="width:100%;box-sizing:border-box;padding:9px 10px;border-radius:8px;border:1px solid #2A3B5C;background:#101E3A;color:#E8F0FF;font-size:14px;margin:0 0 14px;outline:none">'
+    +'<select id="shareHours" style="width:100%;box-sizing:border-box;padding:9px 10px;border-radius:8px;border:1px solid var(--line2);background:var(--surface);color:var(--text);font-size:14px;margin:0 0 14px;outline:none">'
     +'<option value="1">1시간</option>'
     +'<option value="6">6시간</option>'
     +'<option value="24" selected>24시간 (1일)</option>'
@@ -1276,7 +1313,7 @@ function renderTrash(items){
   var el=document.getElementById('fileList');document.getElementById('fileEmpty').style.display=items.length?'none':'block';
   document.getElementById('storageListTitle').textContent='🗑️ 휴지통';
   document.getElementById('trashEmptyBtn').style.display=items.length?'inline-block':'none';
-  document.getElementById('breadcrumb').innerHTML='<span>🗑️ 휴지통</span><span style="color:#55688C"> · 삭제된 항목은 복구할 수 있습니다</span>';
+  document.getElementById('breadcrumb').innerHTML='<span>🗑️ 휴지통</span><span style="color:var(--dim)"> · 삭제된 항목은 복구할 수 있습니다</span>';
   var h='';
   items.forEach(function(f){
     var isDir=f.type==='dir';
@@ -1287,7 +1324,7 @@ function renderTrash(items){
       +'<div class="file-meta">'+(isDir?'폴더':fmt(f.size))+(dateStr?' · '+dateStr:'')+'</div></div>'
       +'<div class="acts">'
       +'<button class="ghost sm" style="width:auto;padding:5px 10px" onclick="restoreItem(this.closest(\'.file-row\').dataset.name)">♻️ 복구</button>'
-      +'<button class="ghost sm" style="width:auto;padding:5px 10px;color:#FF8A93" onclick="purgeItem(this.closest(\'.file-row\').dataset.name)">🔥 영구삭제</button>'
+      +'<button class="ghost sm" style="width:auto;padding:5px 10px;color:var(--err)" onclick="purgeItem(this.closest(\'.file-row\').dataset.name)">🔥 영구삭제</button>'
       +'</div></div>';
   });
   el.innerHTML=h;
@@ -1471,11 +1508,11 @@ function delJob(id){fetch('/api/jobs/'+id,{method:'DELETE'}).then(refresh);}
 function torrentAct(id,a){fetch('/api/torrents/'+id+'/'+a,{method:'POST'}).then(refresh);}
 function searchTorrents(){
   var q=document.getElementById('tsearch').value.trim();if(!q)return;
-  document.getElementById('searchResults').innerHTML='<div style="padding:8px 16px;color:#8FA3BF">검색 중...</div>';
+  document.getElementById('searchResults').innerHTML='<div style="padding:8px 16px;color:var(--muted)">검색 중...</div>';
   fetch('/api/search?q='+encodeURIComponent(q)).then(function(r){return r.json();}).then(function(d){
     var el=document.getElementById('searchResults');
-    if(d&&d.error){el.innerHTML='<div style="padding:8px 16px;color:#FF8A93">'+esc(d.error)+'</div>';return;}
-    if(!d||!d.length){el.innerHTML='<div style="padding:8px 16px;color:#8FA3BF">결과 없음</div>';return;}
+    if(d&&d.error){el.innerHTML='<div style="padding:8px 16px;color:var(--err)">'+esc(d.error)+'</div>';return;}
+    if(!d||!d.length){el.innerHTML='<div style="padding:8px 16px;color:var(--muted)">결과 없음</div>';return;}
     var h='';
     d.forEach(function(r,i){
       h+='<div class="card" style="margin:8px 16px"><div style="min-width:0;flex:1"><div class="name">'+esc(r.title)+'</div>'
@@ -1484,7 +1521,7 @@ function searchTorrents(){
     });
     el.innerHTML=h;
     window.__searchResults=d;
-  }).catch(function(e){document.getElementById('searchResults').innerHTML='<div style="padding:8px 16px;color:#FF8A93">검색 실패</div>';});
+  }).catch(function(e){document.getElementById('searchResults').innerHTML='<div style="padding:8px 16px;color:var(--err)">검색 실패</div>';});
 }
 function addSearchResult(i){
   var r=(window.__searchResults||[])[i];if(!r)return;
@@ -1597,6 +1634,39 @@ function setPoll(ms){if(__pollTimer)clearInterval(__pollTimer);__pollTimer=setIn
   connect();
 })();
 
+// ── 헤더: 수동 새로고침 + 테마 (v0.27) ──
+// 틱 리렌더 중 입력 보호 헬퍼 (T-998) — el 안에서 select/체크박스 조작 중이면 true
+function uiBusy(el){
+  if(!el)return false;
+  var ae=document.activeElement;
+  return !!(ae&&(ae.tagName==='SELECT'||(ae.tagName==='INPUT'&&ae.type==='checkbox'))&&el.contains(ae));
+}
+function manualRefresh(){
+  var b=document.getElementById('btnRefresh');
+  if(b){b.classList.remove('spin');void b.offsetWidth;b.classList.add('spin');
+    setTimeout(function(){b.classList.remove('spin');},850);}
+  refresh();
+}
+document.addEventListener('keydown',function(e){
+  if(document.getElementById('popupOverlay'))return;
+  var t=document.activeElement;
+  if(t&&(t.tagName==='INPUT'||t.tagName==='SELECT'||t.tagName==='TEXTAREA'))return;
+  if(e.key==='r'||e.key==='R'){manualRefresh();}
+});
+function setTheme(t){
+  try{localStorage.setItem('dr_theme',t);}catch(e){}
+  applyTheme();
+}
+function applyTheme(){
+  var t='toxic';
+  try{t=localStorage.getItem('dr_theme')||'toxic';}catch(e){}
+  if(t!=='toxic'&&t!=='midnight'&&t!=='navy')t='toxic';
+  document.body.dataset.theme=t;
+  var s=document.getElementById('themeSel');
+  if(s)s.value=t;
+}
+applyTheme();
+
 // ── 토렌트 상세 모달 ──
 function openTorrentModal(id){
   var overlay=document.getElementById('torrentModal');
@@ -1638,7 +1708,7 @@ function loadTorrentDetail(id){
       // 트래커
       if(d.currentTracker){
         h+='<div class="modal-section"><div class="modal-section-title">트래커</div>';
-        h+='<div style="font-size:12px;color:#A0AABB;word-break:break-all">'+esc(d.currentTracker)+'</div></div>';
+        h+='<div style="font-size:12px;color:var(--dim);word-break:break-all">'+esc(d.currentTracker)+'</div></div>';
       }
       // 연결된 피어 목록
       var peers=d.connectedPeers||[];
@@ -1649,7 +1719,7 @@ function loadTorrentDetail(id){
           var ppct=Math.round((p.progress!=null?p.progress:0)*100);
           ppct=Math.min(100,Math.max(0,ppct));
           var isSeed=ppct>=100;
-          var seedStyle=isSeed?' style="color:#69E29B;font-weight:600"':'';
+          var seedStyle=isSeed?' style="color:var(--ok);font-weight:600"':'';
           h+='<div class="modal-peer-row">';
           h+='<span class="modal-peer-ip">'+esc(p.ip||'?')+'</span>';
           h+='<span class="modal-peer-client">'+esc(p.client||'')+'</span>';
@@ -1675,7 +1745,9 @@ function loadTorrentDetail(id){
         });
         h+='</div>';
       }
-      document.getElementById('tmBody').innerHTML=h;
+      // 체크박스 조작 중엔 모달 교체 skip (T-998) — 조작 끝나면 다음 틱에 반영
+      var tm=document.getElementById('tmBody');
+      if(!uiBusy(tm))tm.innerHTML=h;
     })
     .catch(function(e){document.getElementById('tmBody').innerHTML='<div style="color:#f86;padding:20px">로딩 실패: '+esc(e.message)+'</div>';});
 }
@@ -1814,7 +1886,7 @@ function loadSettings(){
     if(sch.scheduleCron){
       var el=document.getElementById('scheduleStatus');
       el.textContent='크론: "'+sch.scheduleCron+'"'+(sch.cronValid?' ✓':' ✗');
-      el.style.color=sch.cronValid?'#69E29B':'#FF8A93';
+      el.style.color=sch.cronValid?'var(--ok)':'var(--err)';
     }
     loadRssFeeds();
     // 디버그 상태
@@ -1833,12 +1905,12 @@ function updateSpeedLimitStatus(sl){
   var el=document.getElementById('speedLimitStatus');
   if(!el)return;
   if(sl.maxDownloadBps<=0&&sl.maxUploadBps<=0){
-    el.innerHTML='<span style="color:#55688C">전역 속도 제한: 비활성화 (무제한)</span>';
+    el.innerHTML='<span style="color:var(--dim)">전역 속도 제한: 비활성화 (무제한)</span>';
   }else{
     var parts=[];
     if(sl.maxDownloadBps>0)parts.push('다운로드 '+fmt(sl.maxDownloadBps)+'/s');
     if(sl.maxUploadBps>0)parts.push('업로드 '+fmt(sl.maxUploadBps)+'/s');
-    el.innerHTML='<span style="color:#69E29B">전역 속도 제한 적용 중: '+parts.join(' · ')+'</span>';
+    el.innerHTML='<span style="color:var(--ok)">전역 속도 제한 적용 중: '+parts.join(' · ')+'</span>';
   }
 }
 
@@ -2048,35 +2120,35 @@ function testPath(){
   var path=document.getElementById('torrentSavePath').value.trim();
   if(!path){alert('경로를 입력하세요');return;}
   var el=document.getElementById('pathTestResult');
-  el.textContent='테스트 중...';el.style.color='#8FD8FF';
+  el.textContent='테스트 중...';el.style.color='var(--accent2)';
   fetch('/api/storage/test-path',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path:path})})
     .then(function(r){return r.json();})
     .then(function(d){
       if(d.ok){
-        el.textContent='✓ 쓰기 가능';el.style.color='#69E29B';
+        el.textContent='✓ 쓰기 가능';el.style.color='var(--ok)';
       }else{
-        el.textContent='✗ 쓰기 불가: '+(d.error||'알 수 없는 오류');el.style.color='#FF8A93';
+        el.textContent='✗ 쓰기 불가: '+(d.error||'알 수 없는 오류');el.style.color='var(--err)';
       }
     })
-    .catch(function(e){el.textContent='✗ 테스트 실패: '+e;el.style.color='#FF8A93';});
+    .catch(function(e){el.textContent='✗ 테스트 실패: '+e;el.style.color='var(--err)';});
 }
 
 function loadRssFeeds(){
   fetch('/api/rss').then(function(r){return r.json();}).then(function(arr){
     var el=document.getElementById('rssFeedList');
-    if(!arr||arr.length===0){el.innerHTML='<span style="color:#55688C">등록된 피드 없음</span>';return;}
+    if(!arr||arr.length===0){el.innerHTML='<span style="color:var(--dim)">등록된 피드 없음</span>';return;}
     var html='';
     arr.forEach(function(f){
-      var status=f.error?'<span style="color:#FF8A93">⚠ '+f.error+'</span>':'<span style="color:#69E29B">✓</span>';
+      var status=f.error?'<span style="color:var(--err)">⚠ '+f.error+'</span>':'<span style="color:var(--ok)">✓</span>';
       var lastCheck=f.lastCheckedAt>0?new Date(f.lastCheckedAt).toLocaleString():'확인 전';
-      html+='<div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid #1A2233">';
+      html+='<div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--line)">';
       html+='<div style="flex:1;min-width:0">';
-      html+='<div style="font-size:13px;color:#E0E6F0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+f.name+'</div>';
-      html+='<div style="font-size:11px;color:#55688C;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+f.url+'</div>';
-      html+='<div style="font-size:11px;color:#55688C">마지막: '+lastCheck+' | 항목: '+f.lastItemCount+'</div>';
+      html+='<div style="font-size:13px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+f.name+'</div>';
+      html+='<div style="font-size:11px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+f.url+'</div>';
+      html+='<div style="font-size:11px;color:var(--dim)">마지막: '+lastCheck+' | 항목: '+f.lastItemCount+'</div>';
       html+='</div>';
       html+=status;
-      html+=' <button class="ghost sm" onclick="deleteRssFeed(\''+f.id+'\')" style="color:#FF8A93;border:none;padding:2px 6px">✕</button>';
+      html+=' <button class="ghost sm" onclick="deleteRssFeed(\''+f.id+'\')" style="color:var(--err);border:none;padding:2px 6px">✕</button>';
       html+='</div>';
     });
     el.innerHTML=html;
@@ -2200,7 +2272,7 @@ function resetSettings(category){
 function highlightDebridProvider(provider){
   ['REALDEBRID','ALLDEBRID','PREMIUMIZE'].forEach(function(p){
     var el=document.getElementById('debrid'+p.charAt(0)+p.slice(1).toLowerCase());
-    if(el){el.style.borderColor=p===provider?'#2F80ED':'#2A3B5C';el.style.background=p===provider?'#122A4D':'transparent';}
+    if(el){el.style.borderColor=p===provider?'var(--accent)':'var(--line2)';el.style.background=p===provider?'var(--sel)':'transparent';}
   });
 }
 function setDebridProvider(provider){
@@ -2220,17 +2292,17 @@ function saveDebridSettings(){
 }
 function checkDebridAccount(){
   var el=document.getElementById('debridStatus');
-  el.textContent='계정 확인 중...';el.style.color='#8FD8FF';
+  el.textContent='계정 확인 중...';el.style.color='var(--accent2)';
   fetch('/api/debrid/check',{method:'POST'})
     .then(function(r){return r.json();})
     .then(function(d){
       if(d.ok){
-        el.innerHTML='<span style="color:#69E29B">✓ 연결됨</span> — '+(d.username||d.email||'알 수 없음')+(d.premium?' <span class="badge DONE">프리미엄</span>':'');
+        el.innerHTML='<span style="color:var(--ok)">✓ 연결됨</span> — '+(d.username||d.email||'알 수 없음')+(d.premium?' <span class="badge DONE">프리미엄</span>':'');
       }else{
-        el.innerHTML='<span style="color:#FF8A93">✗ '+esc(d.error||'확인 실패')+'</span>';
+        el.innerHTML='<span style="color:var(--err)">✗ '+esc(d.error||'확인 실패')+'</span>';
       }
     })
-    .catch(function(e){el.innerHTML='<span style="color:#FF8A93">✗ 오류: '+esc(e.message)+'</span>';});
+    .catch(function(e){el.innerHTML='<span style="color:var(--err)">✗ 오류: '+esc(e.message)+'</span>';});
 }
 
 // ── 터널 설정 ──
@@ -2239,7 +2311,7 @@ function highlightTunnelProvider(provider){
   tunnelSelectedProvider=provider;
   ['TAILSCALE','CLOUDFLARE'].forEach(function(p){
     var el=document.getElementById('tunnel'+p.charAt(0)+p.slice(1).toLowerCase());
-    if(el){el.style.borderColor=p===provider?'#2F80ED':'#2A3B5C';el.style.background=p===provider?'#122A4D':'transparent';}
+    if(el){el.style.borderColor=p===provider?'var(--accent)':'var(--line2)';el.style.background=p===provider?'var(--sel)':'transparent';}
   });
 }
 function saveTunnelSettings(){
@@ -2253,17 +2325,17 @@ function saveTunnelSettings(){
 }
 function checkTunnelStatus(){
   var el=document.getElementById('tunnelStatus');
-  el.textContent='상태 확인 중...';el.style.color='#8FD8FF';
+  el.textContent='상태 확인 중...';el.style.color='var(--accent2)';
   fetch('/api/tunnel/status')
     .then(function(r){return r.json();})
     .then(function(d){
       if(d.connected){
-        el.innerHTML='<span style="color:#69E29B">✓ 연결됨</span> — IP <b>'+esc(d.ip)+'</b> · 접속 주소 <a href="'+esc(d.url)+'" target="_blank">'+esc(d.url)+'</a>';
+        el.innerHTML='<span style="color:var(--ok)">✓ 연결됨</span> — IP <b>'+esc(d.ip)+'</b> · 접속 주소 <a href="'+esc(d.url)+'" target="_blank">'+esc(d.url)+'</a>';
       }else{
-        el.innerHTML='<span style="color:#FF8A93">✗ '+esc(d.reason||'연결 안 됨')+'</span>';
+        el.innerHTML='<span style="color:var(--err)">✗ '+esc(d.reason||'연결 안 됨')+'</span>';
       }
     })
-    .catch(function(e){el.innerHTML='<span style="color:#FF8A93">✗ 오류: '+esc(e.message)+'</span>';});
+    .catch(function(e){el.innerHTML='<span style="color:var(--err)">✗ 오류: '+esc(e.message)+'</span>';});
 }
 
 // ── 가드 데몬 설정 ──
@@ -2288,7 +2360,7 @@ function saveGuardSettings(){
 }
 function checkGuardStatus(){
   var el=document.getElementById('guardStatus');
-  el.textContent='상태 확인 중...';el.style.color='#8FD8FF';
+  el.textContent='상태 확인 중...';el.style.color='var(--accent2)';
   fetch('/api/guard/status')
     .then(function(r){return r.json();})
     .then(function(d){
@@ -2296,11 +2368,11 @@ function checkGuardStatus(){
       parts.push('열: '+d.thermal+'°C / '+d.thermalLimit+'°C');
       parts.push('배터리: '+(d.batteryLevel>=0?d.batteryLevel+'%':'확인 불가')+' / '+d.batteryLimit+'%');
       parts.push('스토리지: '+d.storageUsed+'% / '+d.storageLimit+'%');
-      var color=d.throttled?'#FF8A93':'#69E29B';
+      var color=d.throttled?'var(--err)':'var(--ok)';
       var status=d.throttled?'⚠ 스로틀링 발동 중':'✓ 정상';
       el.innerHTML='<span style="color:'+color+'">'+status+'</span><br>'+parts.join(' · ');
     })
-    .catch(function(e){el.innerHTML='<span style="color:#FF8A93">✗ 오류: '+esc(e.message)+'</span>';});
+    .catch(function(e){el.innerHTML='<span style="color:var(--err)">✗ 오류: '+esc(e.message)+'</span>';});
 }
 
 function saveMcpSettings(){
@@ -2332,10 +2404,10 @@ function saveScheduleSettings(){
         var el=document.getElementById('scheduleStatus');
         if(body.scheduleCron){
           el.textContent='다음 실행: 크론 "'+body.scheduleCron+'"';
-          el.style.color='#8FD8FF';
+          el.style.color='var(--accent2)';
         }else{
           el.textContent='크론 미설정';
-          el.style.color='#8FA3BF';
+          el.style.color='var(--muted)';
         }
       }
     })
@@ -2344,28 +2416,28 @@ function saveScheduleSettings(){
 
 function detectStorage(){
   var el=document.getElementById('storageList');
-  el.textContent='감지 중...';el.style.color='#8FD8FF';
+  el.textContent='감지 중...';el.style.color='var(--accent2)';
   fetch('/api/storage/external')
     .then(function(r){return r.json();})
     .then(function(d){
       if(!d.storages||d.storages.length===0){
-        el.innerHTML='<span style="color:#8FA3BF">외장 스토리지 없음</span>';
+        el.innerHTML='<span style="color:var(--muted)">외장 스토리지 없음</span>';
         return;
       }
       var html='';
       d.storages.forEach(function(s){
         var freeGB=(s.freeBytes/1073741824).toFixed(1);
         var totalGB=(s.totalBytes/1073741824).toFixed(1);
-        html+='<div style="margin:6px 0;padding:8px 12px;background:#1B2B4D;border-radius:8px">';
-        html+='<b>'+esc(s.label)+'</b> <span style="color:#8FA3BF">'+esc(s.path)+'</span>';
+        html+='<div style="margin:6px 0;padding:8px 12px;background:var(--track);border-radius:8px">';
+        html+='<b>'+esc(s.label)+'</b> <span style="color:var(--muted)">'+esc(s.path)+'</span>';
         html+='<br>여유: '+freeGB+'GB / '+totalGB+'GB';
-        if(s.isExternal) html+=' <span style="color:#69E29B">외장</span>';
+        if(s.isExternal) html+=' <span style="color:var(--ok)">외장</span>';
         html+='</div>';
       });
-      if(d.bestPath) html+='<div style="margin-top:8px;color:#69E29B">권장 경로: '+esc(d.bestPath)+'</div>';
+      if(d.bestPath) html+='<div style="margin-top:8px;color:var(--ok)">권장 경로: '+esc(d.bestPath)+'</div>';
       el.innerHTML=html;
     })
-    .catch(function(e){el.innerHTML='<span style="color:#FF8A93">✗ 오류: '+esc(e.message)+'</span>';});
+    .catch(function(e){el.innerHTML='<span style="color:var(--err)">✗ 오류: '+esc(e.message)+'</span>';});
 }
 
 // 디버그 오버레이
@@ -2373,11 +2445,11 @@ var overlayRunning=false;
 function requestOverlayPerm(){
   fetch('/api/debug/overlay').then(function(r){return r.json();}).then(function(d){
     if(d.hasPermission){
-      document.getElementById('overlayStatus').innerHTML='<span style="color:#69E29B">✓ 권한 있음</span>';
+      document.getElementById('overlayStatus').innerHTML='<span style="color:var(--ok)">✓ 권한 있음</span>';
       document.getElementById('overlayPermBtn').style.display='none';
       document.getElementById('overlayToggleBtn').style.display='';
     }else{
-      document.getElementById('overlayStatus').innerHTML='<span style="color:#FF8A93">권한이 없습니다. 안드로이드 설정에서 "다른 앱 위에 표시"를 허용해주세요.</span>';
+      document.getElementById('overlayStatus').innerHTML='<span style="color:var(--err)">권한이 없습니다. 안드로이드 설정에서 "다른 앱 위에 표시"를 허용해주세요.</span>';
     }
   }).catch(function(){});
 }
@@ -2385,17 +2457,17 @@ function toggleOverlay(){
   fetch('/api/debug/overlay/toggle',{method:'POST'}).then(function(r){return r.json();}).then(function(d){
     overlayRunning=d.running;
     document.getElementById('overlayToggleBtn').textContent=overlayRunning?'오버레이 끄기':'오버레이 켜기';
-    document.getElementById('overlayStatus').innerHTML='<span style="color:#69E29B">'+(overlayRunning?' 활성화됨':' 중지됨')+'</span>';
+    document.getElementById('overlayStatus').innerHTML='<span style="color:var(--ok)">'+(overlayRunning?' 활성화됨':' 중지됨')+'</span>';
   }).catch(function(){});
 }
 function checkOverlay(){
   fetch('/api/debug/overlay').then(function(r){return r.json();}).then(function(d){
     if(d.hasPermission){
-      document.getElementById('overlayStatus').innerHTML='<span style="color:#69E29B">✓ 권한 있음</span>';
+      document.getElementById('overlayStatus').innerHTML='<span style="color:var(--ok)">✓ 권한 있음</span>';
       document.getElementById('overlayPermBtn').style.display='none';
       document.getElementById('overlayToggleBtn').style.display='';
     }else{
-      document.getElementById('overlayStatus').innerHTML='<span style="color:#8FA3BF">권한 필요</span>';
+      document.getElementById('overlayStatus').innerHTML='<span style="color:var(--muted)">권한 필요</span>';
     }
   }).catch(function(){});
 }
@@ -2408,33 +2480,33 @@ function checkOverlay(){
 <title>DroidRelay — Debug</title>
 <style>
   :root{color-scheme:dark}
-  body{margin:0;background:#0A1428;color:#E6EEF8;font:13px/1.5 'SF Mono','Menlo','Consolas',monospace;height:100vh;display:flex;flex-direction:column}
-  .toolbar{background:#101E3A;border-bottom:1px solid #22345A;padding:8px 12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;flex-shrink:0}
-  .toolbar h3{margin:0;font-size:14px;color:#8FD8FF;white-space:nowrap}
-  .toolbar .sep{width:1px;height:20px;background:#22345A}
+  body{margin:0;background:var(--bg);color:var(--text);font:13px/1.5 'SF Mono','Menlo','Consolas',monospace;height:100vh;display:flex;flex-direction:column}
+  .toolbar{background:var(--surface);border-bottom:1px solid var(--line);padding:8px 12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;flex-shrink:0}
+  .toolbar h3{margin:0;font-size:14px;color:var(--accent2);white-space:nowrap}
+  .toolbar .sep{width:1px;height:20px;background:var(--line)}
   .tabs{display:flex;gap:2px}
-  .tab{padding:4px 10px;border-radius:6px;cursor:pointer;font-size:12px;color:#8FA3BF;background:transparent;border:none;transition:all .15s}
-  .tab:hover{background:#1A2540;color:#E3E8EF}
-  .tab.active{background:#2F80ED;color:#fff}
+  .tab{padding:4px 10px;border-radius:6px;cursor:pointer;font-size:12px;color:var(--muted);background:transparent;border:none;transition:all .15s}
+  .tab:hover{background:var(--surface2);color:var(--text)}
+  .tab.active{background:var(--accent);color:var(--on-accent)}
   .filter{display:flex;align-items:center;gap:6px;margin-left:auto}
-  .filter select,.filter input{background:#12203D;border:1px solid #2A3B5C;color:#E6EEF8;border-radius:6px;padding:4px 8px;font-size:12px}
+  .filter select,.filter input{background:var(--surface2);border:1px solid var(--line2);color:var(--text);border-radius:6px;padding:4px 8px;font-size:12px}
   .filter input{width:120px}
   .filter select{width:80px}
-  .btn{padding:4px 10px;border-radius:6px;border:1px solid #2A3B5C;background:#22335A;color:#9FB4D4;cursor:pointer;font-size:12px;transition:all .15s}
-  .btn:hover{background:#2F80ED;border-color:#2F80ED;color:#fff}
-  .btn.red{border-color:#40191C;color:#FF8A93}
-  .btn.red:hover{background:#40191C;color:#FF8A93}
-  .stats{font-size:11px;color:#55688C;white-space:nowrap}
+  .btn{padding:4px 10px;border-radius:6px;border:1px solid var(--line2);background:var(--line);color:var(--muted);cursor:pointer;font-size:12px;transition:all .15s}
+  .btn:hover{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
+  .btn.red{border-color:var(--danger);color:var(--err)}
+  .btn.red:hover{background:var(--danger);color:var(--err)}
+  .stats{font-size:11px;color:var(--dim);white-space:nowrap}
   .log-area{flex:1;overflow-y:auto;padding:8px 12px;font-size:12px;line-height:1.6;scroll-behavior:smooth}
   .log-line{white-space:pre-wrap;word-break:break-all}
-  .log-line.D{color:#66788C}
-  .log-line.I{color:#8FD8FF}
-  .log-line.W{color:#FFD59E}
-  .log-line.E{color:#FF8A93}
-  .log-line.API{color:#69E29B}
+  .log-line.D{color:var(--dim)}
+  .log-line.I{color:var(--accent2)}
+  .log-line.W{color:var(--warn)}
+  .log-line.E{color:var(--err)}
+  .log-line.API{color:var(--ok)}
   .pause-overlay{position:fixed;inset:0;background:rgba(0,0,0,.4);display:none;align-items:center;justify-content:center;z-index:999}
   .pause-overlay.show{display:flex}
-  .pause-text{background:#181F2E;border:1px solid #2A3B5C;border-radius:12px;padding:16px 24px;font-size:16px;color:#FFD59E}
+  .pause-text{background:var(--surface);border:1px solid var(--line2);border-radius:12px;padding:16px 24px;font-size:16px;color:var(--warn)}
 </style></head><body>
 <div class="toolbar">
   <h3>DroidRelay Debug</h3>

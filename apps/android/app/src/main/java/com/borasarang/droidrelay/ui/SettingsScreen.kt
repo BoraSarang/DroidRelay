@@ -1046,6 +1046,7 @@ private fun TrackerProbeRow() {
         }) { Text("도달 측정") }
     }
 }
+
 /** 속도 스케줄 목록 + 추가 다이얼로그 (v0.24) */
 @Composable
 private fun SpeedScheduleSection(windows: List<com.borasarang.droidrelay.relay.SpeedWindow>) {

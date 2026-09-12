@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.27.0] - 2026-09-12 (미배포, 웹 리뉴얼)
+
+### Added [web] — 웹 대시보드 리뉴얼 (PLAN_v0.27_web-renew_android)
+- **T-992 새로고침**: 헤더 ⟳ 버튼 + `R`키 (탭 유지 전체 재조회, 스핀 애니메이션)
+- **T-993/994 테마**: CSS 토큰 19종 + 다크 3종 (기본 ⚡Toxic / 🌌Midnight / 🌊Navy) + 헤더 select + localStorage
+- **T-995 리뉴얼**: `.sub` 문구 삭제, 헤더 1줄화, 네온 글로우, 진행바 플로우 애니메이션
+- **T-996 모바일**: 44px 타겟·글로우 off·헤더 랩 (640px)
+- **T-998 입력 보호**: 틱 리렌더 중 select/체크박스 조작 시 목록 교체 skip (다운로드 속도 변경·토렌트 파일 선택)
+- **T-999 모바일 1줄 입력**: 다운로드 URL+추가 버튼 한줄 고정
+- **검증**: JS node --check + 실기기 3테마 × PC/모바일 스크린샷 + select 실상호작용 E2E
+
 ## [0.26.0] - 2026-09-12 (미배포, Phase E)
 
 ### Added [android+web] — Phase E 트래커 프로빙 (PLAN_v0.26_tracker-probe_android)
