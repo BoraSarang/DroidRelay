@@ -294,6 +294,29 @@ fun SettingsScreen(onPortChanged: (Int) -> Unit) {
                     steps = 8,
                 )
             }
+
+            Spacer(Modifier.height(12.dp))
+            Text("완료 후 동작", color = cs.onSurfaceVariant, style = MaterialTheme.typography.labelMedium)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                androidx.compose.material3.FilterChip(
+                    selected = s.completionAction == SettingsConstraints.COMPLETION_ACTION_NONE,
+                    onClick = {
+                        kotlinx.coroutines.MainScope().launch { repo.setCompletionAction(SettingsConstraints.COMPLETION_ACTION_NONE) }
+                    },
+                    label = { Text("없음") },
+                )
+                androidx.compose.material3.FilterChip(
+                    selected = s.completionAction == SettingsConstraints.COMPLETION_ACTION_STOP_SERVER,
+                    onClick = {
+                        DebugLogger.i("Settings", "완료 후 동작 → 서버 정지")
+                        kotlinx.coroutines.MainScope().launch { repo.setCompletionAction(SettingsConstraints.COMPLETION_ACTION_STOP_SERVER) }
+                    },
+                    label = { Text("전체 완료 시 서버 정지") },
+                )
+            }
+
+            Spacer(Modifier.height(12.dp))
+            SpeedScheduleSection(s.speedSchedule)
         }
 
         HorizontalDivider(color = cs.outlineVariant)
@@ -951,6 +974,8 @@ private fun resetSettings(ctx: android.content.Context, repo: SettingsRepository
             repo.setConcurrency(SettingsConstraints.DEFAULT_CONCURRENCY)
             repo.setSpeedLimit(0)
             repo.setNotifications(true)
+            repo.setSpeedSchedule(emptyList())
+            repo.setCompletionAction(SettingsConstraints.COMPLETION_ACTION_NONE)
             RelayApp.get(ctx).applySettings(repo.firstBlocking())
         }
         "torrent" -> kotlinx.coroutines.MainScope().launch {
@@ -969,6 +994,8 @@ private fun resetSettings(ctx: android.content.Context, repo: SettingsRepository
                 repo.setConcurrency(SettingsConstraints.DEFAULT_CONCURRENCY)
                 repo.setSpeedLimit(0)
                 repo.setNotifications(true)
+                repo.setSpeedSchedule(emptyList())
+                repo.setCompletionAction(SettingsConstraints.COMPLETION_ACTION_NONE)
                 RelayApp.get(ctx).applySettings(repo.firstBlocking())
             }
             kotlinx.coroutines.MainScope().launch {
@@ -983,5 +1010,115 @@ private fun resetSettings(ctx: android.content.Context, repo: SettingsRepository
                 RelayApp.getTorrent(ctx).applySettings(repo.firstBlocking())
             }
         }
+    }
+}
+
+/** 속도 스케줄 목록 + 추가 다이얼로그 (v0.24) */
+@Composable
+private fun SpeedScheduleSection(windows: List<com.borasarang.droidrelay.relay.SpeedWindow>) {
+    val ctx = LocalContext.current
+    val repo = remember { SettingsRepository.get(ctx) }
+    val cs = MaterialTheme.colorScheme
+    var showAdd by remember { mutableStateOf(false) }
+    val dayNames = mapOf(1 to "일", 2 to "월", 3 to "화", 4 to "수", 5 to "목", 6 to "금", 7 to "토")
+
+    fun save(next: List<com.borasarang.droidrelay.relay.SpeedWindow>) {
+        kotlinx.coroutines.MainScope().launch { repo.setSpeedSchedule(next) }
+    }
+
+    Text("속도 스케줄 (요일+시간)", color = cs.onSurfaceVariant, style = MaterialTheme.typography.labelMedium)
+    if (windows.isEmpty()) {
+        Text("등록된 스케줄 없음", color = cs.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
+    }
+    windows.forEach { w ->
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    w.days.sorted().map { dayNames[it] ?: "?" }.joinToString(",") +
+                        " ${w.startMin / 60}:${(w.startMin % 60).toString().padStart(2, '0')}" +
+                        "~${w.endMin / 60}:${(w.endMin % 60).toString().padStart(2, '0')}" +
+                        " ↓${w.downKbps}KB/s ↑${w.upKbps}KB/s",
+                    color = cs.onSurface,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            Switch(checked = w.enabled, onCheckedChange = { on ->
+                save(windows.map { if (it.id == w.id) it.copy(enabled = on) else it })
+            })
+            TextButton(onClick = { save(windows.filter { it.id != w.id }) }) { Text("삭제") }
+        }
+    }
+    OutlinedButton(onClick = { showAdd = true }, enabled = windows.size < 10) { Text("+ 스케줄 추가 (최대 10개)") }
+
+    if (showAdd) {
+        var days by remember { mutableStateOf(setOf(2, 3, 4, 5, 6)) }
+        var start by remember { mutableStateOf("00:00") }
+        var end by remember { mutableStateOf("06:00") }
+        var down by remember { mutableStateOf("0") }
+        var up by remember { mutableStateOf("0") }
+        var err by remember { mutableStateOf<String?>(null) }
+        AlertDialog(
+            onDismissRequest = { showAdd = false },
+            title = { Text("스케줄 추가") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        (1..7).forEach { d ->
+                            androidx.compose.material3.FilterChip(
+                                selected = d in days,
+                                onClick = { days = if (d in days) days - d else days + d },
+                                label = { Text(dayNames[d] ?: "?", fontSize = 12.sp) },
+                            )
+                        }
+                    }
+                    OutlinedTextField(value = start, onValueChange = { start = it }, label = { Text("시작 HH:MM") }, singleLine = true)
+                    OutlinedTextField(value = end, onValueChange = { end = it }, label = { Text("종료 HH:MM") }, singleLine = true)
+                    OutlinedTextField(
+                        value = down,
+                        onValueChange = { down = it.filter { c -> c.isDigit() } },
+                        label = { Text("다운 KB/s (0=무제한)") },
+                        singleLine = true,
+                    )
+                    OutlinedTextField(
+                        value = up,
+                        onValueChange = { up = it.filter { c -> c.isDigit() } },
+                        label = { Text("업 KB/s (0=무제한)") },
+                        singleLine = true,
+                    )
+                    err?.let { Text(it, color = cs.error, style = MaterialTheme.typography.labelSmall) }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    fun toMin(v: String): Int? {
+                        val p = v.split(":")
+                        if (p.size != 2) return null
+                        val h = p[0].toIntOrNull() ?: return null
+                        val m = p[1].toIntOrNull() ?: return null
+                        if (h !in 0..23 || m !in 0..59) return null
+                        return h * 60 + m
+                    }
+                    val s = toMin(start)
+                    val e = toMin(end)
+                    val w = com.borasarang.droidrelay.relay.SpeedWindow(
+                        id = "w" + System.currentTimeMillis(),
+                        enabled = true,
+                        days = days,
+                        startMin = s ?: -1,
+                        endMin = e ?: -1,
+                        downKbps = down.toLongOrNull() ?: -1,
+                        upKbps = up.toLongOrNull() ?: -1,
+                    )
+                    if (!com.borasarang.droidrelay.relay.SpeedSchedule.isValid(w)) {
+                        err = "요일·시간·속도를 확인해 주세요"
+                    } else {
+                        DebugLogger.i("Settings", "[FEATURE] 속도스케줄 추가 id=${w.id}")
+                        save(windows + w)
+                        showAdd = false
+                    }
+                }) { Text("추가") }
+            },
+            dismissButton = { TextButton(onClick = { showAdd = false }) { Text("취소") } },
+        )
     }
 }

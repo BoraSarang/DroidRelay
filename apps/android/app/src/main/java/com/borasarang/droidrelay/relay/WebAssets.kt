@@ -360,6 +360,32 @@ object WebAssets {
             <input type="checkbox" id="autoClassify">
             <label for="autoClassify">완료 파일 자동 분류 (영상/음악/문서 폴더)</label>
           </div>
+          <div class="ti">완료 후 동작</div>
+          <div class="sv">
+            <select id="completionAction">
+              <option value="none">없음 (기본)</option>
+              <option value="stop_server">전체 완료 시 서버 정지</option>
+            </select>
+          </div>
+          <div class="sb" style="margin-top:4px">모든 다운로드·토렌트가 끝나면 서버를 정지합니다 (시딩 중 제외)</div>
+          <div class="ti">속도 스케줄 (요일+시간)</div>
+          <div id="speedSchedList" class="sb"></div>
+          <div class="fp" style="margin-top:6px;flex-wrap:wrap">
+            <label class="sb">월<input type="checkbox" class="ssd" value="2" checked></label>
+            <label class="sb">화<input type="checkbox" class="ssd" value="3" checked></label>
+            <label class="sb">수<input type="checkbox" class="ssd" value="4" checked></label>
+            <label class="sb">목<input type="checkbox" class="ssd" value="5" checked></label>
+            <label class="sb">금<input type="checkbox" class="ssd" value="6" checked></label>
+            <label class="sb">토<input type="checkbox" class="ssd" value="7"></label>
+            <label class="sb">일<input type="checkbox" class="ssd" value="1"></label>
+            <input type="time" id="ssStart" value="00:00" style="max-width:110px">
+            <span class="sb">~</span>
+            <input type="time" id="ssEnd" value="06:00" style="max-width:110px">
+            <input type="number" id="ssDown" min="0" max="1000000" value="0" placeholder="다운KB/s" style="max-width:110px">
+            <input type="number" id="ssUp" min="0" max="1000000" value="0" placeholder="업KB/s" style="max-width:100px">
+            <button class="ghost sm" onclick="addSpeedWindow()">+ 추가</button>
+          </div>
+          <div class="sb" style="margin-top:4px">창 진입 시 전역 제한으로 적용, 이탈 시 수동값 복원 · 0 = 무제한 · 최대 10개</div>
         </div>
       </div>
 
@@ -1719,6 +1745,8 @@ function loadSettings(){
     document.getElementById('storageQuotaGb').value=dl.storageQuotaGb!=null?dl.storageQuotaGb:0;
     document.getElementById('storageQuotaLabel').textContent=dl.storageQuotaGb>0?dl.storageQuotaGb+'GB':'끔';
     document.getElementById('autoClassify').checked=dl.autoClassify===true;
+    document.getElementById('completionAction').value=dl.completionAction||'none';
+    loadSpeedSchedule();
     // 토렌트 설정
     document.getElementById('torrentUploadLimit').value=tr.torrentUploadLimit!=null?tr.torrentUploadLimit:512;
     document.getElementById('torrentUploadLabel').textContent=kblabel(tr.torrentUploadLimit,512,'끔');
@@ -1849,7 +1877,8 @@ function saveDownloadSettings(){
     speedLimitKbps:num(document.getElementById('speedLimitKbps').value,0),
     notifications:document.getElementById('notifications').checked,
     storageQuotaGb:num(document.getElementById('storageQuotaGb').value,0),
-    autoClassify:document.getElementById('autoClassify').checked
+    autoClassify:document.getElementById('autoClassify').checked,
+    completionAction:document.getElementById('completionAction').value||'none'
   };
   document.getElementById('concurrencyLabel').textContent=body.concurrency;
   document.getElementById('speedLimitLabel').textContent=kblabel(body.speedLimitKbps,0,'무제한');
@@ -1857,6 +1886,63 @@ function saveDownloadSettings(){
   apiPost('/api/settings/download',body)
     .then(function(d){if(!d.ok)alert('저장 실패');})
     .catch(function(e){alert('저장 실패: '+e);});
+}
+
+// 속도 스케줄 (v0.24) — 목록은 서버가 단일 진실, 로컬 캐시 없음
+var __speedWindows=[];
+var __dayNames={1:'일',2:'월',3:'화',4:'수',5:'목',6:'금',7:'토'};
+function ssToMin(v){var p=(v||'').split(':');return (parseInt(p[0],10)||0)*60+(parseInt(p[1],10)||0);}
+function ssToTime(m){var h=Math.floor(m/60),mm=m%60;return (h<10?'0':'')+h+':'+(mm<10?'0':'')+mm;}
+function loadSpeedSchedule(){
+  fetch('/api/settings/speed-schedule').then(function(r){return r.json();}).then(function(j){
+    __speedWindows=j.windows||[];
+    renderSpeedSchedule();
+  }).catch(function(){});
+}
+function renderSpeedSchedule(){
+  var el=document.getElementById('speedSchedList');
+  if(!el)return;
+  if(!__speedWindows.length){el.textContent='등록된 스케줄 없음';return;}
+  var h='';
+  for(var i=0;i<__speedWindows.length;i++){
+    var w=__speedWindows[i];
+    var days=(w.days||[]).map(function(d){return __dayNames[d]||d;}).join(',');
+    h+='<div>'+esc(w.id.slice(-6))+' · '+esc(days)+' '+ssToTime(w.startMin)+'~'+ssToTime(w.endMin)
+      +' · ↓'+w.downKbps+'KB/s ↑'+w.upKbps+'KB/s'
+      +' <button class="ghost sm" onclick="toggleSpeedWindow('+i+')">'+(w.enabled?'끄기':'켜기')+'</button>'
+      +' <button class="ghost sm" onclick="deleteSpeedWindow('+i+')">삭제</button></div>';
+  }
+  el.innerHTML=h;
+}
+function saveSpeedSchedule(){
+  apiPost('/api/settings/speed-schedule',{windows:__speedWindows})
+    .then(function(d){if(d.ok){showDlToast('스케줄 저장됨');renderSpeedSchedule();}else alert('저장 실패');})
+    .catch(function(e){alert('저장 실패: '+e);});
+}
+function addSpeedWindow(){
+  var days=[];
+  var cbs=document.querySelectorAll('.ssd:checked');
+  for(var i=0;i<cbs.length;i++)days.push(parseInt(cbs[i].value,10));
+  if(!days.length){alert('요일을 선택하세요');return;}
+  var w={id:'w'+Date.now(),enabled:true,days:days,
+    startMin:ssToMin(document.getElementById('ssStart').value),
+    endMin:ssToMin(document.getElementById('ssEnd').value),
+    downKbps:num(document.getElementById('ssDown').value,0),
+    upKbps:num(document.getElementById('ssUp').value,0)};
+  if(w.startMin<0||w.startMin>1439||w.endMin<0||w.endMin>1439){alert('시간이 올바르지 않습니다');return;}
+  if(__speedWindows.length>=10){alert('최대 10개까지 등록 가능합니다');return;}
+  __speedWindows.push(w);
+  saveSpeedSchedule();
+}
+function toggleSpeedWindow(i){
+  if(!__speedWindows[i])return;
+  __speedWindows[i].enabled=!__speedWindows[i].enabled;
+  saveSpeedSchedule();
+}
+function deleteSpeedWindow(i){
+  if(!__speedWindows[i])return;
+  __speedWindows.splice(i,1);
+  saveSpeedSchedule();
 }
 
 function saveTorrentSettings(){
@@ -2065,6 +2151,7 @@ function resetSettings(category){
   document.getElementById('notifications')?.addEventListener('change',autoSave('dl',saveDownloadSettings));
   document.getElementById('storageQuotaGb')?.addEventListener('change',autoSave('dl',saveDownloadSettings));
   document.getElementById('autoClassify')?.addEventListener('change',autoSave('dl',saveDownloadSettings));
+  document.getElementById('completionAction')?.addEventListener('change',autoSave('dl',saveDownloadSettings));
   document.getElementById('torrentUploadLimit')?.addEventListener('change',autoSave('tr',saveTorrentSettings));
   document.getElementById('torrentDownloadLimit')?.addEventListener('change',autoSave('tr',saveTorrentSettings));
   document.getElementById('torrentMaxActive')?.addEventListener('change',autoSave('tr',saveTorrentSettings));

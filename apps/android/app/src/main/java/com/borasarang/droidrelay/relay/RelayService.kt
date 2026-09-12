@@ -36,6 +36,7 @@ class RelayService : Service() {
     private var webhookManager: WebhookManager? = null
     private var tunnelManager: TunnelManager? = null
     private var schedulerManager: SchedulerManager? = null
+    private var speedScheduleManager: SpeedScheduleManager? = null
     private var isForeground = false
 
     override fun onCreate() {
@@ -102,6 +103,12 @@ class RelayService : Service() {
         schedulerManager = scheduler
         scheduler.start(settingsRepo)
         DebugLogger.i(TAG, "스케줄러 시작 완료")
+
+        // 속도 스케줄 시작 (v0.24) — 가드 스로틀 공유
+        val speedSched = SpeedScheduleManager(applicationContext) { guardDaemon?.isThrottled == true }
+        speedScheduleManager = speedSched
+        speedSched.start()
+        DebugLogger.i(TAG, "속도 스케줄 시작 완료")
 
         // ① 설정 감시: 포트 변경 → 서버 재시작 / 알림 토글 / 서버 스냅샷 갱신
         scope.launch {
@@ -227,6 +234,21 @@ class RelayService : Service() {
                     }
                 }
 
+                // 완료 후 동작 (v0.24) — 전이 기반: 직전까지 활성이었는데 지금 유휴면 1회 실행
+                val wasActive = last.values.any { it == JobState.RUNNING || it == JobState.QUEUED }
+                val nowIdle = current.values.none { it == JobState.RUNNING || it == JobState.QUEUED } &&
+                    TorrentRepository.all().none {
+                        it.state == TorrentState.DOWNLOADING ||
+                            it.state == TorrentState.FETCHING_METADATA ||
+                            it.state == TorrentState.QUEUED
+                    }
+                if (wasActive && nowIdle) {
+                    val action = runCatching { settingsRepo.firstBlocking().completionAction }.getOrDefault("none")
+                    if (action == SettingsConstraints.COMPLETION_ACTION_STOP_SERVER) {
+                        DebugLogger.i(TAG, "[FEATURE] 전체 완료 → 서버 정지 (completionAction)")
+                        stop(applicationContext)
+                    }
+                }
                 last = current
 
                 // 진행바 실시간 갱신 (2초 스로틀)
@@ -310,6 +332,8 @@ class RelayService : Service() {
         guardDaemon = null
         schedulerManager?.stop()
         schedulerManager = null
+        speedScheduleManager?.stop()
+        speedScheduleManager = null
         DebugLogger.i(TAG, "서비스 종료 완료 — 영구 저장 실행")
         // 서버 상태 갱신
         SettingsRepository.get(applicationContext).updateServerState(ServerState(running = false, port = currentPort))
@@ -429,10 +453,19 @@ class RelayService : Service() {
 
     private fun notify(id: Int, title: String, text: String, done: Boolean) {
         val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        // 완료 알림 탭 → 보관함으로 이동 (v0.24)
+        val openTab = PendingIntent.getActivity(
+            this, 9000 + id,
+            Intent(this, com.borasarang.droidrelay.MainActivity::class.java)
+                .setAction(com.borasarang.droidrelay.MainActivity.ACTION_OPEN_TAB)
+                .putExtra(com.borasarang.droidrelay.MainActivity.EXTRA_TAB, 2),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
         val notif = Notification.Builder(this, CHANNEL_RESULT_ID)
             .setSmallIcon(if (done) android.R.drawable.stat_sys_download_done else android.R.drawable.stat_notify_error)
             .setContentTitle(title)
             .setContentText(text)
+            .setContentIntent(if (done) openTab else null)
             .setAutoCancel(true)
             .build()
         nm.notify(id, notif)
@@ -440,10 +473,19 @@ class RelayService : Service() {
 
     private fun notifyTorrent(id: Int, title: String, text: String) {
         val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        // 토렌트 완료 알림 탭 → 토렌트 탭으로 이동 (v0.24)
+        val openTab = PendingIntent.getActivity(
+            this, 9100 + id,
+            Intent(this, com.borasarang.droidrelay.MainActivity::class.java)
+                .setAction(com.borasarang.droidrelay.MainActivity.ACTION_OPEN_TAB)
+                .putExtra(com.borasarang.droidrelay.MainActivity.EXTRA_TAB, 1),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
         val notif = Notification.Builder(this, CHANNEL_TORRENT_ID)
             .setSmallIcon(android.R.drawable.stat_sys_download_done)
             .setContentTitle(title)
             .setContentText(text)
+            .setContentIntent(openTab)
             .setAutoCancel(true)
             .build()
         nm.notify(TORRENT_NOTIF_PREFIX + id, notif)

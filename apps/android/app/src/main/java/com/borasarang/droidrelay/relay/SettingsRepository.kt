@@ -91,6 +91,10 @@ data class AppSettings(
     // 게스트 읽기전용 (v0.20) — 웹 인증 켜짐 + 비밀번호 설정 시에만 유효
     val guestEnabled: Boolean = false,
     val guestPassword: String = "",
+    // 속도 스케줄 (v0.24) — 요일+시간 창 기반 전역 제한
+    val speedSchedule: List<SpeedWindow> = emptyList(),
+    // 완료 후 동작 (v0.24) — none | stop_server
+    val completionAction: String = SettingsConstraints.COMPLETION_ACTION_NONE,
 )
 
 private val Context.settingsDataStore by preferencesDataStore("droidrelay_settings")
@@ -170,6 +174,9 @@ class SettingsRepository(private val context: Context) {
         // 게스트 (v0.20)
         val GUEST_ENABLED = booleanPreferencesKey("guest_enabled")
         val GUEST_PASSWORD = stringPreferencesKey("guest_password")
+        // 속도 스케줄 + 완료 후 동작 (v0.24)
+        val SPEED_SCHEDULE = stringPreferencesKey("speed_schedule")
+        val COMPLETION_ACTION = stringPreferencesKey("completion_action")
     }
 
     val settings: Flow<AppSettings> = context.settingsDataStore.data.map { p ->
@@ -229,6 +236,10 @@ class SettingsRepository(private val context: Context) {
             searchApiKey = p[Keys.SEARCH_API_KEY] ?: "",
             guestEnabled = p[Keys.GUEST_ENABLED] ?: false,
             guestPassword = p[Keys.GUEST_PASSWORD] ?: "",
+            speedSchedule = SpeedSchedule.decode(p[Keys.SPEED_SCHEDULE]),
+            completionAction = (p[Keys.COMPLETION_ACTION] ?: SettingsConstraints.COMPLETION_ACTION_NONE)
+                .takeIf { it == SettingsConstraints.COMPLETION_ACTION_STOP_SERVER }
+                ?: SettingsConstraints.COMPLETION_ACTION_NONE,
         )
     }
 
@@ -317,6 +328,20 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun setGuestPassword(pass: String) =
         context.settingsDataStore.edit { if (pass.isNotBlank()) it[Keys.GUEST_PASSWORD] = pass }
+
+    // 속도 스케줄 setters (v0.24) — 전체 교체 (검증 후 유효분만 영속)
+    suspend fun setSpeedSchedule(windows: List<SpeedWindow>) =
+        context.settingsDataStore.edit { it[Keys.SPEED_SCHEDULE] = SpeedSchedule.encode(windows) }
+
+    // 완료 후 동작 setters (v0.24)
+    suspend fun setCompletionAction(action: String) =
+        context.settingsDataStore.edit {
+            it[Keys.COMPLETION_ACTION] = if (action == SettingsConstraints.COMPLETION_ACTION_STOP_SERVER) {
+                SettingsConstraints.COMPLETION_ACTION_STOP_SERVER
+            } else {
+                SettingsConstraints.COMPLETION_ACTION_NONE
+            }
+        }
 
     suspend fun addAllowedIp(ip: String) =
         context.settingsDataStore.edit { it[Keys.ALLOWED_IPS] = (it[Keys.ALLOWED_IPS] ?: emptySet()) + ip }

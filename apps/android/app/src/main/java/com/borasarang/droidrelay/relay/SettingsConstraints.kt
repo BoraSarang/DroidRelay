@@ -41,6 +41,10 @@ object SettingsConstraints {
         else -> "${kbps / 1024}M"
     }
 
+    // 완료 후 동작 (v0.24)
+    const val COMPLETION_ACTION_NONE = "none"
+    const val COMPLETION_ACTION_STOP_SERVER = "stop_server"
+
     /** 임시 포트 (리셋용) */
     fun randomEphemeralPort(): Int = 49152 + kotlin.random.Random.nextInt(16384)
 }

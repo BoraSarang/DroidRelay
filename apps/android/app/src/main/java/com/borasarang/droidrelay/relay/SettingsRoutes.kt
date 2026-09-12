@@ -3,6 +3,7 @@ package com.borasarang.droidrelay.relay
 import android.content.Context
 import android.os.StatFs
 import io.ktor.http.ContentType
+import io.ktor.http.HttpStatusCode
 import io.ktor.server.request.receiveText
 import io.ktor.server.response.respondText
 import io.ktor.server.routing.Route
@@ -76,6 +77,7 @@ internal fun Route.settingsRoutes(context: Context, serverRef: RelayServer) {
                 put("notifications", s.notifications)
                 put("storageQuotaGb", s.storageQuotaGb)
                 put("autoClassify", s.autoClassify)
+                put("completionAction", s.completionAction)
             }.toString(),
             ContentType.Application.Json
         )
@@ -90,8 +92,73 @@ internal fun Route.settingsRoutes(context: Context, serverRef: RelayServer) {
         if (json?.has("notifications") == true) json?.optBoolean("notifications")?.let { repo.setNotifications(it) }
         json?.optInt("storageQuotaGb", -1)?.let { if (it >= 0) repo.setStorageQuotaGb(it) }
         if (json?.has("autoClassify") == true) json?.optBoolean("autoClassify")?.let { repo.setAutoClassify(it) }
+        json?.optString("completionAction", "")?.let {
+            if (it == SettingsConstraints.COMPLETION_ACTION_STOP_SERVER || it == SettingsConstraints.COMPLETION_ACTION_NONE) {
+                repo.setCompletionAction(it)
+            }
+        }
         // 엔진에 즉시 반영
         RelayApp.get(context).applySettings(repo.firstBlocking())
+        serverRef.settings = repo.firstBlocking()
+        call.respondText("""{"ok":true}""", ContentType.Application.Json)
+    }
+
+    // ── 속도 스케줄 (v0.24) ──
+    get("/api/settings/speed-schedule") {
+        val s = serverRef.settings
+        call.respondText(
+            JSONObject().apply {
+                put("windows", JSONArray().apply {
+                    s.speedSchedule.forEach { w ->
+                        put(JSONObject().apply {
+                            put("id", w.id)
+                            put("enabled", w.enabled)
+                            put("days", JSONArray(w.days.sorted()))
+                            put("startMin", w.startMin)
+                            put("endMin", w.endMin)
+                            put("downKbps", w.downKbps)
+                            put("upKbps", w.upKbps)
+                        })
+                    }
+                })
+            }.toString(),
+            ContentType.Application.Json
+        )
+    }
+
+    post("/api/settings/speed-schedule") {
+        val body = call.receiveText()
+        val json = try { JSONObject(body) } catch (_: Exception) { null }
+        val arr = json?.optJSONArray("windows")
+        if (arr == null) {
+            call.respondText("잘못된 요청", ContentType.Text.Plain, HttpStatusCode.BadRequest)
+            return@post
+        }
+        if (arr.length() > SpeedSchedule.MAX_WINDOWS) {
+            call.respondText("잘못된 요청", ContentType.Text.Plain, HttpStatusCode.BadRequest)
+            return@post
+        }
+        val windows = (0 until arr.length()).mapNotNull { i ->
+            runCatching {
+                val o = arr.getJSONObject(i)
+                SpeedWindow(
+                    id = o.optString("id").ifBlank { System.currentTimeMillis().toString() + "-$i" },
+                    enabled = o.optBoolean("enabled", true),
+                    days = (0 until (o.optJSONArray("days")?.length() ?: 0))
+                        .map { o.optJSONArray("days")!!.getInt(it) }.toSet(),
+                    startMin = o.optInt("startMin", -1),
+                    endMin = o.optInt("endMin", -1),
+                    downKbps = o.optLong("downKbps", -1),
+                    upKbps = o.optLong("upKbps", -1),
+                ).takeIf { SpeedSchedule.isValid(it) }
+            }.getOrNull()
+        }
+        if (windows.size != arr.length()) {
+            call.respondText("잘못된 요청", ContentType.Text.Plain, HttpStatusCode.BadRequest)
+            return@post
+        }
+        val repo = SettingsRepository.get(context)
+        repo.setSpeedSchedule(windows)
         serverRef.settings = repo.firstBlocking()
         call.respondText("""{"ok":true}""", ContentType.Application.Json)
     }
@@ -176,6 +243,8 @@ internal fun Route.settingsRoutes(context: Context, serverRef: RelayServer) {
                 repo.setNotifications(true)
                 repo.setStorageQuotaGb(0)
                 repo.setAutoClassify(false)
+                repo.setSpeedSchedule(emptyList())
+                repo.setCompletionAction(SettingsConstraints.COMPLETION_ACTION_NONE)
                 RelayApp.get(ctx).applySettings(repo.firstBlocking())
             }
             "torrent" -> {
@@ -187,6 +256,7 @@ internal fun Route.settingsRoutes(context: Context, serverRef: RelayServer) {
                 repo.setTorrentPexEnabled(true)
                 repo.setTorrentListenPort(SettingsConstraints.randomEphemeralPort())
                 repo.setTorrentSavePath("/sdcard/Download/DroidRelay")
+                repo.setTorrentTrackerSync(true)
                 repo.setSearchEnabled(false)
                 repo.setSearchUrl("")
                 repo.setSearchApiKey("")
@@ -198,15 +268,17 @@ internal fun Route.settingsRoutes(context: Context, serverRef: RelayServer) {
                 repo.setNotifications(true)
                 repo.setStorageQuotaGb(0)
                 repo.setAutoClassify(false)
+                repo.setSpeedSchedule(emptyList())
+                repo.setCompletionAction(SettingsConstraints.COMPLETION_ACTION_NONE)
                 repo.setTorrentUploadLimit(SettingsConstraints.DEFAULT_TORRENT_UPLOAD_KBPS)
                 repo.setTorrentDownloadLimit(SettingsConstraints.DEFAULT_TORRENT_DOWNLOAD_KBPS)
                 repo.setTorrentMaxActive(SettingsConstraints.DEFAULT_TORRENT_MAX_ACTIVE)
                 repo.setTorrentSeedRatio(2.0f)
                 repo.setTorrentDhtEnabled(true)
                 repo.setTorrentPexEnabled(true)
+                repo.setTorrentTrackerSync(true)
                 repo.setTorrentListenPort(SettingsConstraints.randomEphemeralPort())
                 repo.setTorrentSavePath("/sdcard/Download/DroidRelay")
-                repo.setTorrentTrackerSync(true)
                 repo.setSearchEnabled(false)
                 repo.setSearchUrl("")
                 repo.setSearchApiKey("")

@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.24.0] - 2026-09-12 (미배포, Phase C)
+
+### Added [android+web] — Phase C 운영 완성 (PLAN_v0.24_phaseC_android)
+- **T-975/976 속도 스케줄**: `SpeedWindow(요일+시간+상하향)` + 수동 직렬화 + `SpeedScheduleManager`(60초 틱, 진입/이탈 시만 적용, 가드 스로틀 시 보류). 우선순위: 가드 일시정지 > 스케줄 > 수동
+- **T-977/978 스케줄 API+UI**: `GET/POST /api/settings/speed-schedule`(10개 cap·400 검증) + 웹 목록/추가/토글/삭제 + 앱 목록/스위치/삭제/추가 다이얼로그
+- **T-979 알림 딥링크 + 완료 후 동작**: 완료 알림→보관함 탭, 토렌트 완료→토렌트 탭 (`pendingOpenTab`, singleTop). `completionAction(none/stop_server)` + 전이 기반 실행(SEEDING 제외)
+- **T-980 버전 단일 진실**: `gradle.properties` + `scripts/bump-version.sh` (dry-run 검증済)
+- **검증**: unit 8건 GREEN(전체 92건) + ktlint 본문 GREEN + JS node --check + assembleDebug GREEN
+
 ## [0.23.0] - 2026-09-12 (미배포, Phase B)
 
 ### Added [android+web] — Phase B 성공률·복원력 (PLAN_v0.23_phaseB_android)

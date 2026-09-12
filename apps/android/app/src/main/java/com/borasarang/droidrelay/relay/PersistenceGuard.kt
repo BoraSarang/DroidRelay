@@ -54,6 +54,8 @@ object PersistenceGuard {
         "forceHttpsRedirect" to s.forceHttpsRedirect,
         "storageQuotaGb" to s.storageQuotaGb,
         "autoClassify" to s.autoClassify,
+        "completionAction" to s.completionAction,
+        "speedScheduleSize" to s.speedSchedule.size,
         "searchEnabled" to s.searchEnabled,
         "searchUrl" to s.searchUrl,
         "searchApiKey" to "***",

@@ -63,6 +63,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         DebugLogger.i("UI", "앱 실행 onCreate")
         handleSharedIntent(intent)
+        handleOpenTab(intent)
 
         val settingsRepo = SettingsRepository.get(this)
         val initial = settingsRepo.firstBlocking()
@@ -86,6 +87,7 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         handleSharedIntent(intent)
+        handleOpenTab(intent)
     }
 
     /** 공유 받기: ACTION_SEND 텍스트에서 URL/magnet 추출 (T-941) */
@@ -146,9 +148,22 @@ class MainActivity : ComponentActivity() {
     }
 
     companion object {
+        const val ACTION_OPEN_TAB = "com.borasarang.droidrelay.OPEN_TAB"
+        const val EXTRA_TAB = "tab"
         @Volatile var pendingClipUrl: String? = null
         @Volatile var pendingSharedUrl: String? = null
         @Volatile var pendingSharedMagnet: String? = null
+        @Volatile var pendingOpenTab: Int? = null
+    }
+
+    /** 알림 탭 → 지정 탭으로 이동 (v0.24, singleTop이므로 onNewIntent 경유) */
+    private fun handleOpenTab(intent: android.content.Intent?) {
+        if (intent?.action != ACTION_OPEN_TAB) return
+        val tab = intent.getIntExtra(EXTRA_TAB, -1)
+        if (tab in 0..3) {
+            pendingOpenTab = tab
+            DebugLogger.i("UI", "[FEATURE] 알림 탭 이동 tab=$tab")
+        }
     }
 }
 
@@ -164,10 +179,14 @@ fun RootApp() {
     val engine = com.borasarang.droidrelay.relay.RelayApp.get(context)
     val tabTitles = listOf("다운로드", "토렌트", "보관함", "설정")
 
-    // 클립보드 URL 감지 제안 (T-110) + 공유 받기 (T-941)
+    // 클립보드 URL 감지 제안 (T-110) + 공유 받기 (T-941) + 알림 탭 이동 (v0.24)
     LaunchedEffect(Unit) {
         while (true) {
             kotlinx.coroutines.delay(1500)
+            MainActivity.pendingOpenTab?.let { target ->
+                MainActivity.pendingOpenTab = null
+                tab = target
+            }
             MainActivity.pendingClipUrl?.let { url ->
                 MainActivity.pendingClipUrl = null
                 val result = snackbar.showSnackbar(

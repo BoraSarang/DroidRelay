@@ -32,8 +32,9 @@ android {
         applicationId = "com.borasarang.droidrelay"
         minSdk = 26
         targetSdk = 36
-        versionCode = 26
-        versionName = "0.21.0"
+        // 버전 단일 진실: root gradle.properties (변경은 scripts/bump-version.sh 로만)
+        versionCode = (project.findProperty("versionCode") as String).toInt()
+        versionName = project.findProperty("versionName") as String
         buildConfigField("String", "TLS_KEYSTORE_PASSWORD", "\"$tlsKeystorePassword\"")
     }
 

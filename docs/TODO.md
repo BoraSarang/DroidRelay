@@ -377,3 +377,16 @@ T-001~T-008 전부 완료 (커밋 7574486).
 | T-971 | P1-6 코어+엔진 (TrackerListProvider/설정/주입) + 테스트 5건 | ✅ |
 | T-972 | P1-6 UI+API (trackers 2종 + 웹/앱 토글) | ✅ |
 | T-973 | 검증(3종 게이트) + CHANGELOG + 세션 로그 + E2E | ✅ |
+
+## v0.24 (2026-09-12) — Phase C 운영 완성 (PLAN_v0.24_phaseC_android.md)
+
+| T-번호 | 내용 | 상태 |
+|--------|------|------|
+| T-974 | PLAN 작성 + TODO 등록 | ✅ |
+| T-975 | SpeedSchedule 코어(모델+직렬화+decide) + Repo 배선 + 테스트 8건 | ✅ |
+| T-976 | SpeedScheduleManager(60초 틱) + RelayService 배선 | ✅ |
+| T-977 | API speed-schedule 2종 + 검증 | ✅ |
+| T-978 | UI 웹 스케줄 블록 + 앱 목록/다이얼로그 | ✅ |
+| T-979 | 알림 딥링크(pendingOpenTab) + completionAction | ✅ |
+| T-980 | 버전 단일 진실 + bump-version.sh | ✅ |
+| T-981 | 검증(게이트) + CHANGELOG + 세션 로그 + E2E | ✅ |
