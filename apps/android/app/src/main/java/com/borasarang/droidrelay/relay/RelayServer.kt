@@ -530,7 +530,8 @@ internal object StreamContentType {
 /** RFC 6266 — 비ASCII(한글/일본어/중국어) 파일명은 filename*=UTF-8''<percent-encoded>로 전달 */
 internal object DispositionHeader {
     fun make(name: String): String {
-        val enc = java.net.URLEncoder.encode(name, "UTF-8").replace("+", "%20")
+        val safe = name.ifBlank { "download" }
+        val enc = java.net.URLEncoder.encode(safe, "UTF-8").replace("+", "%20")
         return "attachment; filename=\"$enc\"; filename*=UTF-8''$enc"
     }
 }

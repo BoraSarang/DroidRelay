@@ -13,10 +13,11 @@ import org.json.JSONObject
 object VideoApi {
     private const val TAG = "VideoApi"
 
-    /** 분석 — 스트림(m3u8/mpd)/동영상(mp4) 전용. 실패 시 VideoException. */
-    suspend fun analyze(url: String): JSONObject = withContext(Dispatchers.IO) {
-        DebugLogger.i(TAG, "[FEATURE] 분석 시작 url=${url.take(90)}")
-        val d = StreamDetector.analyze(url)
+    /** 분석 — 스트림(m3u8/mpd)/동영상(mp4) 전용. 실패 시 VideoException.
+     * extra는 메모리 전용 전달 헤더 (영속·로그 값 기록 금지). */
+    suspend fun analyze(url: String, extra: StreamDetector.ExtraHeaders? = null): JSONObject = withContext(Dispatchers.IO) {
+        DebugLogger.i(TAG, "[FEATURE] 분석 시작 url=${url.take(90)} ref=${extra?.hasReferer} ck=${extra?.hasCookie}")
+        val d = StreamDetector.analyze(url, extra)
         JSONObject().apply {
             put("kind", d.kind)
             put("title", d.title)
@@ -42,15 +43,16 @@ object VideoApi {
         url: String,
         streamUrl: String?,
         filename: String?,
+        extra: StreamDetector.ExtraHeaders? = null,
     ): Job = withContext(Dispatchers.IO) {
         val vm = RelayApp.getVideo(context)
-        val found = StreamDetector.analyze(url)
+        val found = StreamDetector.analyze(url, extra)
         val stream = streamUrl?.ifBlank { found.url } ?: found.url
         // 분석 대상과 다운로드 대상이 같으면 재fetch 없이 계측값 재사용(403 사이트는 분석 단계에서 이미 즉시 실패)
         val m = if (stream == found.url) {
             StreamDetector.ManifestResult(emptyList(), found.segmentsTotal, found.durationMs)
         } else {
-            StreamDetector.parseManifest(stream)
+            StreamDetector.parseManifest(stream, extra)
         }
         val segments = m.segments
         val durationMs = m.durationMs

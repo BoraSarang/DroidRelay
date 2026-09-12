@@ -216,6 +216,10 @@ object WebAssets {
         <input id="vurl" type="url" placeholder="스트림 페이지 또는 m3u8/mpd 직접 주소" style="flex:1">
         <button class="ghost" onclick="analyzeVideo()">분석</button>
       </div>
+      <div class="row" style="margin-top:6px">
+        <input id="vref" type="url" placeholder="Referer (선택, 차단 사이트용)" style="flex:1">
+        <input id="vcookie" type="password" placeholder="Cookie (선택, 저장 안 됨)" style="flex:1" autocomplete="off">
+      </div>
       <div id="videoArea" style="margin-top:10px"></div>
     </div>
 
@@ -438,6 +442,12 @@ object WebAssets {
             <button class="ghost sm" onclick="saveSearchSettings()">저장</button>
           </div>
           <div class="sb" style="margin-top:4px">Torznab 경로(/api/v2.0/...)는 자동 추가. 토렌트 탭 검색창이 활성화됩니다</div>
+          <div class="ti">트래커 자동 동기</div>
+          <div class="ck"><input type="checkbox" id="torrentTrackerSync" checked><label for="torrentTrackerSync">커뮤니티 트래커 목록 자동 동기 (24시간)</label></div>
+          <div class="fp" style="margin-top:6px">
+            <button class="ghost sm" onclick="refreshTrackers()">🔄 지금 동기화</button>
+            <span class="sb" id="trackerCountLabel"></span>
+          </div>
         </div>
       </div>
 
@@ -740,12 +750,24 @@ function showVideoBlocked(){
   if(_a)_a.innerHTML='<div class="info" style="margin-top:6px;border:1px solid #B36B00;border-radius:8px;padding:8px 10px;background:rgba(255,170,0,.08)">💡 해당 사이트는 폰/앱(비브라우저) 접근을 차단하고 있습니다.</div>';
 }
 function isVideoBlocked(m){return (m||'').indexOf('E-AND-VID-0206')>=0;}
+function videoExtra(){
+  var r=document.getElementById('vref');var c=document.getElementById('vcookie');
+  var o={};
+  var rv=r?r.value.trim():'';var cv=c?c.value.trim():'';
+  if(rv)o.referer=rv;if(cv)o.cookie=cv;
+  return o;
+}
+function clearVideoExtra(){
+  var r=document.getElementById('vref');if(r)r.value='';
+  var c=document.getElementById('vcookie');if(c)c.value='';
+}
 function analyzeVideo(){
   var v=document.getElementById('vurl').value.trim();
   if(!v){videoErr('스트림/동영상 URL을 입력해 주세요');return;}
   var area=document.getElementById('videoArea');
   area.innerHTML='<div class="info">주소 확인 중… (동영상/스트림 스니핑)</div>';
-  fetch('/api/video/analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:v})}).then(function(r){
+  var body={url:v};var ex=videoExtra();if(ex.referer)body.referer=ex.referer;if(ex.cookie)body.cookie=ex.cookie;
+  fetch('/api/video/analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(function(r){
     if(!r.ok)return r.text().then(function(t){throw new Error(t);});
     return r.json();
   }).then(function(j){
@@ -809,7 +831,7 @@ function retryVideo(v){
     return r.json();
   }).then(function(){
     if(area){area.innerHTML='<div class="info" style="color:#69E29B">✓ 재다운로드 시작됨 — 목록에서 확인</div>';setTimeout(function(){area.innerHTML='';},3000);}
-    clearVideoUrlInput();
+    clearVideoUrlInput();clearVideoExtra();
     refresh();
   }).catch(function(e){
     var _m=e.message||e;
@@ -821,6 +843,7 @@ function createVideo(v){
   var j=__videoState||{};
   var nameEl=document.getElementById('vname');
   var body={url:v,streamUrl:currentVideoUrl(),filename:(nameEl?nameEl.value.trim():'')};
+  var ex=videoExtra();if(ex.referer)body.referer=ex.referer;if(ex.cookie)body.cookie=ex.cookie;
   var area=document.getElementById('videoArea');
   area.innerHTML='<div class="info">다운로드 시작 중…</div>';
   fetch('/api/video/create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(function(r){
@@ -829,7 +852,7 @@ function createVideo(v){
   }).then(function(){
     area.innerHTML='<div class="info" style="color:#69E29B">✓ 다운로드 시작됨 — 위 목록에서 진행률 확인</div>';
     setTimeout(function(){ area.innerHTML=''; }, 3000);
-    clearVideoUrlInput();
+    clearVideoUrlInput();clearVideoExtra();
     refresh();
   }).catch(function(e){
     var _m=e.message||e;
@@ -1649,7 +1672,7 @@ function switchTab(t){
   document.getElementById('panel-storage').classList.toggle('active',t==='storage');
   document.getElementById('panel-settings').classList.toggle('active',t==='settings');
   if(t==='storage')refreshStorage();
-  if(t==='settings'){loadSettings();loadSearchSettings();}
+  if(t==='settings'){loadSettings();loadSearchSettings();loadTrackerCount();}
 }
 
 // ── 설정 사이드바 전환 ──
@@ -1708,6 +1731,7 @@ function loadSettings(){
     document.getElementById('torrentDhtEnabled').checked=tr.torrentDhtEnabled!==false;
     document.getElementById('torrentPexEnabled').checked=tr.torrentPexEnabled!==false;
     document.getElementById('torrentSequentialDownload').checked=tr.torrentSequentialDownload===true;
+    document.getElementById('torrentTrackerSync').checked=tr.torrentTrackerSync!==false;
     document.getElementById('torrentListenPort').value=tr.torrentListenPort!=null?tr.torrentListenPort:6881;
     document.getElementById('torrentSavePath').value=tr.torrentSavePath||'/sdcard/Download/DroidRelay';
     document.getElementById('torrentMinSeedWaitSec').value=tr.torrentMinSeedWaitSec!=null?tr.torrentMinSeedWaitSec:0;
@@ -1844,6 +1868,7 @@ function saveTorrentSettings(){
     torrentDhtEnabled:document.getElementById('torrentDhtEnabled').checked,
     torrentPexEnabled:document.getElementById('torrentPexEnabled').checked,
     torrentSequentialDownload:document.getElementById('torrentSequentialDownload').checked,
+    torrentTrackerSync:document.getElementById('torrentTrackerSync').checked,
     torrentListenPort:num(document.getElementById('torrentListenPort').value,6881),
     torrentSavePath:document.getElementById('torrentSavePath').value.trim(),
     torrentMinSeedWaitSec:num(document.getElementById('torrentMinSeedWaitSec').value,0)
@@ -1879,6 +1904,24 @@ function randomizePort(){
   var port=49152+Math.floor(Math.random()*16384);
   document.getElementById('torrentListenPort').value=port;
   saveTorrentSettings();
+}
+
+function refreshTrackers(){
+  var el=document.getElementById('trackerCountLabel');
+  if(el)el.textContent='동기화 중…';
+  fetch('/api/torrents/trackers/refresh',{method:'POST'}).then(function(r){return r.json();}).then(function(j){
+    if(el)el.textContent='트래커 '+(j.count||0)+'개 동기화됨';
+    showDlToast('트래커 '+(j.count||0)+'개 동기화됨');
+  }).catch(function(e){
+    if(el)el.textContent='동기화 실패';
+    alert('동기화 실패: '+e);
+  });
+}
+function loadTrackerCount(){
+  fetch('/api/torrents/trackers').then(function(r){return r.json();}).then(function(j){
+    var el=document.getElementById('trackerCountLabel');
+    if(el)el.textContent='트래커 '+(j.count||0)+'개';
+  }).catch(function(){});
 }
 
 // 업로드 최소화 프리셋 (T-959)
@@ -2029,6 +2072,7 @@ function resetSettings(category){
   document.getElementById('torrentDhtEnabled')?.addEventListener('change',autoSave('tr',saveTorrentSettings));
   document.getElementById('torrentPexEnabled')?.addEventListener('change',autoSave('tr',saveTorrentSettings));
   document.getElementById('torrentSequentialDownload')?.addEventListener('change',autoSave('tr',saveTorrentSettings));
+  document.getElementById('torrentTrackerSync')?.addEventListener('change',autoSave('tr',saveTorrentSettings));
   document.getElementById('torrentListenPort')?.addEventListener('change',autoSave('tr',saveTorrentSettings));
   document.getElementById('torrentSavePath')?.addEventListener('change',autoSave('tr',saveTorrentSettings));
   document.getElementById('guardThermalLimit')?.addEventListener('input',function(){document.getElementById('guardThermalLabel').textContent=this.value+'°C';});

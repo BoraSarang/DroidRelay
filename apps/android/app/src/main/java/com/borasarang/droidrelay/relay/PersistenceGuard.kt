@@ -40,6 +40,7 @@ object PersistenceGuard {
         "accessScope" to s.accessScope.name,
         "torrentMaxActive" to s.torrentMaxActive,
         "torrentDhtEnabled" to s.torrentDhtEnabled,
+        "torrentTrackerSync" to s.torrentTrackerSync,
         "guardEnabled" to s.guardEnabled,
         "webhookEnabled" to s.webhookEnabled,
         "webhookUrl" to s.webhookUrl,

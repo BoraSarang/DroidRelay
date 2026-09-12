@@ -70,6 +70,29 @@ class TorrentEngine(
         hashToId[hash] = id
         // 재매핑(재시작·복원) 시 영속된 파일 선택 복원 (T-942)
         applyPersistedSelection(id)
+        // 동기된 커뮤니티 트래커 주입 (T-971, 실패해도 계속)
+        applyExtraTrackers(id)
+    }
+
+    /** 동기된 트래커를 핸들에 추가 — 없는 것만 최대 20개. 전체 try-catch (T-931 교훈). */
+    internal fun applyExtraTrackers(id: String) {
+        try {
+            if (!settings.firstBlocking().torrentTrackerSync) return
+            val extra = TrackerListProvider.getCached(context)
+            if (extra.isEmpty()) return
+            val th = handleMap[id] ?: return
+            val existing = withGate { th.trackers().map { it.url() }.toSet() }
+            val missing = extra.filter { it !in existing }.take(20)
+            if (missing.isEmpty()) return
+            withGate {
+                missing.forEach { u ->
+                    runCatching { th.addTracker(org.libtorrent4j.AnnounceEntry(u)) }
+                }
+            }
+            DebugLogger.i(TAG, "[FEATURE] 트래커 주입 id=$id ${missing.size}개")
+        } catch (e: Exception) {
+            DebugLogger.e(TAG, "트래커 주입 실패 id=$id (무시)", e)
+        }
     }
 
     /** 영속된 파일 선택을 libtorrent 우선순위로 적용 (T-942) */
@@ -232,6 +255,12 @@ class TorrentEngine(
                 applyRateLimits()
                 startStatusPolling()
                 restoreTorrents()
+                // 트래커 목록 백그라운드 동기 (T-971, 실패해도 번들 목록 사용)
+                scope.launch {
+                    if (runCatching { settings.firstBlocking().torrentTrackerSync }.getOrDefault(true)) {
+                        TrackerListProvider.refresh(context)
+                    }
+                }
             } catch (e: Exception) {
                 DebugLogger.e(TAG, "세션 시작 실패", e)
             }

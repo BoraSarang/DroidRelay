@@ -111,6 +111,7 @@ internal fun Route.settingsRoutes(context: Context, serverRef: RelayServer) {
                 put("torrentSavePath", s.torrentSavePath)
                 put("torrentSequentialDownload", s.torrentSequentialDownload)
                 put("torrentMinSeedWaitSec", s.torrentMinSeedWaitSec)
+                put("torrentTrackerSync", s.torrentTrackerSync)
             }.toString(),
             ContentType.Application.Json
         )
@@ -130,6 +131,7 @@ internal fun Route.settingsRoutes(context: Context, serverRef: RelayServer) {
         json?.optString("torrentSavePath", "")?.let { if (it.isNotBlank()) repo.setTorrentSavePath(it) }
         if (json?.has("torrentSequentialDownload") == true) json?.optBoolean("torrentSequentialDownload")?.let { repo.setTorrentSequentialDownload(it) }
         json?.optInt("torrentMinSeedWaitSec", -1)?.let { if (it >= 0) repo.setTorrentMinSeedWaitSec(it) }
+        if (json?.has("torrentTrackerSync") == true) json?.optBoolean("torrentTrackerSync")?.let { repo.setTorrentTrackerSync(it) }
         // 엔진에 즉시 반영
         RelayApp.getTorrent(context).applySettings(repo.firstBlocking())
         serverRef.settings = repo.firstBlocking()
@@ -204,6 +206,7 @@ internal fun Route.settingsRoutes(context: Context, serverRef: RelayServer) {
                 repo.setTorrentPexEnabled(true)
                 repo.setTorrentListenPort(SettingsConstraints.randomEphemeralPort())
                 repo.setTorrentSavePath("/sdcard/Download/DroidRelay")
+                repo.setTorrentTrackerSync(true)
                 repo.setSearchEnabled(false)
                 repo.setSearchUrl("")
                 repo.setSearchApiKey("")

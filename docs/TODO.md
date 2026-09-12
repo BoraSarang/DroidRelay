@@ -365,3 +365,15 @@ T-001~T-008 전부 완료 (커밋 7574486).
 | T-964 | DebugBundle + /bundle 라우트 + status 확장 + 테스트 3건 | ✅ |
 | T-965 | 검증(3종 게이트) + CHANGELOG + 세션 로그 | ✅ |
 | T-966 | 실기기 E2E (마이그레이션/손상복구/번들) | ✅ |
+
+## v0.23 (2026-09-12) — Phase B 성공률·복원력 (PLAN_v0.23_phaseB_android.md)
+
+| T-번호 | 내용 | 상태 |
+|--------|------|------|
+| T-967 | PLAN 작성 + TODO 등록 | ✅ |
+| T-968 | P0-3 코어+라우트 (ExtraHeaders/VideoApi/JobRoutes/E-AND-VALID-0002) + 테스트 6건 | ✅ |
+| T-969 | P0-3 UI (웹 Referer/Cookie + 앱 2필드, 메모리만) | ✅ |
+| T-970 | P1-4 파일명 매트릭스 (safeFilename+DispositionHeader) + 테스트 6건 | ✅ |
+| T-971 | P1-6 코어+엔진 (TrackerListProvider/설정/주입) + 테스트 5건 | ✅ |
+| T-972 | P1-6 UI+API (trackers 2종 + 웹/앱 토글) | ✅ |
+| T-973 | 검증(3종 게이트) + CHANGELOG + 세션 로그 + E2E | ✅ |

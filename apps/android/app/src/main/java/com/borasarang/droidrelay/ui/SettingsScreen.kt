@@ -499,6 +499,14 @@ fun SettingsScreen(onPortChanged: (Int) -> Unit) {
                 color = cs.onSurfaceVariant,
                 style = MaterialTheme.typography.labelSmall,
             )
+            SwitchRow("트래커 자동 동기 (24시간)", s.torrentTrackerSync) { v ->
+                kotlinx.coroutines.MainScope().launch { repo.setTorrentTrackerSync(v) }
+            }
+            Text(
+                "커뮤니티 트래커 목록을 받아 새 토렌트에 자동 추가합니다",
+                color = cs.onSurfaceVariant,
+                style = MaterialTheme.typography.labelSmall,
+            )
 
             var seedWait by remember(s.torrentMinSeedWaitSec) { mutableStateOf(s.torrentMinSeedWaitSec.toString()) }
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {

@@ -52,6 +52,7 @@ data class AppSettings(
     val torrentPexEnabled: Boolean = true,
     val torrentListenPort: Int = 6881,
     val torrentSequentialDownload: Boolean = false,
+    val torrentTrackerSync: Boolean = true,
     // Debrid (Phase 1.3)
     val debridEnabled: Boolean = false,
     val debridProvider: String = "",
@@ -130,6 +131,7 @@ class SettingsRepository(private val context: Context) {
         val TORRENT_PEX = booleanPreferencesKey("torrent_pex")
         val TORRENT_LISTEN_PORT = intPreferencesKey("torrent_listen_port")
         val TORRENT_SEQUENTIAL = booleanPreferencesKey("torrent_sequential")
+        val TORRENT_TRACKER_SYNC = booleanPreferencesKey("torrent_tracker_sync")
         // Debrid
         val DEBRID_ENABLED = booleanPreferencesKey("debrid_enabled")
         val DEBRID_PROVIDER = stringPreferencesKey("debrid_provider")
@@ -168,9 +170,6 @@ class SettingsRepository(private val context: Context) {
         // 게스트 (v0.20)
         val GUEST_ENABLED = booleanPreferencesKey("guest_enabled")
         val GUEST_PASSWORD = stringPreferencesKey("guest_password")
-        // 속도 스케줄 + 완료 후 동작 (v0.24)
-        val SPEED_SCHEDULE = stringPreferencesKey("speed_schedule")
-        val COMPLETION_ACTION = stringPreferencesKey("completion_action")
     }
 
     val settings: Flow<AppSettings> = context.settingsDataStore.data.map { p ->
@@ -200,6 +199,7 @@ class SettingsRepository(private val context: Context) {
             torrentPexEnabled = p[Keys.TORRENT_PEX] ?: true,
             torrentListenPort = (p[Keys.TORRENT_LISTEN_PORT] ?: 6881).coerceIn(1024, 65535),
             torrentSequentialDownload = p[Keys.TORRENT_SEQUENTIAL] ?: false,
+            torrentTrackerSync = p[Keys.TORRENT_TRACKER_SYNC] ?: true,
             debridEnabled = p[Keys.DEBRID_ENABLED] ?: false,
             debridProvider = p[Keys.DEBRID_PROVIDER] ?: "",
             debridApiKey = p[Keys.DEBRID_API_KEY] ?: "",
@@ -353,6 +353,9 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun setTorrentSequentialDownload(enabled: Boolean) =
         context.settingsDataStore.edit { it[Keys.TORRENT_SEQUENTIAL] = enabled }
+
+    suspend fun setTorrentTrackerSync(enabled: Boolean) =
+        context.settingsDataStore.edit { it[Keys.TORRENT_TRACKER_SYNC] = enabled }
 
     // Debrid setters
     suspend fun setDebridEnabled(enabled: Boolean) =

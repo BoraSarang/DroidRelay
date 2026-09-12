@@ -206,14 +206,24 @@ class VideoDownloadManager(
             return last
         }
 
-        /** 사용자 입력/제목 기반 안전 파일명 (확장자 포함) */
+        /** Windows 예약 파일명 — 충돌 시 "_" 접두 (대소문자 무시, 확장자 제외 비교) */
+        private val RESERVED_NAMES = setOf(
+            "CON", "PRN", "AUX", "NUL",
+            "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+            "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+        )
+
+        /** 사용자 입력/제목 기반 안전 파일명 (확장자 포함).
+         * Motrix 매트릭스 차용: 제어문자 제거·Windows 예약어 회피·후행 점/공백 제거·traversal 무력화·80자 cap·한글 유지. */
         fun safeFilename(raw: String?, ext: String): String {
-            val base = (raw ?: "")
+            val cleaned = (raw ?: "")
+                .replace(Regex("\\p{Cntrl}+"), "")
                 .replace(Regex("[\\\\/:*?\"<>|\\s]+"), "_")
                 .trim('.', '_', ' ')
                 .take(80)
-                .ifBlank { "video-${java.text.SimpleDateFormat("yyyyMMdd-HHmmss", java.util.Locale.US).format(System.currentTimeMillis())}" }
-            return "$base.$ext"
+            val base = cleaned.ifBlank { "video-${java.text.SimpleDateFormat("yyyyMMdd-HHmmss", java.util.Locale.US).format(System.currentTimeMillis())}" }
+            val guarded = if (RESERVED_NAMES.contains(base.substringBefore('.').uppercase())) "_$base" else base
+            return "$guarded.$ext"
         }
     }
 

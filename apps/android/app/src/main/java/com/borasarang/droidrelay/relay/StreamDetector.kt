@@ -50,6 +50,37 @@ object StreamDetector {
         val durationMs: Long,
     )
 
+    /** 브라우저 세션 전달 헤더 — 메모리 전용, 영속·로그 기록 금지 (v0.23 Phase B).
+     * 값이 아닌 존재 여부만 로그에 남긴다. */
+    data class ExtraHeaders(
+        val referer: String?,
+        val cookie: String?,
+    ) {
+        val hasReferer: Boolean get() = !referer.isNullOrBlank()
+        val hasCookie: Boolean get() = !cookie.isNullOrBlank()
+    }
+
+    const val MAX_REFERER_LEN = 2048
+    const val MAX_COOKIE_LEN = 4096
+
+    /** 입력 정제 — 초과 길이는 null 반환(무음 절단 금지, 호출자가 400으로 거부).
+     * 둘 다 비면 null (헤더 미적용 경로). 순수 함수. */
+    fun sanitizeExtra(referer: String?, cookie: String?): ExtraHeaders? {
+        val r = referer?.trim()?.ifBlank { null }
+        val c = cookie?.trim()?.ifBlank { null }
+        if (r != null && r.length > MAX_REFERER_LEN) return null
+        if (c != null && c.length > MAX_COOKIE_LEN) return null
+        if (r == null && c == null) return null
+        return ExtraHeaders(r, c)
+    }
+
+    /** 길이 초과 여부 — 라우트가 400 판정에 사용 (sanitizeExtra와 같은 기준) */
+    fun isExtraTooLong(referer: String?, cookie: String?): Boolean {
+        if ((referer?.trim()?.length ?: 0) > MAX_REFERER_LEN) return true
+        if ((cookie?.trim()?.length ?: 0) > MAX_COOKIE_LEN) return true
+        return false
+    }
+
     private val client by lazy {
         OkHttpClient.Builder()
             .connectTimeout(15, TimeUnit.SECONDS)
@@ -59,23 +90,23 @@ object StreamDetector {
     }
 
     /** 입력이 m3u8/mpd/mp4 직접 주소면 그대로, 웹페이지면 스니핑. 실패 시 VideoException. */
-    fun analyze(input: String): Found {
+    fun analyze(input: String, extra: ExtraHeaders? = null): Found {
         val url = input.trim()
         if (directMp4.containsMatchIn(url)) {
-            DebugLogger.i(TAG, "[FEATURE] 직접 동영상 url=${url.take(90)}")
+            DebugLogger.i(TAG, "[FEATURE] 직접 동영상 url=${url.take(90)} ref=${extra?.hasReferer} ck=${extra?.hasCookie}")
             return Found(url, "동영상 (직접 주소)", true, "mp4")
         }
         if (directManifest.containsMatchIn(url)) {
-            DebugLogger.i(TAG, "[FEATURE] 직접 매니페스트 url=${url.take(90)}")
-            val m = parseManifest(url)
+            DebugLogger.i(TAG, "[FEATURE] 직접 매니페스트 url=${url.take(90)} ref=${extra?.hasReferer} ck=${extra?.hasCookie}")
+            val m = parseManifest(url, extra)
             return Found(url, "스트림 (직접 주소)", true, "stream", m.variants, m.segments, m.durationMs)
         }
         if (!url.startsWith("http://") && !url.startsWith("https://")) {
             throw VideoException("E-AND-VID-0200", "스트림 주소(m3u8/mpd) 또는 웹페이지 URL이 아닙니다")
         }
 
-        DebugLogger.i(TAG, "[FEATURE] 페이지 스니핑 url=${url.take(90)}")
-        val html = fetch(url)
+        DebugLogger.i(TAG, "[FEATURE] 페이지 스니핑 url=${url.take(90)} ref=${extra?.hasReferer} ck=${extra?.hasCookie}")
+        val html = fetch(url, extra)
         val title = TITLE_RE.matcher(html).run { if (find()) group(1)?.trim().orEmpty() else "스트림" }
 
         // 1차: 직접적으로 선언된 mp4 동영상 (video/source/og:video/인라인 JS file 키)
@@ -91,7 +122,7 @@ object StreamDetector {
             "페이지에서 스트림(m3u8/mpd)을 찾지 못했습니다. 스트림 주소를 직접 입력해 주세요.",
         )
         val abs = resolve(url, found)
-        val m = parseManifest(abs)
+        val m = parseManifest(abs, extra)
         DebugLogger.i(TAG, "검출 성공 title='$title' url=${abs.take(90)} quality=${m.variants.size}")
         return Found(abs, title, false, "stream", m.variants, m.segments, m.durationMs)
     }
@@ -99,14 +130,14 @@ object StreamDetector {
     /** 매니페스트 URL을 GET해 variant(해상도)·세그먼트 개수·총 재생 시간을 1회 수신으로 계산.
      *  403/네트워크 실패는 삼키지 않고 VideoException을 그대로 전파한다 (E-AND-VID-0206 등).
      *  마스터면 첫 variant 1회만 추가 fetch(세그먼트/재생시간 실측). DASH는 variant 파싱만. */
-    fun parseManifest(manifestUrl: String): ManifestResult {
-        val body = fetch(manifestUrl)
+    fun parseManifest(manifestUrl: String, extra: ExtraHeaders? = null): ManifestResult {
+        val body = fetch(manifestUrl, extra)
         val isDash = manifestUrl.contains(".mpd", true)
         val variants = if (isDash) parseDashManifest(body, manifestUrl) else parseHlsMaster(body, manifestUrl)
         var mediaBody: String? = null
         if (!isDash) {
             mediaBody = if (countHlsSegments(body) > 0) body
-            else variants.firstOrNull()?.url?.let { fetch(it) }
+            else variants.firstOrNull()?.url?.let { fetch(it, extra) }
         }
         return ManifestResult(
             variants,
@@ -193,19 +224,21 @@ object StreamDetector {
         return out
     }
 
-    private fun fetch(url: String): String {
-        val req = Request.Builder()
+    private fun fetch(url: String, extra: ExtraHeaders? = null): String {
+        val builder = Request.Builder()
             .url(url)
             .header("User-Agent", UA)
             .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,application/vnd.apple.mpegurl;q=0.9,application/dash+xml;q=0.9,*/*;q=0.8")
             .header("Accept-Language", "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7")
-            .header("Referer", "https://www.google.com/")
+            // extra referer가 있으면 사이트 세션 것으로 교체, 없으면 기본값 (값은 로그 금지)
+            .header("Referer", extra?.referer ?: "https://www.google.com/")
             .header("Sec-Fetch-Dest", "document")
             .header("Sec-Fetch-Mode", "navigate")
             .header("Sec-Fetch-Site", "none")
             .header("Sec-Fetch-User", "?1")
             .header("Upgrade-Insecure-Requests", "1")
-            .build()
+        if (extra?.hasCookie == true) builder.header("Cookie", extra.cookie!!)
+        val req = builder.build()
         try {
             client.newCall(req).execute().use { resp ->
                 if (!resp.isSuccessful) {

@@ -136,8 +136,15 @@ internal fun Route.jobRoutes(context: Context, serverRef: RelayServer) {
             call.respondText("E-AND-VID-0101: 주소가 올바르지 않거나 지원하지 않는 URL입니다", ContentType.Text.Plain, HttpStatusCode.UnprocessableEntity)
             return@post
         }
+        // 전달 헤더는 메모리 전용 (영속·로그 값 기록 금지)
+        val rawRef = json?.optString("referer", "")?.ifBlank { null }
+        val rawCk = json?.optString("cookie", "")?.ifBlank { null }
+        if (StreamDetector.isExtraTooLong(rawRef, rawCk)) {
+            call.respondText("E-AND-VALID-0002: 전달 헤더가 너무 깁니다", ContentType.Text.Plain, HttpStatusCode.BadRequest)
+            return@post
+        }
         try {
-            val result = VideoApi.analyze(url)
+            val result = VideoApi.analyze(url, StreamDetector.sanitizeExtra(rawRef, rawCk))
             call.respondText(result.toString(), ContentType.Application.Json)
         } catch (e: VideoException) {
             DebugLogger.e("VideoApi", "분석 실패 ${e.code}: ${e.message}")
@@ -158,11 +165,18 @@ internal fun Route.jobRoutes(context: Context, serverRef: RelayServer) {
         val url = json?.optString("url", "")?.trim().orEmpty()
         val streamUrl = json?.optString("streamUrl", "")?.trim().orEmpty()
         val wantName = json?.optString("filename", "")?.trim().orEmpty()
+        val rawRef = json?.optString("referer", "")?.ifBlank { null }
+        val rawCk = json?.optString("cookie", "")?.ifBlank { null }
+        if (StreamDetector.isExtraTooLong(rawRef, rawCk)) {
+            call.respondText("E-AND-VALID-0002: 전달 헤더가 너무 깁니다", ContentType.Text.Plain, HttpStatusCode.BadRequest)
+            return@post
+        }
         val job = try {
             VideoApi.create(
                 context, url,
                 streamUrl.ifBlank { null },
                 wantName.ifBlank { null },
+                StreamDetector.sanitizeExtra(rawRef, rawCk),
             )
         } catch (e: VideoException) {
             DebugLogger.e("VideoApi", "생성 실패 ${e.code}: ${e.message}")

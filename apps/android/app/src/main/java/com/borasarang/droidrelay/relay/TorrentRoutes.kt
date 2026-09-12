@@ -198,4 +198,29 @@ internal fun Route.torrentRoutes(context: Context, serverRef: RelayServer) {
         TorrentRepository.reorder(id, newOrder)
         call.respondText("ok")
     }
+
+    get("/api/torrents/trackers") {
+        val list = TrackerListProvider.getCached(context)
+        call.respondText(
+            JSONObject().apply {
+                put("count", list.size)
+                put("trackers", JSONArray(list))
+                put("cacheAgeMs", TrackerListProvider.cacheAgeMs(context))
+                put("source", TrackerListProvider.SOURCE_URL)
+            }.toString(),
+            ContentType.Application.Json,
+        )
+    }
+
+    post("/api/torrents/trackers/refresh") {
+        val list = TrackerListProvider.refresh(context)
+        DebugLogger.i("Http", "[FEATURE] 트래커 수동 동기 ${list.size}개")
+        call.respondText(
+            JSONObject().apply {
+                put("count", list.size)
+                put("trackers", JSONArray(list))
+            }.toString(),
+            ContentType.Application.Json,
+        )
+    }
 }

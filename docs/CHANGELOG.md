@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.23.0] - 2026-09-12 (미배포, Phase B)
+
+### Added [android+web] — Phase B 성공률·복원력 (PLAN_v0.23_phaseB_android)
+- **T-968/969 Referer/Cookie 전달(메모리만)**: `ExtraHeaders + sanitizeExtra`(2048/4096 cap, 초과 400 `E-AND-VALID-0002`) → analyze/create 전 경로. 웹 2입력(성공 시 초기화) + 앱 2필드(쿠키 마스킹, 시작 후 초기화). 값은 로그·영속에 절대 기록 금지(존재 여부만)
+- **T-970 파일명 매트릭스**: `safeFilename` 제어문자 제거·Windows 예약어 회피·후행 점/공백 제거 + `DispositionHeader` 빈 이름 폴백
+- **T-971/972 트래커 자동 동기**: `TrackerListProvider`(ngosang best, 24h 캐시, 실패 시 번들 5개, never throw) + 설정 토글(기본 true) + `registerMapping` 주입(20개 cap, 게이트 내) + start 시 백그라운드 refresh + `GET/POST /api/torrents/trackers[/refresh]` + 웹/앱 UI
+- **검증**: unit 17건 GREEN + ktlint 본문 GREEN + WebAssets JS node --check + assembleDebug GREEN
+
 ## [0.22.0] - 2026-09-12 (미배포, Phase A)
 
 ### Added [android] — Phase A 안정성 기반 (PLAN_v0.22_phaseA_android)

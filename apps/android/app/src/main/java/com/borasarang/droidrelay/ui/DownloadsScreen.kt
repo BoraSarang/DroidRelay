@@ -65,6 +65,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -74,6 +75,7 @@ import com.borasarang.droidrelay.relay.JobState
 import com.borasarang.droidrelay.relay.JobsRepository
 import com.borasarang.droidrelay.relay.RelayApp
 import com.borasarang.droidrelay.relay.RelayService
+import com.borasarang.droidrelay.relay.StreamDetector
 import com.borasarang.droidrelay.relay.VideoApi
 import com.borasarang.droidrelay.relay.VideoException
 import com.borasarang.droidrelay.relay.currentNetworkType
@@ -342,7 +344,11 @@ private fun VideoAddRow(onDlStarted: () -> Unit) {
     var result by remember { mutableStateOf<JSONObject?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var fileName by remember { mutableStateOf("") }
+    var referer by remember { mutableStateOf("") }
+    var cookie by remember { mutableStateOf("") }
     var qIndex by remember { mutableIntStateOf(0) }
+
+    fun extraOrNull() = StreamDetector.sanitizeExtra(referer.ifBlank { null }, cookie.ifBlank { null })
 
     fun analyze() {
         val u = url.trim()
@@ -351,7 +357,7 @@ private fun VideoAddRow(onDlStarted: () -> Unit) {
         analyzing = true; result = null; error = null; qIndex = 0
         scope.launch {
             try {
-                val r = VideoApi.analyze(u)
+                val r = VideoApi.analyze(u, extraOrNull())
                 result = r
                 fileName = defaultFileName(r, u)
                 DebugLogger.i("UI Video", "분석 성공 kind=${r.optString("kind") ?: "stream"} qualities=${r.optJSONArray("qualities")?.length() ?: 0}")
@@ -378,10 +384,10 @@ private fun VideoAddRow(onDlStarted: () -> Unit) {
                 } else {
                     r.optString("streamUrl")
                 }.ifBlank { null }
-                VideoApi.create(ctx, u, streamUrl, fileName.trim().ifBlank { null })
+                VideoApi.create(ctx, u, streamUrl, fileName.trim().ifBlank { null }, extraOrNull())
                 DebugLogger.i("UI Video", "다운로드 시작 url=${u.take(90)} q=$qIndex file=${fileName.trim()}")
                 onDlStarted()
-                result = null; url = ""; fileName = ""
+                result = null; url = ""; fileName = ""; referer = ""; cookie = ""
             } catch (e: VideoException) {
                 error = "${e.code}: ${e.message}"
                 DebugLogger.w("UI Video", "다운로드 시작 실패 ${e.code}: ${e.message}")
@@ -420,6 +426,41 @@ private fun VideoAddRow(onDlStarted: () -> Unit) {
                 } else {
                     Button(onClick = { analyze() }, shape = MaterialTheme.shapes.small) { Text("분석") }
                 }
+            }
+            Spacer(Modifier.height(6.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                OutlinedTextField(
+                    value = referer,
+                    onValueChange = { referer = it },
+                    placeholder = { Text("Referer (선택)", fontSize = 13.sp, color = cs.onSurfaceVariant) },
+                    singleLine = true,
+                    shape = MaterialTheme.shapes.small,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = cs.primary,
+                        unfocusedBorderColor = cs.outlineVariant,
+                        focusedTextColor = cs.onSurface,
+                        unfocusedTextColor = cs.onSurface,
+                        cursorColor = cs.primary,
+                    ),
+                    modifier = Modifier.weight(1f),
+                )
+                Spacer(Modifier.width(8.dp))
+                OutlinedTextField(
+                    value = cookie,
+                    onValueChange = { cookie = it },
+                    placeholder = { Text("Cookie (선택·저장 안 됨)", fontSize = 13.sp, color = cs.onSurfaceVariant) },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    shape = MaterialTheme.shapes.small,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = cs.primary,
+                        unfocusedBorderColor = cs.outlineVariant,
+                        focusedTextColor = cs.onSurface,
+                        unfocusedTextColor = cs.onSurface,
+                        cursorColor = cs.primary,
+                    ),
+                    modifier = Modifier.weight(1f),
+                )
             }
             error?.let { e ->
                 Spacer(Modifier.height(8.dp))
