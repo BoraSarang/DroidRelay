@@ -50,6 +50,40 @@ class JobsRepositoryTest {
     }
 
     @Test
+    fun `response-content-disposition 쿼리 파일명이 우선된다`() {
+        val name = JobsRepository.filenameFromUrl(
+            "https://release-assets.githubusercontent.com/github-production-release-asset/15634981/e898f508-0ae3-4c2c-b04a-40d1fc069418?sp=r&response-content-disposition=attachment%3B%20filename%3DGodot_v4.7.2-stable_export_templates.tpz&response-content-type=application%2Foctet-stream",
+        )
+        assertEquals("Godot_v4.7.2-stable_export_templates.tpz", name)
+    }
+
+    @Test
+    fun `일반 filename 쿼리도 확장자 있을 때 우선된다`() {
+        val name = JobsRepository.filenameFromUrl(
+            "https://example.org/files/abc123?token=zzz&filename=report-2026.pdf",
+        )
+        assertEquals("report-2026.pdf", name)
+    }
+
+    @Test
+    fun `폴백 이름은 헤더 파일명으로 교정 후보가 된다`() {
+        val fixed = JobsRepository.correctedWithHeader(
+            "file-ts.githubusercontent.com-0913-120000",
+            "attachment; filename=\"Godot_v4.7.2-stable_export_templates.tpz\"",
+        )
+        assertEquals("Godot_v4.7.2-stable_export_templates.tpz", fixed)
+    }
+
+    @Test
+    fun `정상 이름은 헤더가 있어도 교정하지 않는다`() {
+        val fixed = JobsRepository.correctedWithHeader(
+            "model.gguf",
+            "attachment; filename=\"other.bin\"",
+        )
+        assertNull(fixed)
+    }
+
+    @Test
     fun `추가_조회_삭제 흐름이 동작한다`() {
         val before = JobsRepository.all().size
         val job = JobsRepository.add("https://test.local/a.bin", "a.bin")

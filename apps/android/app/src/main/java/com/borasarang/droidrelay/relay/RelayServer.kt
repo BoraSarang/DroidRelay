@@ -534,6 +534,25 @@ internal object DispositionHeader {
         val enc = java.net.URLEncoder.encode(safe, "UTF-8").replace("+", "%20")
         return "attachment; filename=\"$enc\"; filename*=UTF-8''$enc"
     }
+
+    /** 응답/쿼리 Content-Disposition에서 파일명 추출 — filename*=UTF-8'' 우선, 없으면 filename= (T-1004) */
+    fun parse(header: String?): String? {
+        if (header.isNullOrBlank()) return null
+        // filename*= 우선 (RFC 5987: [charset'lang'value], charset 접두사 선택)
+        val starRegex = Regex("""filename\*\s*=\s*(?:[^']*''){0,2}([^;\s]+)""", RegexOption.IGNORE_CASE)
+        starRegex.find(header)?.let { m ->
+            val decoded = runCatching {
+                java.net.URLDecoder.decode(m.groupValues[1].trim().trim('"'), "UTF-8")
+            }.getOrNull()?.trim()
+            if (!decoded.isNullOrBlank()) return decoded
+        }
+        // filename= ("quoted" 또는 token)
+        val regex = Regex("""filename\s*=\s*"?([^";\s]+)"?""", RegexOption.IGNORE_CASE)
+        val raw = regex.find(header)?.groupValues?.getOrNull(1)?.trim().orEmpty()
+        if (raw.isBlank()) return null
+        val decoded = runCatching { java.net.URLDecoder.decode(raw, "UTF-8") }.getOrDefault(raw).trim().trim('"')
+        return decoded.ifBlank { null }
+    }
 }
 
 internal object RangeParser {

@@ -102,6 +102,11 @@ object JobsRepository {
     }
 
     fun filenameFromUrl(url: String): String {
+        // 1순위: 쿼리 파라미터 (서명 URL의 response-content-disposition 등) — T-1004
+        filenameFromQuery(url)?.let {
+            DebugLogger.d(TAG, "파일명 결정(쿼리 우선): '$it'")
+            return it.takeLast(120)
+        }
         val path = url.substringBefore('?').substringBefore('#')
         val raw = path.substringAfterLast('/')
         val last = runCatching { URLDecoder.decode(raw, "UTF-8") }.getOrDefault(raw)
@@ -111,8 +116,9 @@ object JobsRepository {
             GENERIC_NAMES.contains(last.lowercase()) ||
             !last.contains('.')
         if (!generic) {
-            DebugLogger.d(TAG, "파일명 결정(URL 그대로): '$last'")
-            return last.takeLast(120)
+            val sanitized = sanitizeLeaf(last) ?: last.takeLast(120)
+            DebugLogger.d(TAG, "파일명 결정(URL 그대로): '$sanitized'")
+            return sanitized
         }
 
         val host = url.substringAfter("//").substringBefore('/').substringBefore(':')
@@ -122,6 +128,63 @@ object JobsRepository {
         val fallback = "file-$host-$ts"
         DebugLogger.d(TAG, "파일명 결정(범용 폴백): '$raw' → '$fallback'")
         return fallback
+    }
+
+    /** 폴백 이름 여부 — 응답 헤더 교정 대상 판단용 (T-1004) */
+    fun isFallbackName(name: String): Boolean {
+        if (!name.startsWith("file-")) return false
+        return Regex("""^file-.+-\d{4}-\d{6}$""").matches(name)
+    }
+
+    /** 응답 Content-Disposition 헤더로 교정할 이름 반환 — 폴백일 때만, 아니면 null (T-1004) */
+    fun correctedWithHeader(current: String, header: String?): String? {
+        if (!isFallbackName(current)) return null
+        val parsed = DispositionHeader.parse(header) ?: return null
+        return sanitizeLeaf(parsed)
+    }
+
+    /** 쿼리에서 파일명 후보 추출 — response-content-disposition 우선, 없으면 filename/file/name */
+    internal fun filenameFromQuery(url: String): String? {
+        val query = url.substringAfter('?', "").substringBefore('#')
+        if (query.isBlank()) return null
+        val params = query.split('&').mapNotNull { pair ->
+            val eq = pair.indexOf('=')
+            if (eq <= 0) return@mapNotNull null
+            val key = runCatching { URLDecoder.decode(pair.substring(0, eq), "UTF-8") }
+                .getOrDefault(pair.substring(0, eq)).trim()
+            val value = runCatching { URLDecoder.decode(pair.substring(eq + 1), "UTF-8") }
+                .getOrDefault(pair.substring(eq + 1))
+            key to value
+        }
+        // response-content-disposition 안의 filename= / filename*= (GitHub release-assets 서명 URL)
+        params.firstOrNull { it.first.equals("response-content-disposition", ignoreCase = true) }
+            ?.let { (_, v) ->
+                DispositionHeader.parse(v)?.let { sanitizeLeaf(it) }?.let { return it }
+            }
+        // 일반 filename/file/name 쿼리 (확장자 있는 것만)
+        for ((k, v) in params) {
+            if (k.equals("filename", ignoreCase = true) ||
+                k.equals("file", ignoreCase = true) ||
+                k.equals("name", ignoreCase = true)
+            ) {
+                sanitizeLeaf(v)?.let { return it }
+            }
+        }
+        return null
+    }
+
+    /** 경로 탈출·제어문자·예약문자 정제 — 한글 유지, 120자 cap, 확장자 필수 */
+    internal fun sanitizeLeaf(raw: String?): String? {
+        if (raw.isNullOrBlank()) return null
+        val cleaned = raw
+            .replace(Regex("\\p{Cntrl}+"), "")
+            .replace(Regex("[\\\\/:*?\"<>|\\s]+"), "_")
+            .trim('.', '_', ' ')
+            .take(120)
+        if (cleaned.isBlank() || cleaned == "." || cleaned == "..") return null
+        if (!cleaned.contains('.')) return null
+        if (GENERIC_NAMES.contains(cleaned.lowercase())) return null
+        return cleaned
     }
 
     private val GENERIC_NAMES = setOf(
@@ -182,7 +245,16 @@ object JobsRepository {
     private fun newId(): String = System.currentTimeMillis().toString(36) + (0..999).random()
 
     private fun uniqueName(name: String): String {
-        val taken = map.values.map { it.filename }.toSet()
+        return uniqueAmong(name, map.values.map { it.filename }.toSet())
+    }
+
+    /** 헤더 교정용 — 자기 자신 제외하고 중복 회피 (T-1004) */
+    fun uniqueFor(excludeId: String, desired: String): String {
+        val taken = map.values.filter { it.id != excludeId }.map { it.filename }.toSet()
+        return uniqueAmong(desired, taken)
+    }
+
+    private fun uniqueAmong(name: String, taken: Set<String>): String {
         if (name !in taken) return name
         val dot = name.lastIndexOf('.')
         val base = if (dot > 0) name.substring(0, dot) else name

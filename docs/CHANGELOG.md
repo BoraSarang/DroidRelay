@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.32.0] - 2026-09-13 (미배포, 파일명 우선)
+
+### Fixed [android] — 서명 URL 파일명 오저장 수정 (T-1004)
+- 쿼리 `response-content-disposition` 안 `filename=`/`filename*=` 우선 파싱 (예: GitHub release-assets → `Godot_v4.7.2-stable_export_templates.tpz`)
+- 일반 `filename=`/`file=`/`name=` 쿼리도 확장자 있을 때 사용
+- 응답 `Content-Disposition` 헤더로 폴백 이름 1회 교정 (`[FEATURE] Content-Disposition 교정` 로그) + `.part` rename + 중복 회피
+- 정상 path 이름은 헤더가 있어도 덮어쓰지 않음, 경로 탈출 정제 유지
+- 검증: unit 전체 GREEN + ktlint 본문 GREEN + assembleDebug+실기기 설치 성공
+
 ## [0.29.0] - 2026-09-12 (미배포, 접이식 섹션)
 
 ### Added [web] — 비디오 분석·토렌트 검색 접이식 (T-1003)

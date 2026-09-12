@@ -230,8 +230,8 @@ class DownloadEngine(
 
     private suspend fun runOnce(id: String): Outcome = withContext(Dispatchers.IO) {
         val t0 = System.currentTimeMillis()
-        val job = JobsRepository.get(id) ?: return@withContext Outcome.COMPLETED
-        val partial = partialFile(job)
+        var job = JobsRepository.get(id) ?: return@withContext Outcome.COMPLETED
+        var partial = partialFile(job)
         var start = if (partial.exists()) partial.length() else 0L
 
         val req = Request.Builder().url(job.url).apply {
@@ -252,6 +252,25 @@ class DownloadEngine(
                         it.copy(state = JobState.FAILED, errorCode = "E-AND-DOWN-1003", errorMessage = "E-AND-DOWN-1003: HTTP ${res.code}", speedBps = 0L)
                     }
                     return@withContext Outcome.COMPLETED
+                }
+
+                // Content-Disposition 헤더 교정 — 폴백 이름일 때만 1회 (T-1004)
+                JobsRepository.correctedWithHeader(job.filename, res.header("Content-Disposition"))?.let { desired ->
+                    val unique = JobsRepository.uniqueFor(id, desired)
+                    if (unique != job.filename) {
+                        if (partial.exists()) {
+                            val renamed = File(workDir, "$unique.part")
+                            if (!partial.renameTo(renamed)) {
+                                partial.copyTo(renamed, overwrite = true)
+                                partial.delete()
+                            }
+                            partial = renamed
+                        }
+                        val before = job.filename
+                        JobsRepository.update(id) { it.copy(filename = unique) }
+                        DebugLogger.i(TAG, "[FEATURE] Content-Disposition 교정 id=$id '$before' → '$unique'")
+                        job = JobsRepository.get(id) ?: job
+                    }
                 }
 
                 val contentLen = res.body?.contentLength() ?: -1L
