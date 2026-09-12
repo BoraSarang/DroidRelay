@@ -29,8 +29,12 @@ object WebAssets {
   #btnRefresh{font-size:16px;padding:8px 13px;line-height:1}
   #btnRefresh.spin{animation:spin .8s linear}
   @keyframes spin{to{transform:rotate(360deg)}}
-  #themeSel{background:var(--surface2);border:1px solid var(--line2);color:var(--text);border-radius:10px;
-    padding:8px 10px;font-size:13px;outline:none;cursor:pointer}
+  #themeSel{-webkit-appearance:none;appearance:none;background-color:var(--surface2);border:1px solid var(--line2);color:var(--text);border-radius:10px;
+    padding:8px 28px 8px 10px;font-size:13px;line-height:1.4;outline:none;cursor:pointer;
+    background-image:url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%239AA7BD' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E");
+    background-repeat:no-repeat;background-position:right 10px center}
+  #themeSel:focus{border-color:var(--accent)}
+  #themeSel option{background-color:var(--surface2);color:var(--text)}
   .fill{background:linear-gradient(90deg,var(--accent),var(--accent2),var(--accent));background-size:200% 100%;
     animation:flow 2.5s linear infinite}
   @keyframes flow{to{background-position:-200% 0}}
@@ -164,6 +168,10 @@ object WebAssets {
   /* ── 설정 탭 전용 ── */
   .sg{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px}
   .sh{font-size:14px;font-weight:700;color:var(--accent2);padding-left:10px;border-left:3px solid var(--accent);margin-bottom:14px}
+  .coll-h{cursor:pointer;user-select:none;-webkit-user-select:none;display:flex;align-items:center;justify-content:space-between}
+  .coll-h .arrow{display:inline-block;transition:transform .15s;color:var(--muted);font-size:12px}
+  .coll-h.open .arrow{transform:rotate(90deg)}
+  .coll-b{display:none}
   .sr{display:flex;flex-wrap:wrap;gap:16px}
   .si{flex:1;min-width:220px}
   .sl{display:block;margin-bottom:5px;font-size:12px;color:var(--muted);font-weight:500}
@@ -211,11 +219,13 @@ object WebAssets {
     .settings-nav .settings-nav-item{flex-shrink:0;white-space:nowrap}
     .settings-content{width:100%}
     .si{min-width:0}
+    .sr{flex-direction:column;gap:12px}
     .row,.row-torrent{flex-wrap:wrap}
-    .row input,.row-torrent input{flex:1 1 100%}
+    .row input,.row-torrent input{flex:1 1 100%!important;min-width:0}
+    .row-torrent button{flex:1}
     #panel-dl>.row{flex-wrap:nowrap}
     #panel-dl>.row input{flex:1 1 auto;min-width:0}
-    .row button,.row-torrent button{flex-shrink:0}
+    .row button{flex-shrink:0}
     .tabs .tab{padding:9px 2px;font-size:13px}
     .hd{flex-wrap:wrap;margin-bottom:12px}
     #btnRefresh{padding:12px 16px;min-height:44px}
@@ -225,6 +235,12 @@ object WebAssets {
     body[data-theme=midnight] .card,body[data-theme=midnight] .file-row,
     body[data-theme=toxic] .tab.active,body[data-theme=midnight] .tab.active{box-shadow:none}
     .fill{animation:none}
+    .fp{flex-wrap:wrap}
+    .fp input[type=text]{flex:1 1 100%;min-width:0}
+    .sv input[type=range]{min-width:0}
+    .ck{flex-wrap:wrap}
+    .modal-stat{grid-template-columns:repeat(2,1fr)}
+    select{max-width:100%}
   }
 </style></head><body>
 <div class="wrap">
@@ -245,9 +261,10 @@ object WebAssets {
       <button onclick="add()">추가</button>
     </div>
 
-    <!-- 비디오 분석 섹션 -->
+    <!-- 비디오 분석 섹션 (접이식, 기본 접힘) -->
     <div class="sg" id="videoSection" style="margin:14px 0 10px;padding:14px;background:var(--surface);border:1px solid var(--line);border-radius:12px">
-      <div class="sh">🎬 비디오 분석 & 다운로드</div>
+      <div class="sh coll-h" id="videoHead" onclick="toggleColl('videoBody','videoHead','video')"><span>🎬 비디오 분석 & 다운로드</span><span class="arrow">▶</span></div>
+      <div class="coll-b" id="videoBody">
       <div class="row" style="margin-top:10px">
         <input id="vurl" type="url" placeholder="스트림 페이지 또는 m3u8/mpd 직접 주소" style="flex:1">
         <button class="ghost" onclick="analyzeVideo()">분석</button>
@@ -257,6 +274,7 @@ object WebAssets {
         <input id="vcookie" type="password" placeholder="Cookie (선택, 저장 안 됨)" style="flex:1" autocomplete="off">
       </div>
       <div id="videoArea" style="margin-top:10px"></div>
+      </div>
     </div>
 
     <div id="list"></div>
@@ -274,11 +292,16 @@ object WebAssets {
     <div class="drop-zone" id="torrentDrop">
       또는 .torrent 파일을 여기에 드래그하세요
     </div>
+    <div id="tsearchSection">
+      <div class="sh coll-h" id="tsearchHead" onclick="toggleColl('tsearchBody','tsearchHead','tsearch')" style="margin-top:14px"><span>🔍 토렌트 검색</span><span class="arrow">▶</span></div>
+      <div class="coll-b" id="tsearchBody">
     <div class="row-torrent" style="margin-top:8px">
       <input id="tsearch" placeholder="토렌트 검색 (설정에서 Jackett/Prowlarr 입력)" style="flex:1">
       <button onclick="searchTorrents()">검색</button>
     </div>
     <div id="searchResults"></div>
+      </div>
+    </div>
     <div id="torrentInfo" style="padding:10px 16px;font-size:13px;color:var(--dim);border-bottom:1px solid var(--text)"></div>
     <div id="torrentList"></div>
     <div class="empty" id="torrentEmpty">토렌트 작업이 없습니다</div>
@@ -1657,6 +1680,34 @@ function setTheme(t){
   try{localStorage.setItem('dr_theme',t);}catch(e){}
   applyTheme();
 }
+
+// ── 접이식 섹션 (T-1003, 기본 접힘 + localStorage 기억) ──
+function setColl(bodyId,headId,open){
+  var b=document.getElementById(bodyId);var h=document.getElementById(headId);
+  if(b)b.style.display=open?'block':'none';
+  if(h)h.classList.toggle('open',open);
+}
+function toggleColl(bodyId,headId,key){
+  var b=document.getElementById(bodyId);
+  var open=!b||b.style.display==='none';
+  try{localStorage.setItem('dr_coll_'+key,open?'1':'0');}catch(e){}
+  setColl(bodyId,headId,open);
+}
+function applyColl(bodyId,headId,key){
+  var open=false;
+  try{open=localStorage.getItem('dr_coll_'+key)==='1';}catch(e){}
+  setColl(bodyId,headId,open);
+}
+applyColl('videoBody','videoHead','video');
+applyColl('tsearchBody','tsearchHead','tsearch');
+function refreshSearchVisibility(){
+  fetch('/api/settings/search').then(function(r){return r.json();}).then(function(s){
+    var on=s.searchEnabled===true;
+    var sec=document.getElementById('tsearchSection');
+    if(sec)sec.style.display=on?'block':'none';
+  }).catch(function(){});
+}
+refreshSearchVisibility();
 function applyTheme(){
   var t='toxic';
   try{t=localStorage.getItem('dr_theme')||'toxic';}catch(e){}
@@ -1786,6 +1837,7 @@ function switchTab(t){
   document.getElementById('panel-storage').classList.toggle('active',t==='storage');
   document.getElementById('panel-settings').classList.toggle('active',t==='settings');
   if(t==='storage')refreshStorage();
+  if(t==='torrent')refreshSearchVisibility();
   if(t==='settings'){loadSettings();loadSearchSettings();loadTrackerCount();}
 }
 
@@ -2063,7 +2115,11 @@ function saveSearchSettings(){
     searchApiKey:document.getElementById('searchApiKey').value.trim()
   };
   apiPost('/api/settings/search',body)
-    .then(function(d){showDlToast(d.ok?'검색 설정 저장됨':'저장 실패');})
+    .then(function(d){
+      showDlToast(d.ok?'검색 설정 저장됨':'저장 실패');
+      var sec=document.getElementById('tsearchSection');
+      if(sec)sec.style.display=body.searchEnabled?'block':'none';
+    })
     .catch(function(e){alert('저장 실패: '+e);});
 }
 function loadSearchSettings(){
