@@ -80,7 +80,8 @@ class JobsPersistence(
                 }
             }
         }.getOrElse {
-            DebugLogger.e(TAG, "이력 복원 실패 — 초기화 진행 (E-AND-DOWN-2003)", it)
+            val bak = PersistenceGuard.backupCorrupt(file)
+            DebugLogger.e(TAG, "이력 복원 실패 — 백업 ${bak?.name ?: "없음"} 후 초기화 (E-AND-DOWN-2003)", it)
             emptyList()
         }.also {
             if (it.isNotEmpty()) DebugLogger.i(TAG, "이력 복원 ${it.size}건")

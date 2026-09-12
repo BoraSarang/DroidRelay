@@ -52,6 +52,9 @@ class RelayService : Service() {
         torrentEngine = torrentEng
         DebugLogger.i(TAG, "초기화 시작 engine=${engine::class.simpleName} torrent=${torrentEng::class.simpleName}")
 
+        // 설정 스키마 마이그레이션 (v0.22 Phase A) — 실패해도 기동 계속
+        scope.launch(kotlinx.coroutines.Dispatchers.IO) { settingsRepo.ensureMigrated() }
+
         // TorrentEngine 시작
         torrentEng.start()
         DebugLogger.i(TAG, "TorrentEngine 시작 완료")

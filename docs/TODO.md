@@ -354,3 +354,14 @@ T-001~T-008 전부 완료 (커밋 7574486).
 | T-960 | **검증·문서** — test/lint/assembleDebug + 실기기 E2E + CHANGELOG + 커밋 | ✅ |
 
 > v0.16.0(설정 1차)·v0.16.1(디자인 개편) 실기기 **직접 확인 대기**(사용자). 이후 **2차 확장** 예약: 스케줄(ScheduleRepository) / Debrid / 터널 / MCP / 기본값 복원. RSS CRUD는 별도 저장소(2차와 분리 검토).
+
+## v0.22 (2026-09-12) — Phase A 안정성 기반 (PLAN_v0.22_phaseA_android.md)
+
+| T-번호 | 내용 | 상태 |
+|--------|------|------|
+| T-961 | PLAN 작성 + TODO 등록 + 버전 상수 설계 | ✅ |
+| T-962 | SettingsMigration + Repository 배선 + 테스트 6건 | ✅ |
+| T-963 | PersistenceGuard + Jobs/Torrent 백업 + 테스트 4건 | ✅ |
+| T-964 | DebugBundle + /bundle 라우트 + status 확장 + 테스트 3건 | ✅ |
+| T-965 | 검증(3종 게이트) + CHANGELOG + 세션 로그 | ✅ |
+| T-966 | 실기기 E2E (마이그레이션/손상복구/번들) | ✅ |

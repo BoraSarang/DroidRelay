@@ -28,6 +28,7 @@ data class ServerState(
 )
 
 data class AppSettings(
+    val configVersion: Int = SettingsMigration.CURRENT_VERSION,
     val port: Int = 8080,
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
     val dynamicColor: Boolean = true,
@@ -105,6 +106,7 @@ class SettingsRepository(private val context: Context) {
     }
 
     private object Keys {
+        val CONFIG_VERSION = intPreferencesKey("config_version")
         val PORT = intPreferencesKey("port")
         val THEME = stringPreferencesKey("theme_mode")
         val DYNAMIC = booleanPreferencesKey("dynamic_color")
@@ -166,13 +168,16 @@ class SettingsRepository(private val context: Context) {
         // 게스트 (v0.20)
         val GUEST_ENABLED = booleanPreferencesKey("guest_enabled")
         val GUEST_PASSWORD = stringPreferencesKey("guest_password")
+        // 속도 스케줄 + 완료 후 동작 (v0.24)
+        val SPEED_SCHEDULE = stringPreferencesKey("speed_schedule")
+        val COMPLETION_ACTION = stringPreferencesKey("completion_action")
     }
 
     val settings: Flow<AppSettings> = context.settingsDataStore.data.map { p ->
         AppSettings(
-            port = (p[Keys.PORT] ?: 8080).coerceIn(1024, 65535),
-            themeMode = runCatching { ThemeMode.valueOf(p[Keys.THEME] ?: ThemeMode.SYSTEM.name) }
-                .getOrDefault(ThemeMode.SYSTEM),
+            configVersion = p[Keys.CONFIG_VERSION] ?: 0,
+            port = SettingsMigration.clampPort(p[Keys.PORT]),
+            themeMode = SettingsMigration.parseThemeMode(p[Keys.THEME]),
             dynamicColor = p[Keys.DYNAMIC] ?: true,
             concurrency = (p[Keys.CONCURRENCY] ?: SettingsConstraints.DEFAULT_CONCURRENCY)
                 .coerceIn(SettingsConstraints.CONCURRENCY_MIN, SettingsConstraints.CONCURRENCY_MAX),
@@ -185,8 +190,7 @@ class SettingsRepository(private val context: Context) {
             maxDownloadBps = (p[Keys.MAX_DOWNLOAD_BPS] ?: 0L).coerceAtLeast(0),
             maxUploadBps = (p[Keys.MAX_UPLOAD_BPS] ?: 0L).coerceAtLeast(0),
             allowedIps = p[Keys.ALLOWED_IPS] ?: emptySet(),
-            accessScope = runCatching { AccessScope.valueOf(p[Keys.ACCESS_SCOPE] ?: AccessScope.SUBNET_ONLY.name) }
-                .getOrDefault(AccessScope.SUBNET_ONLY),
+            accessScope = SettingsMigration.parseAccessScope(p[Keys.ACCESS_SCOPE]),
             torrentSavePath = p[Keys.TORRENT_SAVE_PATH] ?: "",
             torrentUploadLimit = (p[Keys.TORRENT_UPLOAD_LIMIT] ?: SettingsConstraints.DEFAULT_TORRENT_UPLOAD_KBPS).toLong().coerceAtLeast(0),
             torrentDownloadLimit = (p[Keys.TORRENT_DOWNLOAD_LIMIT] ?: 0).toLong().coerceAtLeast(0),
@@ -200,7 +204,7 @@ class SettingsRepository(private val context: Context) {
             debridProvider = p[Keys.DEBRID_PROVIDER] ?: "",
             debridApiKey = p[Keys.DEBRID_API_KEY] ?: "",
             guardEnabled = p[Keys.GUARD_ENABLED] ?: false,
-            guardThermalLimit = (p[Keys.GUARD_THERMAL] ?: 50).coerceIn(50, 70),
+            guardThermalLimit = SettingsMigration.clampThermal(p[Keys.GUARD_THERMAL]),
             guardBatteryLimit = (p[Keys.GUARD_BATTERY] ?: 20).coerceIn(5, 50),
             guardStorageLimit = (p[Keys.GUARD_STORAGE] ?: 90).coerceIn(50, 99),
             webhookEnabled = p[Keys.WEBHOOK_ENABLED] ?: false,
@@ -230,6 +234,20 @@ class SettingsRepository(private val context: Context) {
 
     /** 시작 직후 1회 동기 로드 (서비스 자동시작 판단용) */
     fun firstBlocking(): AppSettings = kotlinx.coroutines.runBlocking { settings.first() }
+
+    /** 스키마 버전 스탬프 — 구버전(버전키 없음) 설치분을 현행으로 승격.
+     * 멱등이며 실패해도 기동을 막지 않는다. RelayService.onCreate에서 1회 호출. */
+    suspend fun ensureMigrated() {
+        try {
+            val stored = context.settingsDataStore.data.first()[Keys.CONFIG_VERSION]
+            if (!SettingsMigration.needsMigration(stored)) return
+            val old = stored ?: 0
+            context.settingsDataStore.edit { it[Keys.CONFIG_VERSION] = SettingsMigration.migratedVersion(stored) }
+            DebugLogger.i("Settings", "[FEATURE] 설정마이그레이션 v${old}→v${SettingsMigration.CURRENT_VERSION} 완료")
+        } catch (e: Exception) {
+            DebugLogger.e("Settings", "설정마이그레이션 실패(무시하고 계속 기동)", e)
+        }
+    }
 
     suspend fun setPort(v: Int) =
         context.settingsDataStore.edit { it[Keys.PORT] = v.coerceIn(1024, 65535) }

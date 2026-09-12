@@ -4,13 +4,18 @@ import android.content.Context
 import android.provider.Settings
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
+import io.ktor.http.HttpStatusCode
 import io.ktor.server.response.header
 import io.ktor.server.response.respondBytesWriter
+import io.ktor.server.response.respondOutputStream
 import io.ktor.server.response.respondText
 import io.ktor.server.routing.Route
 import io.ktor.server.routing.get
 import io.ktor.server.routing.post
 import io.ktor.utils.io.writeStringUtf8
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import kotlinx.coroutines.delay
 import org.json.JSONArray
 import org.json.JSONObject
@@ -102,9 +107,79 @@ internal fun Route.debugRoutes(context: Context, serverRef: RelayServer) {
                 }.getOrNull() ?: "0.0.0"
                 put("version", appVersion)
                 put("uptime", System.currentTimeMillis() - RelayApp.startTime)
+                put("configVersion", SettingsMigration.CURRENT_VERSION)
+                put("jobsSchema", PersistenceGuard.JOBS_SCHEMA_VERSION)
+                put("torrentsSchema", PersistenceGuard.TORRENTS_SCHEMA_VERSION)
             }.toString(),
             ContentType.Application.Json
         )
+    }
+
+    get("/api/debug/bundle") {
+        try {
+            DebugLogger.i("Debug", "[FEATURE] 진단번들 요청")
+            val settings = runCatching { SettingsRepository.get(context).firstBlocking() }.getOrNull()
+            val settingsMasked: Map<String, Any?> =
+                if (settings != null) PersistenceGuard.maskSecrets(settings) else mapOf("unavailable" to true)
+            val jobsRaw = runCatching {
+                val f = java.io.File(context.getExternalFilesDir(null), "jobs.json")
+                if (f.exists()) f.readText() else "[]"
+            }.getOrDefault("<unavailable: corrupt, backup kept>")
+            val torrentsRaw = runCatching {
+                val f = java.io.File(context.filesDir, "torrents.json")
+                if (f.exists()) f.readText() else "[]"
+            }.getOrDefault("<unavailable: corrupt, backup kept>")
+            val jobs = JobsRepository.all()
+            val torrents = TorrentRepository.all()
+            val metricsJson = JSONObject().apply {
+                put("downloads_total", jobs.size)
+                put("torrents_total", torrents.size)
+                put("uptime_ms", System.currentTimeMillis() - RelayApp.startTime)
+            }.toString()
+            val appVersion = runCatching {
+                context.packageManager.getPackageInfo(context.packageName, 0).versionName
+            }.getOrNull() ?: "0.0.0"
+            val deviceJson = JSONObject().apply {
+                put("version", appVersion)
+                put("uptime", System.currentTimeMillis() - RelayApp.startTime)
+                put("configVersion", SettingsMigration.CURRENT_VERSION)
+                put("jobsSchema", PersistenceGuard.JOBS_SCHEMA_VERSION)
+                put("torrentsSchema", PersistenceGuard.TORRENTS_SCHEMA_VERSION)
+            }.toString()
+            val entries = DebugBundle.buildEntries(
+                logs = DebugLogger.lines().takeLast(300),
+                apiCalls = DebugLogger.apiLines().takeLast(100),
+                metricsJson = metricsJson,
+                settingsMasked = settingsMasked,
+                jobsRaw = jobsRaw,
+                torrentsRaw = torrentsRaw,
+                deviceJson = deviceJson,
+            )
+            val stamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date())
+            call.response.header(HttpHeaders.ContentDisposition, DispositionHeader.make("droidrelay-debug-$stamp.zip"))
+            call.response.header("X-Content-Type-Options", "nosniff")
+            call.response.header(HttpHeaders.CacheControl, "no-store, must-revalidate")
+            call.respondOutputStream(contentType = ContentType.Application.Zip) {
+                java.io.BufferedOutputStream(this, 256 * 1024).use { buffered ->
+                    java.util.zip.ZipOutputStream(buffered).use { zip ->
+                        zip.setLevel(0)
+                        entries.toSortedMap().forEach { (name, bytes) ->
+                            zip.putNextEntry(java.util.zip.ZipEntry(name))
+                            zip.write(bytes)
+                            zip.closeEntry()
+                        }
+                    }
+                }
+            }
+            DebugLogger.i("Debug", "진단번들 완료 ${entries.size}엔트리")
+        } catch (e: Exception) {
+            DebugLogger.e("Debug", "진단번들 실패", e)
+            call.respondText(
+                """{"error":"번들 생성 실패"}""",
+                ContentType.Application.Json,
+                HttpStatusCode.InternalServerError,
+            )
+        }
     }
 
     post("/api/debug/clear") {

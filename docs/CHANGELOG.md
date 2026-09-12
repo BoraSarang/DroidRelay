@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.22.0] - 2026-09-12 (미배포, Phase A)
+
+### Added [android] — Phase A 안정성 기반 (PLAN_v0.22_phaseA_android)
+- **T-962 설정 마이그레이션**: `SettingsMigration(CURRENT=1)` + `configVersion` DataStore 키 + `ensureMigrated()` (RelayService 기동 시 1회, 멱등·실패해도 기동). 파싱 폴백(SYSTEM/SUBNET_ONLY)·범위 수리 순수함수화
+- **T-963 저장소 무결성 가드**: `PersistenceGuard` — jobs/torrents 손상 시 `.bak` 보존 후 빈 목록 복구 (자동 삭제 금지, E-AND-DOWN-2003 유지)
+- **T-964 진단 번들**: `GET /api/debug/bundle` ZIP 스트리밍(logs/api-calls/metrics/settings마스킹/jobs/torrents/device) + `/api/debug/status`에 configVersion/schema 노출. 시크릿(`***`) 마스킹
+- **검증**: unit 13건 GREEN(SettingsMigration 6·PersistenceGuard 4·DebugBundle 3) + ktlint 본문 GREEN(kts 파서 기존 이슈 제외) + assembleDebug GREEN
+
 ## [0.21.1] - 2026-09-07 (미배포)
 
 ### Changed [web]

@@ -90,7 +90,8 @@ class TorrentPersistence(private val context: Context) {
             DebugLogger.d("TorrentPersist", "로드 완료 ${list.size}건")
             list
         } catch (e: Exception) {
-            DebugLogger.e("TorrentPersist", "로드 실패", e)
+            val bak = PersistenceGuard.backupCorrupt(file)
+            DebugLogger.e("TorrentPersist", "로드 실패 — 백업 ${bak?.name ?: "없음"} 후 초기화 (E-AND-DOWN-2003)", e)
             emptyList()
         }
     }
