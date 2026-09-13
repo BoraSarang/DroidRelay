@@ -1,13 +1,15 @@
 # Changelog
 
-## [0.35.0] - 2026-09-13 (미배포, QR 카드 바로가기)
+## [0.35.0] - 2026-09-13
+
+> v0.21.1~0.35.0 묶음 릴리즈. versionCode 27, versionName 0.35.0.
 
 ### Added [android] — 홈 QR 카드 HTTP·HTTPS 바로가기 (T-1017~T-1019)
 - `ServerCard` 접속 주소에 `http://…` + `https://…` 두 링크 (각각 탭하면 브라우저)
 - 복사 버튼은 두 줄 복사, 공유 텍스트에 두 주소 포함 (QR은 HTTP 유지)
 - 검증: unit GREEN + assembleDebug+실기기 설치 성공
 
-## [0.34.0] - 2026-09-13 (미배포, 홈 실행상태+HTTPS 포트)
+## [0.34.0] - 2026-09-13
 
 ### Added [android] — 홈 실행상태 + HTTPS 포트 설정 (T-1010~T-1016)
 - 홈 `ServerCard` 최상단에 `●` + `HTTP {port} · HTTPS {httpsPort} 실행 중/대기 중/에러` 표시
@@ -17,7 +19,7 @@
 - `/api/info`에 `httpsPort` 포함, 터널 상태 URL 하드코딩 8080 → 실포트
 - 검증: unit 129건 GREEN(HttpsPortTest 6건) + ktlint 본문 GREEN(kts 파서 기존 이슈 제외) + assembleDebug+실기기 설치 성공
 
-## [0.33.0] - 2026-09-13 (미배포, 웹 파비콘)
+## [0.33.0] - 2026-09-13
 
 ### Added [android+web] — 북마크 아이콘 (T-1005~T-1009)
 - 앱 런처 벡터 이식 SVG (남색 그라디언트+하늘색 궤도+흰색 다운로드 화살표) + PNG 16/32/180 + `site.webmanifest`
@@ -27,7 +29,7 @@
 - GitHub Pages 랜딩(`docs/index.html`) 동일 세트 + 상대경로 링크
 - 검증: FaviconTest 7건 GREEN + unit 전체 GREEN + assembleDebug+실기기 설치 성공 + APK assets/web 5종 포함 확인
 
-## [0.32.0] - 2026-09-13 (미배포, 파일명 우선)
+## [0.32.0] - 2026-09-13
 
 ### Fixed [android] — 서명 URL 파일명 오저장 수정 (T-1004)
 - 쿼리 `response-content-disposition` 안 `filename=`/`filename*=` 우선 파싱 (예: GitHub release-assets → `Godot_v4.7.2-stable_export_templates.tpz`)
@@ -36,14 +38,14 @@
 - 정상 path 이름은 헤더가 있어도 덮어쓰지 않음, 경로 탈출 정제 유지
 - 검증: unit 전체 GREEN + ktlint 본문 GREEN + assembleDebug+실기기 설치 성공
 
-## [0.29.0] - 2026-09-12 (미배포, 접이식 섹션)
+## [0.29.0] - 2026-09-12
 
 ### Added [web] — 비디오 분석·토렌트 검색 접이식 (T-1003)
 - 다운로드 탭 `🎬 비디오 분석 & 다운로드`, 토렌트 탭 `🔍 토렌트 검색` 헤더 클릭 펼침/접힘 (기본 접힘, `localStorage` 상태 기억)
 - 설정 검색 사용 OFF 시 토렌트 검색 섹션 통째 숨김 (로드/탭 진입/저장 직후 갱신)
 - 모바일 행 넘침修正: 인라인 flex 우선순위 정리 (`!important` 적층, 버튼 균등 분할)
 
-## [0.28.0] - 2026-09-12 (미배포, 앱+웹 자잘 수정)
+## [0.28.0] - 2026-09-12
 
 ### Added [android] — 주소 클릭 시 브라우저 열기 (T-1000)
 - 다운로드 탭 서버 카드 + 설정 탭 서버 URL 탭 → 외부 브라우저로 열기 (`ui/OpenBrowser.kt` 공용 헬퍼, 실패 시 크래시 없이 로그만)
@@ -56,7 +58,7 @@
 - 640px 이하: `.sr` 세로 적층, `.fp` wrap+입력 전체폭, `.ck` wrap, range 최소폭 0, 상세 stat 2열
 - headless Chrome 390px 실렌더로 전 섹션(전역~복원) 확인
 
-## [0.27.0] - 2026-09-12 (미배포, 웹 리뉴얼)
+## [0.27.0] - 2026-09-12
 
 ### Added [web] — 웹 대시보드 리뉴얼 (PLAN_v0.27_web-renew_android)
 - **T-992 새로고침**: 헤더 ⟳ 버튼 + `R`키 (탭 유지 전체 재조회, 스핀 애니메이션)
@@ -67,7 +69,7 @@
 - **T-999 모바일 1줄 입력**: 다운로드 URL+추가 버튼 한줄 고정
 - **검증**: JS node --check + 실기기 3테마 × PC/모바일 스크린샷 + select 실상호작용 E2E
 
-## [0.26.0] - 2026-09-12 (미배포, Phase E)
+## [0.26.0] - 2026-09-12
 
 ### Added [android+web] — Phase E 트래커 프로빙 (PLAN_v0.26_tracker-probe_android)
 - **T-988 코어**: `TrackerProbe`(UDP BEP15 핸드셰이크 + TCP connect, 병렬 8·4초 타임아웃) + 테스트 10건
@@ -75,7 +77,7 @@
 - **T-990 UI**: 웹 도달 표시+측정 버튼 + 앱 측정 행
 - **검증**: unit 10건 GREEN(전체 109건) + ktlint 본문 GREEN + JS node --check + assembleDebug GREEN
 
-## [0.25.0] - 2026-09-12 (미배포, Phase D)
+## [0.25.0] - 2026-09-12
 
 ### Added [android+web] — Phase D 작업별 속도 제한 (PLAN_v0.25_task-limit_android)
 - **T-983 코어**: `Job.maxDownBps`(0=무제한) + 영속(구파일 호환) + `ThrottleInterceptor` 작업별 버킷(JobTag·단일 버퍼 유지) + `setTaskLimit` + DONE/cancel 시 정리
@@ -84,7 +86,7 @@
 - **수정 (기존 버그)**: 토큰 버킷 수면분 이중 적립 → 실제 2배速으로 동작하던 전역/작업 제한을 정정 (`accountSleep`), sleepMs 올림으로 고속 상한 초과 해소
 - **검증**: unit 7건 GREEN(전체 99건: ThrottleChain 타이밍 포함) + ktlint 본문 GREEN + JS node --check + assembleDebug GREEN
 
-## [0.24.0] - 2026-09-12 (미배포, Phase C)
+## [0.24.0] - 2026-09-12
 
 ### Added [android+web] — Phase C 운영 완성 (PLAN_v0.24_phaseC_android)
 - **T-975/976 속도 스케줄**: `SpeedWindow(요일+시간+상하향)` + 수동 직렬화 + `SpeedScheduleManager`(60초 틱, 진입/이탈 시만 적용, 가드 스로틀 시 보류). 우선순위: 가드 일시정지 > 스케줄 > 수동
@@ -93,7 +95,7 @@
 - **T-980 버전 단일 진실**: `gradle.properties` + `scripts/bump-version.sh` (dry-run 검증済)
 - **검증**: unit 8건 GREEN(전체 92건) + ktlint 본문 GREEN + JS node --check + assembleDebug GREEN
 
-## [0.23.0] - 2026-09-12 (미배포, Phase B)
+## [0.23.0] - 2026-09-12
 
 ### Added [android+web] — Phase B 성공률·복원력 (PLAN_v0.23_phaseB_android)
 - **T-968/969 Referer/Cookie 전달(메모리만)**: `ExtraHeaders + sanitizeExtra`(2048/4096 cap, 초과 400 `E-AND-VALID-0002`) → analyze/create 전 경로. 웹 2입력(성공 시 초기화) + 앱 2필드(쿠키 마스킹, 시작 후 초기화). 값은 로그·영속에 절대 기록 금지(존재 여부만)
@@ -101,7 +103,7 @@
 - **T-971/972 트래커 자동 동기**: `TrackerListProvider`(ngosang best, 24h 캐시, 실패 시 번들 5개, never throw) + 설정 토글(기본 true) + `registerMapping` 주입(20개 cap, 게이트 내) + start 시 백그라운드 refresh + `GET/POST /api/torrents/trackers[/refresh]` + 웹/앱 UI
 - **검증**: unit 17건 GREEN + ktlint 본문 GREEN + WebAssets JS node --check + assembleDebug GREEN
 
-## [0.22.0] - 2026-09-12 (미배포, Phase A)
+## [0.22.0] - 2026-09-12
 
 ### Added [android] — Phase A 안정성 기반 (PLAN_v0.22_phaseA_android)
 - **T-962 설정 마이그레이션**: `SettingsMigration(CURRENT=1)` + `configVersion` DataStore 키 + `ensureMigrated()` (RelayService 기동 시 1회, 멱등·실패해도 기동). 파싱 폴백(SYSTEM/SUBNET_ONLY)·범위 수리 순수함수화
@@ -109,7 +111,7 @@
 - **T-964 진단 번들**: `GET /api/debug/bundle` ZIP 스트리밍(logs/api-calls/metrics/settings마스킹/jobs/torrents/device) + `/api/debug/status`에 configVersion/schema 노출. 시크릿(`***`) 마스킹
 - **검증**: unit 13건 GREEN(SettingsMigration 6·PersistenceGuard 4·DebugBundle 3) + ktlint 본문 GREEN(kts 파서 기존 이슈 제외) + assembleDebug GREEN
 
-## [0.21.1] - 2026-09-07 (미배포)
+## [0.21.1] - 2026-09-07
 
 ### Changed [web]
 - 브라우저 탭 타이틀에 총속도 표시 (`DroidRelay : 3.2MB/s`, 업로드 있으면 ▲ 추가, 대기 중 원복)

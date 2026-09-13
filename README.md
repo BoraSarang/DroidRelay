@@ -8,7 +8,7 @@ DroidRelay는 Android 기기 안에서 동작하는 네이티브(Kotlin + Jetpac
 - **범용 스트림 지원** — m3u8(HLS) / MPD(DASH) / MP4·WebM·MOV 직접 URL
 - **토렌트 지원** — magnet / `.torrent` (libtorrent4j)
 - **이어받기** — 중단돼도 다시 연결해 이어받기
-- **내장 웹 UI** — 브라우저로 접속해 조작 (모바일 레이아웃 지원)
+- **내장 웹 UI** — HTTP·HTTPS 듀얼 포트, 브라우저로 접속해 조작 (모바일 레이아웃 지원)
 
 ---
 
@@ -20,9 +20,9 @@ DroidRelay는 Android 기기 안에서 동작하는 네이티브(Kotlin + Jetpac
 | 📹 직접 영상 | `.mp4/.webm/.mov` 직접 URL → 그대로 다운로드 |
 | 🧲 토렌트 | magnet / `.torrent` 업로드, 시드·피어·속도 모니터링, 보관함 이동 |
 | 📦 보관함 | 완료 파일을 MediaStore 보관함에 게시, 폴더 관리 |
-| 🕸 내장 웹 서버 | 포트 8080, 브라우저용 대시보드 UI (HTTP 잡·토렌트·보관함·설정) |
+| 🕸 내장 웹 서버 | HTTP 8080 + HTTPS 8443 듀얼 포트, 브라우저용 대시보드 UI (HTTP 잡·토렌트·보관함·설정), QR/주소 바로가기 |
 | 🔄 이어받기 | 네트워크 단절 시 Range 기반 이어받기 재시도 |
-| 🔐 보안 | WebAuth(HTTP Basic), 허용 IP 화이트리스트, HTTPS 옵션 |
+| 🔐 보안 | WebAuth(HTTP Basic), 허용 IP 화이트리스트, HTTPS 옵션(포트 설정 가능) |
 | 🧠 스마트 가드 | 발열/배터리/저장공간 임계에 따른 다운로드 스로틀링 자동 대응 |
 | 📅 스케줄 | 크론 기반 예약 다운로드 (Wi-Fi·충전·배터리 조건) |
 | 📡 RSS | 피드 구독 → 자동 다운로드 |
@@ -39,18 +39,19 @@ DroidRelay는 Android 기기 안에서 동작하는 네이티브(Kotlin + Jetpac
 최신 서명 릴리즈 APK를 [Releases](https://github.com/BoraSarang/DroidRelay/releases)에서 받아 폰에 설치합니다.
 
 ```bash
-adb install -r droidrelay-v0.13.3.apk
+adb install -r droidrelay-v0.35.0.apk
 ```
 
 ### 2. 실행
-- 앱을 열어 **내장 서버 시작** (기본 포트 `8080`)
+- 앱을 열어 **내장 서버 시작** (기본 HTTP 포트 `8080`, HTTPS `8443`)
 - 폰은 같은 네트워크(핫스팟 포함)에 연결되어 있어야 합니다.
 
 ### 3. 웹 UI 접속 (같은 네트워크)
-폰 IP의 8080 포트로 접속합니다.
+폰 IP로 접속합니다. 홈 화면 QR 카드에 HTTP·HTTPS 두 주소가 표시됩니다.
 
 ```
-http://<폰-IP>:8080
+http://<폰-IP>:8080      # 일반
+https://<폰-IP>:8443     # HTTPS (자체서명 경고 후 진행)
 ```
 
 **USB 연결(머신에서) — adb reverse:**
@@ -82,8 +83,8 @@ docs/           문서 (PLAN / TODO / CHANGELOG / 랜딩 페이지)
 **빌드** (JDK는 Android Studio 내장 JBR)
 ```bash
 export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
-./build_and_run.sh debug android          # debug 빌드
-./build_and_run.sh release android        # 서명 릴리즈 (keystore.properties 필요)
+./build_and_run.sh debug android          # debug 빌드 + 실기기 설치
+./gradlew assembleRelease                 # 서명 릴리즈 (apps/android/keystore.properties 필요)
 ```
 
 **테스트 / 린트**
