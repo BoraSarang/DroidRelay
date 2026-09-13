@@ -132,3 +132,31 @@
 
 ## E2E
 - 실기기 E2E는 사용자 직접 진행 예정
+
+---
+
+## 릴리즈 세션 추가분 (v0.35.0 배포)
+
+## 무엇을
+- v0.21.1~v0.35.0 묶음 릴리즈 배포 (versionCode 27, versionName 0.35.0)
+- README·랜딩 업데이트 (v0.13.3→0.35.0, HTTP/HTTPS 듀얼 포트), CHANGELOG 미배포 12건 정리
+
+## 플랫폼
+- android (릴리즈 APK)
+
+## 빌드+PERF+CACHE
+- test GREEN + assembleRelease 성공, apksigner 서명 확인 (CN=DroidRelay, SHA-256 2f1dc84a…)
+- APK 75MB, gh release 업로드 (타임아웃 후 draft→edit으로 재처리)
+
+## 남은TODO
+- 사용자 실기기에서 서명 APK 설치 확인 (debug 설치 시 uninstall 필요)
+
+## 전달로그
+- gh release v0.35.0 (tag 연결, draft 해제, app-release.apk 첨부)
+
+## 문서갱신
+- README·docs/index.html v0.35.0 반영, CHANGELOG 0.35.0 "릴리즈" + 미배포 표시 제거
+- TODO.md는 그대로 (릴리즈 마커), 태그 v0.35.0 + 푸시 완료
+
+## 큐상태
+- beads DB 없음 → TODO/CHANGELOG로만 관리
