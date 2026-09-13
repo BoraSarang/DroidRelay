@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.35.0] - 2026-09-13 (미배포, QR 카드 바로가기)
+
+### Added [android] — 홈 QR 카드 HTTP·HTTPS 바로가기 (T-1017~T-1019)
+- `ServerCard` 접속 주소에 `http://…` + `https://…` 두 링크 (각각 탭하면 브라우저)
+- 복사 버튼은 두 줄 복사, 공유 텍스트에 두 주소 포함 (QR은 HTTP 유지)
+- 검증: unit GREEN + assembleDebug+실기기 설치 성공
+
+## [0.34.0] - 2026-09-13 (미배포, 홈 실행상태+HTTPS 포트)
+
+### Added [android] — 홈 실행상태 + HTTPS 포트 설정 (T-1010~T-1016)
+- 홈 `ServerCard` 최상단에 `●` + `HTTP {port} · HTTPS {httpsPort} 실행 중/대기 중/에러` 표시
+- `AppSettings.httpsPort`(기본 8443) + DataStore + 설정 UI HTTPS 행 (입력+랜덤+적용), HTTP·HTTPS 충돌 시 적용 거부 (신규 `E-AND-SRV-0111`)
+- 설정 상태줄에 두 포트 병기 (`8080(HTTP) · 8443(HTTPS) 실행 중`)
+- `RelayServer(ctx, port, httpsPort)` 배선 + 기동 로그·리다이렉트 타깃 실포트 반영 + 포트쌍 변경 시 재시작
+- `/api/info`에 `httpsPort` 포함, 터널 상태 URL 하드코딩 8080 → 실포트
+- 검증: unit 129건 GREEN(HttpsPortTest 6건) + ktlint 본문 GREEN(kts 파서 기존 이슈 제외) + assembleDebug+실기기 설치 성공
+
+## [0.33.0] - 2026-09-13 (미배포, 웹 파비콘)
+
+### Added [android+web] — 북마크 아이콘 (T-1005~T-1009)
+- 앱 런처 벡터 이식 SVG (남색 그라디언트+하늘색 궤도+흰색 다운로드 화살표) + PNG 16/32/180 + `site.webmanifest`
+- 내장 웹 대시보드(`/`)+디버그(`/debug`) head에 icon/apple-touch-icon/manifest/theme-color 삽입
+- Ktor 6경로 서빙 (`/favicon.svg`·`/favicon-{16,32}.png`·`/apple-touch-icon.png`·`/site.webmanifest`·`/favicon.ico`, 장기 캐시 86400s)
+- 파비콘 경로는 Basic Auth·게스트·기기승인 exempt (인증 팝업 루프 방지) + `[FEATURE] 파비콘 응답` 로그
+- GitHub Pages 랜딩(`docs/index.html`) 동일 세트 + 상대경로 링크
+- 검증: FaviconTest 7건 GREEN + unit 전체 GREEN + assembleDebug+실기기 설치 성공 + APK assets/web 5종 포함 확인
+
 ## [0.32.0] - 2026-09-13 (미배포, 파일명 우선)
 
 ### Fixed [android] — 서명 URL 파일명 오저장 수정 (T-1004)

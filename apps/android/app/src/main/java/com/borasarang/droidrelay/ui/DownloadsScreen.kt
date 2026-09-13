@@ -77,7 +77,8 @@ import com.borasarang.droidrelay.relay.Job
 import com.borasarang.droidrelay.relay.JobState
 import com.borasarang.droidrelay.relay.JobsRepository
 import com.borasarang.droidrelay.relay.RelayApp
-import com.borasarang.droidrelay.relay.RelayService
+import com.borasarang.droidrelay.relay.SettingsConstraints
+import com.borasarang.droidrelay.relay.SettingsRepository
 import com.borasarang.droidrelay.relay.StreamDetector
 import com.borasarang.droidrelay.relay.VideoApi
 import com.borasarang.droidrelay.relay.VideoException
@@ -92,8 +93,13 @@ import org.json.JSONObject
 @OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun DownloadsScreen(onCopyAddress: (String) -> Unit) {
+    val ctx = LocalContext.current
     val jobs by JobsRepository.jobs.collectAsState()
-    val qr = remember { qrBitmap("http://${lanAddress()}:${RelayService.PORT}") }
+    val settingsRepo = remember { SettingsRepository.get(ctx) }
+    val settings by settingsRepo.settings.collectAsState(initial = null)
+    val httpPort = settings?.port ?: SettingsConstraints.DEFAULT_HTTP_PORT
+    val httpsPort = settings?.httpsPort ?: SettingsConstraints.DEFAULT_HTTPS_PORT
+    val qr = remember(httpPort) { qrBitmap("http://${lanAddress()}:$httpPort") }
     var qrFull by remember { mutableStateOf(false) }
     val qrScale by animateFloatAsState(if (qrFull) 1f else 0.85f, animationSpec = tween(180), label = "qrScale")
 
@@ -102,7 +108,7 @@ fun DownloadsScreen(onCopyAddress: (String) -> Unit) {
             modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            item { ServerCard(onCopyAddress, qr, onQrClick = { qrFull = true }) }
+            item { ServerCard(httpPort, httpsPort, onCopyAddress, qr, onQrClick = { qrFull = true }) }
             item { AddRow() }
             item { VideoAddRow(onDlStarted = { }) }
             item {
@@ -185,13 +191,16 @@ fun DownloadsScreen(onCopyAddress: (String) -> Unit) {
     }
 }
 
-/** 서버 주소·QR·저장공간 카드 + 네트워크 타입 + 공유 */
+/** 서버 주소·QR·저장공간 카드 + 실행 상태 + 네트워크 타입 + 공유 */
 @Composable
-private fun ServerCard(onCopyAddress: (String) -> Unit, qr: Bitmap?, onQrClick: () -> Unit) {
+private fun ServerCard(httpPort: Int, httpsPort: Int, onCopyAddress: (String) -> Unit, qr: Bitmap?, onQrClick: () -> Unit) {
     val ctx = LocalContext.current
     val engine = remember { RelayApp.get(ctx) }
+    val repo = remember { SettingsRepository.get(ctx) }
+    val serverState by repo.serverState.collectAsState()
     val ip = remember { lanAddress() }
-    val addr = "http://$ip:${RelayService.PORT}"
+    val httpAddr = "http://$ip:$httpPort"
+    val httpsAddr = "https://$ip:$httpsPort"
     val cs = MaterialTheme.colorScheme
     val netType = remember { mutableStateOf(currentNetworkType(ctx)) }
 
@@ -212,17 +221,46 @@ private fun ServerCard(onCopyAddress: (String) -> Unit, qr: Bitmap?, onQrClick: 
 
     Card(colors = CardDefaults.cardColors(containerColor = cs.surfaceContainerHigh), shape = MaterialTheme.shapes.large) {
         Column(Modifier.fillMaxWidth().padding(16.dp)) {
+            // 실행 상태 (T-1014)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                val dotColor = when {
+                    serverState.error != null -> cs.error
+                    serverState.running -> cs.primary
+                    else -> cs.onSurfaceVariant
+                }
+                Text("●", color = dotColor, fontSize = 12.sp)
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    when {
+                        serverState.error != null -> "에러: ${serverState.error}"
+                        serverState.running -> "HTTP ${serverState.port} · HTTPS ${serverState.httpsPort} 실행 중"
+                        else -> "HTTP ${serverState.port} · HTTPS ${serverState.httpsPort} 대기 중"
+                    },
+                    color = dotColor,
+                    style = MaterialTheme.typography.labelMedium,
+                )
+            }
+            Spacer(Modifier.height(12.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text("테더링 기기 접속 주소", color = cs.onSurfaceVariant, style = MaterialTheme.typography.labelMedium)
                     Text(
-                        addr.ifEmpty { "LAN 주소 탐지 중..." },
+                        httpAddr.ifEmpty { "LAN 주소 탐지 중..." },
                         color = cs.primary,
                         fontWeight = FontWeight.Bold,
                         style = MaterialTheme.typography.titleMedium.copy(textDecoration = TextDecoration.Underline),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.clickable(enabled = addr.isNotEmpty()) { openUrlInBrowser(ctx, addr) },
+                        modifier = Modifier.clickable(enabled = httpAddr.isNotEmpty()) { openUrlInBrowser(ctx, httpAddr) },
+                    )
+                    Text(
+                        httpsAddr,
+                        color = cs.primary,
+                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.titleMedium.copy(textDecoration = TextDecoration.Underline),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.clickable(enabled = httpsAddr.isNotEmpty()) { openUrlInBrowser(ctx, httpsAddr) },
                     )
                     Spacer(Modifier.height(4.dp))
                     val nt = netType.value
@@ -235,11 +273,12 @@ private fun ServerCard(onCopyAddress: (String) -> Unit, qr: Bitmap?, onQrClick: 
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(onClick = {
                             val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                            cm.setPrimaryClip(ClipData.newPlainText("DroidRelay", addr))
-                            onCopyAddress(addr)
+                            val both = "$httpAddr\n$httpsAddr"
+                            cm.setPrimaryClip(ClipData.newPlainText("DroidRelay", both))
+                            onCopyAddress(both)
                         }) { Text("복사") }
                         OutlinedButton(onClick = {
-                            val shareText = "DroidRelay 접속 주소\n$addr\nQR 코드를 스캔하거나 위 주소를 브라우저에 입력하세요."
+                            val shareText = "DroidRelay 접속 주소\n$httpAddr\n$httpsAddr\nQR 코드를 스캔하거나 위 주소를 브라우저에 입력하세요."
                             val sendIntent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
                                 type = "text/plain"
                                 putExtra(android.content.Intent.EXTRA_TEXT, shareText)
