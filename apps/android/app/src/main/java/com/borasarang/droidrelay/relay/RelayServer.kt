@@ -26,6 +26,7 @@ import io.ktor.server.request.receiveMultipart
 import io.ktor.http.content.PartData
 import io.ktor.server.response.header
 import io.ktor.server.response.respond
+import io.ktor.server.response.respondBytes
 import io.ktor.server.response.respondBytesWriter
 import io.ktor.server.response.respondText
 import io.ktor.server.routing.delete
@@ -173,9 +174,10 @@ object DeviceGate {
 class RelayServer(
     private val context: Context,
     val port: Int = 8080,
+    val httpsPort: Int = HTTPS_PORT,
 ) {
     companion object {
-        /** HTTPS 포트 — 다운로드 경고(안전하지 않은 다운로드) 회피용 자체 서명 TLS */
+        /** HTTPS 기본 포트 — 다운로드 경고(안전하지 않은 다운로드) 회피용 자체 서명 TLS */
         const val HTTPS_PORT = 8443
         private const val KEY_STORE_ASSET = "certs/server.p12"
         // TLS 키스토어 비밀번호 — tls.properties → BuildConfig 주입 (소스 하드코딩 금지)
@@ -186,9 +188,12 @@ class RelayServer(
     @Volatile private var server: EmbeddedServer<NettyApplicationEngine, NettyApplicationEngine.Configuration>? = null
     @Volatile var settings: AppSettings = AppSettings()
 
+    /** 실제 HTTPS 바인드 포트 — HTTP와 같으면 +1 회피 (v0.34, UI 충돌검사와 이중 방어) */
+    val effectiveHttpsPort: Int get() = if (port == httpsPort) httpsPort + 1 else httpsPort
+
     fun updateSettings(s: AppSettings) {
         settings = s
-        DebugLogger.d("Server", "설정 스냅샷 갱신 port=${s.port} auth=${s.webAuthEnabled} limit=${s.speedLimitKbps}KB/s")
+        DebugLogger.d("Server", "설정 스냅샷 갱신 port=${s.port} https=${s.httpsPort} auth=${s.webAuthEnabled} limit=${s.speedLimitKbps}KB/s")
     }
 
     fun start() {
@@ -197,7 +202,7 @@ class RelayServer(
         server = runCatching { createServer() }
             .onSuccess { s ->
                 s.start(wait = false)
-                DebugLogger.i("Server", "기동 완료 http://0.0.0.0:$port + https://0.0.0.0:$HTTPS_PORT (LAN=${lanAddress() ?: "?"})")
+                DebugLogger.i("Server", "[FEATURE] HTTPS 포트 기동 완료 http://0.0.0.0:$port + https://0.0.0.0:$effectiveHttpsPort (LAN=${lanAddress() ?: "?"})")
             }
             .onFailure { e ->
                 DebugLogger.e("Server", "서버 기동 실패 E-SRV-NET-1421 ${e.message}")
@@ -249,7 +254,6 @@ class RelayServer(
             KeyStore.getInstance("PKCS12").also { it.load(stream, KEY_STORE_PASSWORD.toCharArray()) }
         }
         val httpPort = port
-        val httpsPort = if (port == HTTPS_PORT) HTTPS_PORT + 1 else HTTPS_PORT
         val env = applicationEnvironment { }
         return embeddedServer(
             Netty,
@@ -260,7 +264,7 @@ class RelayServer(
                     host = "0.0.0.0"
                 }
                 sslConnector(keystore, KEY_ALIAS, { KEY_STORE_PASSWORD.toCharArray() }, { KEY_STORE_PASSWORD.toCharArray() }) {
-                    this.port = httpsPort
+                    this.port = effectiveHttpsPort
                     host = "0.0.0.0"
                 }
             },
@@ -271,6 +275,8 @@ class RelayServer(
 
 /** 게스트 허용 — GET 열람·다운로드만, 설정·디버그·발행·제어 차단 (T-952) */
 private fun isGuestAllowed(method: String, path: String): Boolean {
+    // 파비콘/북마크 아이콘은 민감 정보가 없어 게스트 포함 전원 허용 (T-1007)
+    if (Favicon.isFavicon(path)) return true
     if (method != "GET" && method != "HEAD" && method != "OPTIONS") return false
     if (path == "/debug" || path.startsWith("/api/debug")) return false
     if (path.startsWith("/api/settings")) return false
@@ -317,12 +323,12 @@ private fun Application.relayRoutes(context: Context, serverRef: RelayServer) {
     intercept(ApplicationCallPipeline.Plugins) {
         val s = serverRef.settings
 
-        // HTTP(8080)로 들어온 LAN 요청은 HTTPS(8443)로 이동 — 다운로드/페이지 모두 안전 채널
+        // HTTP로 들어온 LAN 요청은 HTTPS로 이동 — 다운로드/페이지 모두 안전 채널
         // loopback(localhost/127.0.0.1/자기 IP)은 예외 — 터널(tailscaled)과 앱 자체 점검이 https 인증서를 신뢰하지 않으므로
         runCatching {
             val remoteHost = call.request.origin.remoteHost
             // forceHttpsRedirect=false(기본)면 LAN HTTP를 그대로 서빙(자체서명 인증서 미신뢰 브라우저 호환).
-            // true면 HTTPS(8443)로 강제 이동.
+            // true면 HTTPS로 강제 이동.
             if (call.request.local.scheme != "https" && !isLocalHost(remoteHost) && s.forceHttpsRedirect) {
                 // 리다이렉트 대상은 실제 클라이언트가 접근 가능한 LAN IP(핫스팟 우선)로 고정.
                 // call.request.local.localHost는 바인드 주소(0.0.0.0)나 VPN 인터페이스 IP를 줄 수 있어
@@ -330,7 +336,7 @@ private fun Application.relayRoutes(context: Context, serverRef: RelayServer) {
                 val targetHost = lanAddress()?.takeIf { it.isNotEmpty() }
                     ?: call.request.local.localHost.ifEmpty { "" }
                 if (targetHost.isNotEmpty()) {
-                    val target = "https://$targetHost:${RelayServer.HTTPS_PORT}${call.request.local.uri}"
+                    val target = "https://$targetHost:${serverRef.effectiveHttpsPort}${call.request.local.uri}"
                     DebugLogger.d("Security", "HTTP→HTTPS 리다이렉트 $remoteHost → $target")
                     call.response.header(HttpHeaders.Location, target)
                     call.respond(HttpStatusCode.TemporaryRedirect)
@@ -341,6 +347,9 @@ private fun Application.relayRoutes(context: Context, serverRef: RelayServer) {
         }.onFailure { DebugLogger.e("Security", "리다이렉트 판단 실패 ${it.message}") }
 
         val host = runCatching { call.request.origin.remoteHost }.getOrDefault("?")
+        val reqPath = runCatching { call.request.path() }.getOrDefault("")
+        // 파비콘/북마크 아이콘은 정적 공개 에셋 — 접속범위 승인대기·Basic Auth 모두 스킵 (T-1007)
+        val isFavicon = Favicon.isFavicon(reqPath)
 
         // accessScope에 따른 클라이언트 접속 범위 제어
         val isTrusted = when (s.accessScope) {
@@ -349,7 +358,7 @@ private fun Application.relayRoutes(context: Context, serverRef: RelayServer) {
             AccessScope.APPROVED_ONLY -> isLocalHost(host) || host in s.allowedIps
         }
 
-        if (!isTrusted) {
+        if (!isTrusted && !isFavicon) {
             when {
                 DeviceGate.isDenied(host) -> {
                     DebugLogger.w("Security", "차단 세션 기기 접속 거부 $host ${call.request.path()}")
@@ -369,10 +378,9 @@ private fun Application.relayRoutes(context: Context, serverRef: RelayServer) {
             }
         }
 
-        if (s.webAuthEnabled && s.webPassword.isNotEmpty()) {
+        if (!isFavicon && s.webAuthEnabled && s.webPassword.isNotEmpty()) {
             // /s/ 공유 링크는 토큰 자체가 권한이라 인증 예외 (T-951)
-            val sharePath = runCatching { call.request.path() }.getOrDefault("")
-            if (!sharePath.startsWith("/s/")) {
+            if (!reqPath.startsWith("/s/")) {
                 val auth = call.request.headers[HttpHeaders.Authorization] ?: ""
                 val expected = "Basic " + Base64.getEncoder()
                     .encodeToString("${s.webUser}:${s.webPassword}".toByteArray())
@@ -387,7 +395,7 @@ private fun Application.relayRoutes(context: Context, serverRef: RelayServer) {
                     return@intercept
                 }
                 // 게스트 읽기전용 — 열람·다운로드 GET만 (T-952)
-                if (isGuest && !isGuestAllowed(call.request.httpMethod.value, call.request.path())) {
+                if (isGuest && !isGuestAllowed(call.request.httpMethod.value, reqPath)) {
                     DebugLogger.w("Security", "게스트 차단 from=$host ${call.request.httpMethod.value} ${call.request.path()}")
                     call.respondText("게스트는 읽기 전용입니다", ContentType.Text.Plain, HttpStatusCode.Forbidden)
                     finish()
@@ -427,6 +435,11 @@ private fun Application.relayRoutes(context: Context, serverRef: RelayServer) {
             call.respondText(WebAssets.debugHtml, ContentType.Text.Html)
         }
 
+        // ── 파비콘/북마크 아이콘 (정적 공개 에셋, 장기 캐시) ──
+        Favicon.paths.forEach { favPath ->
+            get(favPath) { call.serveFavicon(context, favPath) }
+        }
+
         settingsRoutes(context, serverRef)
 
         storageRoutes(context, serverRef)
@@ -448,6 +461,22 @@ private fun Application.relayRoutes(context: Context, serverRef: RelayServer) {
 
     // ── MCP JSON-RPC 2.0 (Phase 2.1) ──
     McpServer.installRoutes(context, this, serverRef)
+}
+
+/** 파비콘/북마크 아이콘 서빙 — assets/web 고정 매핑, 장기 캐시 (T-1007) */
+internal suspend fun ApplicationCall.serveFavicon(context: Context, path: String) {
+    val asset = Favicon.assetFor(path)
+    val bytes = asset?.let {
+        runCatching { context.assets.open("web/${it.file}").use { stream -> stream.readBytes() } }.getOrNull()
+    }
+    if (asset == null || bytes == null) {
+        DebugLogger.w("Web", "파비콘 에셋 없음 $path")
+        respondText("없음", ContentType.Text.Plain, HttpStatusCode.NotFound)
+        return
+    }
+    response.header(HttpHeaders.CacheControl, "public, max-age=86400")
+    DebugLogger.i("Web", "[FEATURE] 파비콘 응답 $path (${bytes.size}B)")
+    respondBytes(bytes, asset.contentType)
 }
 
 /** Range(이어받기) 지원 파일 스트리밍 */

@@ -45,6 +45,16 @@ object SettingsConstraints {
     const val COMPLETION_ACTION_NONE = "none"
     const val COMPLETION_ACTION_STOP_SERVER = "stop_server"
 
+    // 내장 웹 서버 포트 (v0.34) — HTTP·HTTPS는 서로 달라야 한다
+    const val PORT_MIN = 1024
+    const val PORT_MAX = 65535
+    const val DEFAULT_HTTP_PORT = 8080
+    const val DEFAULT_HTTPS_PORT = 8443
+
+    /** HTTP·HTTPS 포트 쌍 유효성 — 범위 내 + 서로 다름 */
+    fun validPorts(http: Int, https: Int): Boolean =
+        http in PORT_MIN..PORT_MAX && https in PORT_MIN..PORT_MAX && http != https
+
     /** 임시 포트 (리셋용) */
     fun randomEphemeralPort(): Int = 49152 + kotlin.random.Random.nextInt(16384)
 }

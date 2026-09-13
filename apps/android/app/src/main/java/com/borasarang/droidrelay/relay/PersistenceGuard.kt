@@ -30,6 +30,7 @@ object PersistenceGuard {
     fun maskSecrets(s: AppSettings): Map<String, Any?> = mapOf(
         "configVersion" to s.configVersion,
         "port" to s.port,
+        "httpsPort" to s.httpsPort,
         "themeMode" to s.themeMode.name,
         "concurrency" to s.concurrency,
         "autoStart" to s.autoStart,

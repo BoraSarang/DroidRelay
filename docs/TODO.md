@@ -448,6 +448,36 @@ T-001~T-008 전부 완료 (커밋 7574486).
 |--------|------|------|
 | T-1003 | 비디오 분석·토렌트 검색 접이식 (기본접힘+상태기억+검색OFF 숨김) | ✅ |
 
+## v0.33 (2026-09-13) — 웹 파비콘/북마크 아이콘 (PLAN_v0.33_favicon_android.md)
+
+| T-번호 | 내용 | 상태 |
+|--------|------|------|
+| T-1005 | PLAN 작성 + TODO 등록 | ✅ |
+| T-1006 | 에셋 (favicon.svg+PNG 16/32/180+webmanifest, assets/web + docs) | ✅ |
+| T-1007 | 코드 (Favicon 헬퍼+WebAssets head+RelayServer 라우트/인증예외) + FaviconTest | ✅ |
+| T-1008 | 랜딩(docs/index.html) head 링크 | ✅ |
+| T-1009 | 검증(게이트+CHANGELOG+세션 로그) | ✅ |
+
+## v0.34 (2026-09-13) — 홈 실행상태 + HTTPS 포트 설정 (PLAN_v0.34_server-status-https-port_android.md)
+
+| T-번호 | 내용 | 상태 |
+|--------|------|------|
+| T-1010 | PLAN 작성 + TODO 등록 | ✅ |
+| T-1011 | 모델·DataStore·제약 (httpsPort+validPorts+E-AND-SRV-0111) + 단위테스트 | ✅ |
+| T-1012 | RelayServer·RelayService httpsPort 배선 + 재시작 감시 | ✅ |
+| T-1013 | 설정 UI (HTTPS 행+두 포트 상태줄) + 에러코드 등록 | ✅ |
+| T-1014 | 홈 ServerCard 상태 + QR/주소 포트 버그 + 알림 문구 | ✅ |
+| T-1015 | 웹 응답 httpsPort 노출 (확인 후 최소) | ✅ |
+| T-1016 | 검증(게이트+CHANGELOG+세션 로그) | ✅ |
+
+## v0.35 (2026-09-13) — 홈 QR 카드 HTTP·HTTPS 바로가기 (PLAN_v0.35_server-card-links_android.md)
+
+| T-번호 | 내용 | 상태 |
+|--------|------|------|
+| T-1017 | PLAN 작성 + TODO 등록 | ✅ |
+| T-1018 | ServerCard 두 주소 표시 + 복사/공유 반영 | ✅ |
+| T-1019 | 검증(게이트+CHANGELOG+세션 로그) | ✅ |
+
 ## v0.32 (2026-09-13) — Content-Disposition 파일명 우선 (PLAN_v0.32_content-disposition_android.md)
 
 | T-번호 | 내용 | 상태 |

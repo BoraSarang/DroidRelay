@@ -28,6 +28,7 @@ class RelayService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var server: RelayServer? = null
     private var currentPort: Int = -1
+    private var currentHttpsPort: Int = -1
     private var notificationsOn = true
     private var networkMonitor: NetworkMonitor? = null
     private var torrentEngine: TorrentEngine? = null
@@ -112,33 +113,35 @@ class RelayService : Service() {
 
         // ① 설정 감시: 포트 변경 → 서버 재시작 / 알림 토글 / 서버 스냅샷 갱신
         scope.launch {
-            var lastPort = -1
+            var lastPorts = -1 to -1
             settingsRepo.settings.collectLatest { s ->
                 notificationsOn = s.notifications
+                currentPort = s.port
+                currentHttpsPort = s.httpsPort
                 if (server == null) {
                     try {
-                        server = RelayServer(applicationContext, s.port).also { it.updateSettings(s); it.start() }
+                        server = RelayServer(applicationContext, s.port, s.httpsPort).also { it.updateSettings(s); it.start() }
                         val url = lanAddress()?.let { "http://$it:${s.port}" }
-                        settingsRepo.updateServerState(ServerState(running = true, port = s.port, url = url))
+                        settingsRepo.updateServerState(ServerState(running = true, port = s.port, httpsPort = s.httpsPort, url = url))
                     } catch (e: Exception) {
                         DebugLogger.e(TAG, "서버 기동 실패: ${e.message}", e)
-                        settingsRepo.updateServerState(ServerState(running = false, port = s.port, error = "서버 기동 실패: ${e.message}"))
+                        settingsRepo.updateServerState(ServerState(running = false, port = s.port, httpsPort = s.httpsPort, error = "서버 기동 실패: ${e.message}"))
                     }
-                    lastPort = s.port
+                    lastPorts = s.port to s.httpsPort
                 } else {
                     server?.updateSettings(s)
-                    if (s.port != lastPort) {
-                        DebugLogger.i(TAG, "포트 변경 감지 $lastPort → ${s.port} — 서버 재시작")
+                    if (s.port != lastPorts.first || s.httpsPort != lastPorts.second) {
+                        DebugLogger.i(TAG, "[FEATURE] HTTPS 포트 변경 감지 ${lastPorts.first}/${lastPorts.second} → ${s.port}/${s.httpsPort} — 서버 재시작")
                         server?.stop()
                         try {
-                            server = RelayServer(applicationContext, s.port).also { it.updateSettings(s); it.start() }
+                            server = RelayServer(applicationContext, s.port, s.httpsPort).also { it.updateSettings(s); it.start() }
                             val url = lanAddress()?.let { "http://$it:${s.port}" }
-                            settingsRepo.updateServerState(ServerState(running = true, port = s.port, url = url))
+                            settingsRepo.updateServerState(ServerState(running = true, port = s.port, httpsPort = s.httpsPort, url = url))
                         } catch (e: Exception) {
                             DebugLogger.e(TAG, "서버 재시작 실패: ${e.message}", e)
-                            settingsRepo.updateServerState(ServerState(running = false, port = s.port, error = "서버 재시작 실패: ${e.message}"))
+                            settingsRepo.updateServerState(ServerState(running = false, port = s.port, httpsPort = s.httpsPort, error = "서버 재시작 실패: ${e.message}"))
                         }
-                        lastPort = s.port
+                        lastPorts = s.port to s.httpsPort
                         updateRunningNotification(s.port)
                     }
                 }
@@ -164,9 +167,9 @@ class RelayService : Service() {
                         healthyCount = 0
                         runCatching {
                             val s2 = settingsRepo.firstBlocking()
-                            server = RelayServer(applicationContext, s2.port).also { it.updateSettings(s2); it.start() }
+                            server = RelayServer(applicationContext, s2.port, s2.httpsPort).also { it.updateSettings(s2); it.start() }
                             val url = lanAddress()?.let { "http://$it:${s2.port}" }
-                            settingsRepo.updateServerState(ServerState(running = true, port = s2.port, url = url))
+                            settingsRepo.updateServerState(ServerState(running = true, port = s2.port, httpsPort = s2.httpsPort, url = url))
                         }.onFailure { e ->
                             DebugLogger.e(TAG, "watchdog 서버 기동 실패: ${e.message}")
                         }
@@ -336,7 +339,7 @@ class RelayService : Service() {
         speedScheduleManager = null
         DebugLogger.i(TAG, "서비스 종료 완료 — 영구 저장 실행")
         // 서버 상태 갱신
-        SettingsRepository.get(applicationContext).updateServerState(ServerState(running = false, port = currentPort))
+        SettingsRepository.get(applicationContext).updateServerState(ServerState(running = false, port = currentPort, httpsPort = currentHttpsPort))
         // 강제종료/서비스 종료 시 즉시 영구 저장 (T-111)
         val jobs = com.borasarang.droidrelay.relay.JobsRepository.all()
         JobsPersistence(applicationContext).save(jobs)
@@ -364,7 +367,7 @@ class RelayService : Service() {
 
     private fun startInForeground() {
         if (isForeground) return
-        val notif = runningNotification(lanAddress())
+        val notif = runningNotification(lanAddress(), activePort())
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 startForeground(NOTIF_ID, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
@@ -384,17 +387,22 @@ class RelayService : Service() {
         Notification.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.stat_sys_download_done)
 
-    private fun runningNotification(ip: String?): Notification =
+    private fun runningNotification(ip: String?, port: Int): Notification =
         baseNotif()
             .setContentTitle(getString(R.string.notif_running_title))
-            .setContentText(if (ip != null) "http://$ip:$PORT 접속 가능" else getString(R.string.notif_running_text))
+            .setContentText(if (ip != null) "http://$ip:$port 접속 가능" else getString(R.string.notif_running_text))
             .setOngoing(true)
             .build()
 
     private fun updateRunningNotification(port: Int) {
         val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        nm.notify(NOTIF_ID, runningNotification(lanAddress()?.let { "$it:$port" }))
+        nm.notify(NOTIF_ID, runningNotification(lanAddress(), port))
     }
+
+    /** 설정 반영 전(-1)에는 기본 HTTP 포트로 폴백 */
+    private fun activePort(): Int =
+        if (currentPort in SettingsConstraints.PORT_MIN..SettingsConstraints.PORT_MAX) currentPort
+        else SettingsConstraints.DEFAULT_HTTP_PORT
 
     private fun updateProgressNotification(jobs: List<Job>) {
         val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -405,7 +413,7 @@ class RelayService : Service() {
         val notif = if (running.isEmpty()) {
             baseNotif()
                 .setContentTitle(getString(R.string.notif_running_title))
-                .setContentText("http://$ip:$PORT · 대기 중인 다운로드 없음")
+                .setContentText("http://$ip:${activePort()} · 대기 중인 다운로드 없음")
                 .setOngoing(true)
                 .build()
         } else {
@@ -518,7 +526,6 @@ class RelayService : Service() {
     }
 
     companion object {
-        const val PORT = 8080
         private const val CHANNEL_ID = "relay_status"
         private const val CHANNEL_RESULT_ID = "relay_result"
         private const val CHANNEL_GATE_ID = "relay_gate"

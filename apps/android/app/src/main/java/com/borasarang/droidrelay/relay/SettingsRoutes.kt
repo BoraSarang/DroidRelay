@@ -26,6 +26,7 @@ internal fun Route.settingsRoutes(context: Context, serverRef: RelayServer) {
         val info = JSONObject().apply {
             put("ip", lanAddress() ?: JSONObject.NULL)
             put("port", serverRef.port)
+            put("httpsPort", serverRef.effectiveHttpsPort)
             put("version", appVersion)
             put("storageFree", stat?.availableBytes ?: JSONObject.NULL)
             put("storageTotal", stat?.totalBytes ?: JSONObject.NULL)
@@ -618,7 +619,7 @@ internal fun Route.settingsRoutes(context: Context, serverRef: RelayServer) {
                         java.net.NetworkInterface.getNetworkInterfaces()?.asSequence()?.flatMap { it.inetAddresses?.asSequence() ?: emptySequence() }
                             ?.firstOrNull { it is java.net.Inet4Address && !it.isLoopbackAddress && it.hostAddress?.startsWith("100.") == true }?.hostAddress
                     } catch (_: Exception) { null }
-                    if (ip != null) JSONObject().apply { put("connected", true); put("ip", ip); put("url", "http://$ip:8080") }.toString()
+                    if (ip != null) JSONObject().apply { put("connected", true); put("ip", ip); put("url", "http://$ip:${serverRef.port}") }.toString()
                     else JSONObject().apply { put("connected", false); put("reason", "Tailscale 미연결 또는 미설치") }.toString()
                 }
                 TunnelProvider.CLOUDFLARE -> JSONObject().apply { put("connected", false); put("reason", "cloudflared 바이너리 필요") }.toString()

@@ -23,6 +23,7 @@ enum class AccessScope { SUBNET_ONLY, ANY_WITH_PASSWORD, APPROVED_ONLY }
 data class ServerState(
     val running: Boolean = false,
     val port: Int = 8080,
+    val httpsPort: Int = 8443,
     val url: String? = null,
     val error: String? = null,
 )
@@ -30,6 +31,7 @@ data class ServerState(
 data class AppSettings(
     val configVersion: Int = SettingsMigration.CURRENT_VERSION,
     val port: Int = 8080,
+    val httpsPort: Int = 8443,
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
     val dynamicColor: Boolean = true,
     val concurrency: Int = SettingsConstraints.DEFAULT_CONCURRENCY,
@@ -107,12 +109,13 @@ class SettingsRepository(private val context: Context) {
 
     fun updateServerState(state: ServerState) {
         _serverState.value = state
-        DebugLogger.d("Settings", "서버 상태 갱신 running=${state.running} port=${state.port} error=${state.error}")
+        DebugLogger.d("Settings", "서버 상태 갱신 running=${state.running} port=${state.port} https=${state.httpsPort} error=${state.error}")
     }
 
     private object Keys {
         val CONFIG_VERSION = intPreferencesKey("config_version")
         val PORT = intPreferencesKey("port")
+        val HTTPS_PORT = intPreferencesKey("https_port")
         val THEME = stringPreferencesKey("theme_mode")
         val DYNAMIC = booleanPreferencesKey("dynamic_color")
         val CONCURRENCY = intPreferencesKey("concurrency")
@@ -183,6 +186,7 @@ class SettingsRepository(private val context: Context) {
         AppSettings(
             configVersion = p[Keys.CONFIG_VERSION] ?: 0,
             port = SettingsMigration.clampPort(p[Keys.PORT]),
+            httpsPort = SettingsMigration.clampPort(p[Keys.HTTPS_PORT], SettingsConstraints.DEFAULT_HTTPS_PORT),
             themeMode = SettingsMigration.parseThemeMode(p[Keys.THEME]),
             dynamicColor = p[Keys.DYNAMIC] ?: true,
             concurrency = (p[Keys.CONCURRENCY] ?: SettingsConstraints.DEFAULT_CONCURRENCY)
@@ -262,6 +266,9 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun setPort(v: Int) =
         context.settingsDataStore.edit { it[Keys.PORT] = v.coerceIn(1024, 65535) }
+
+    suspend fun setHttpsPort(v: Int) =
+        context.settingsDataStore.edit { it[Keys.HTTPS_PORT] = v.coerceIn(1024, 65535) }
 
     suspend fun setThemeMode(m: ThemeMode) =
         context.settingsDataStore.edit { it[Keys.THEME] = m.name }
