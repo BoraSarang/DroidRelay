@@ -45,7 +45,6 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -86,24 +85,27 @@ fun TorrentScreen(onShowSnack: (String) -> Unit = {}) {
         contract = ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
         uri?.let {
-            try {
-                val bytes = context.contentResolver.openInputStream(it)?.use { s -> s.readBytes() } ?: return@let
-                val filename = it.lastPathSegment?.substringAfterLast('/') ?: "torrent"
-                engine.addTorrentFile(bytes, filename)
-                onShowSnack("torrent 파일 추가됨: $filename")
-            } catch (e: Exception) {
-                DebugLogger.e("TorrentUI", "torrent 파일 읽기 실패", e)
-                onShowSnack("torrent 파일 읽기 실패")
+            scope.launch(Dispatchers.IO) {
+                try {
+                    // 크기 상한 25MB — 대용량 readBytes OOM 방지
+                    val size = context.contentResolver.openFileDescriptor(it, "r")?.use { pfd -> pfd.statSize } ?: -1L
+                    if (size > 25 * 1024 * 1024) {
+                        withContext(Dispatchers.Main) { onShowSnack("torrent 파일이 너무 큽니다") }
+                        return@launch
+                    }
+                    val bytes = context.contentResolver.openInputStream(it)?.use { s -> s.readBytes() } ?: return@launch
+                    val filename = it.lastPathSegment?.substringAfterLast('/') ?: "torrent"
+                    engine.addTorrentFile(bytes, filename)
+                    withContext(Dispatchers.Main) { onShowSnack("torrent 파일 추가됨: $filename") }
+                } catch (e: Exception) {
+                    DebugLogger.e("TorrentUI", "torrent 파일 읽기 실패", e)
+                    withContext(Dispatchers.Main) { onShowSnack("torrent 파일 읽기 실패") }
+                }
             }
         }
     }
 
-    LaunchedEffect(Unit) {
-        while (true) {
-            kotlinx.coroutines.delay(1000)
-            // 강제 리컴포지션 유도 (상태 갱신 반영)
-        }
-    }
+    // 데드 1초 폴링 제거 — TorrentRepository Flow가 상태 갱신을 푸시하므로 리컴포지션 유도 불필요
 
     Box(Modifier.fillMaxSize()) {
         if (torrents.isEmpty()) {

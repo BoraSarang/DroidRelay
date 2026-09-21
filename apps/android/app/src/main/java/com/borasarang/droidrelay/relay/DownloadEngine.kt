@@ -33,8 +33,17 @@ class DownloadEngine(
         JobsRepository.get(id)?.maxDownBps ?: 0L
     }
     private val client = OkHttpClient.Builder()
-        .connectTimeout(java.time.Duration.ofSeconds(30))
-        .readTimeout(java.time.Duration.ofSeconds(90))
+        .connectTimeout(java.time.Duration.ofSeconds(15))
+        .readTimeout(java.time.Duration.ofSeconds(60))
+        .callTimeout(java.time.Duration.ofMinutes(10))
+        .dispatcher(
+            okhttp3.Dispatcher().apply {
+                // 동일 호스트 병렬 제한(기본 5) 완화 — concurrencyTarget 반영
+                maxRequests = 32
+                maxRequestsPerHost = 16
+            },
+        )
+        .connectionPool(okhttp3.ConnectionPool(8, 5, java.util.concurrent.TimeUnit.MINUTES))
         .addNetworkInterceptor(throttleInterceptor)
         .build()
 
@@ -46,8 +55,12 @@ class DownloadEngine(
     @Volatile private var concurrencyTarget = 1
     @Volatile private var limitKbps = 0
 
+    // workDir 매 접근 mkdirs() 제거 — lazy 1회 생성 (syscall 절감)
+    private val cachedWorkDir: File by lazy {
+        File(context.getExternalFilesDir(null), "downloads").apply { mkdirs() }
+    }
     val workDir: File
-        get() = File(context.getExternalFilesDir(null), "downloads").apply { mkdirs() }
+        get() = cachedWorkDir
 
     fun partialFile(job: Job): File = File(workDir, job.filename + ".part")
     fun doneFile(job: Job): File = File(workDir, job.filename)
@@ -216,6 +229,7 @@ class DownloadEngine(
             }
         }
         val lastReason = failureReasons.remove(id)
+        throttleInterceptor.forget(id)
         JobsRepository.update(id) {
             it.copy(
                 state = JobState.FAILED, errorCode = "E-AND-DOWN-1001",
@@ -243,11 +257,12 @@ class DownloadEngine(
             client.newCall(req).execute().use { res ->
                 DebugLogger.d(TAG, "HTTP ${res.code} range=${res.header("Content-Range") ?: "-"} id=$id")
                 if (!res.isSuccessful) {
-                    if (res.code == 416 || start > 0) {
-                        DebugLogger.w(TAG, "Range 거부(code=${res.code}) → 처음부터 id=$id")
+                    if (res.code == 416) {
+                        DebugLogger.w(TAG, "Range 거부(code=416) → 처음부터 id=$id")
                         partial.delete(); start = 0
                         return@withContext Outcome.RETRY
                     }
+                    // 그 외 오류는 .part 유지 (일시 오류 시 재전송 폭증 방지)
                     JobsRepository.update(id) {
                         it.copy(state = JobState.FAILED, errorCode = "E-AND-DOWN-1003", errorMessage = "E-AND-DOWN-1003: HTTP ${res.code}", speedBps = 0L)
                     }
@@ -291,37 +306,46 @@ class DownloadEngine(
                     val input = res.body!!.byteStream()
                     val buf = ByteArray(BUFFER_SIZE)
                     var lastTick = System.currentTimeMillis()
+                    var pos = offset
                     var lastPos = offset
                     var emaBps = 0.0
                     var firstTick = true
                     var windowStart = System.currentTimeMillis()
                     var sentInWindow = 0L
+                    var chunkCount = 0
 
                     while (true) {
-                        val cur = JobsRepository.get(id)!!
-                        when (cur.state) {
-                            JobState.CANCELED -> {
-                                DebugLogger.i(TAG, "취소 감지 → .part 삭제 id=$id")
-                                partial.delete(); return@withContext Outcome.CANCELED
+                        // 상태 폴링 16청크마다 (64KB→256KB 기준 약 4MB 간격) — map 조회 1/16로
+                        if ((chunkCount and 15) == 0) {
+                            when (JobsRepository.get(id)?.state) {
+                                JobState.CANCELED -> {
+                                    DebugLogger.i(TAG, "취소 감지 → .part 삭제 id=$id")
+                                    partial.delete(); return@withContext Outcome.CANCELED
+                                }
+                                JobState.PAUSED -> {
+                                    DebugLogger.i(TAG, "일시정지 감지 → .part 유지(${fmt(pos)}) id=$id")
+                                    // 일시정지 시점까지 받은 바이트 반영
+                                    JobsRepository.update(id) { j ->
+                                        j.copy(downloadedBytes = pos, speedBps = 0L)
+                                    }
+                                    return@withContext Outcome.PAUSED
+                                }
+                                null -> return@withContext Outcome.CANCELED
+                                else -> Unit
                             }
-                            JobState.PAUSED -> {
-                                DebugLogger.i(TAG, "일시정지 감지 → .part 유지(${fmt(raf.length())}) id=$id")
-                                return@withContext Outcome.PAUSED
-                            }
-                            else -> Unit
                         }
 
                         val n = input.read(buf)
                         if (n == -1) break
+                        chunkCount++
 
-                        // 스로틀: 윈도우(1s) 예산 초과 시 대기
+                        // 스로틀: 윈도우(1s) 예산 초과 시 대기 (로그 스팸 제거)
                         if (limitKbps > 0) {
                             sentInWindow += n
                             val budget = limitKbps.toLong() * 1024
                             val elapsedInWindow = System.currentTimeMillis() - windowStart
                             if (sentInWindow >= budget && elapsedInWindow < 1000) {
                                 val sleepMs = 1000 - elapsedInWindow
-                                DebugLogger.d(TAG, "스로틀 대기 ${sleepMs}ms id=$id")
                                 delay(sleepMs)
                                 windowStart = System.currentTimeMillis(); sentInWindow = 0
                             } else if (elapsedInWindow >= 1000) {
@@ -330,16 +354,18 @@ class DownloadEngine(
                         }
 
                         raf.write(buf, 0, n)
+                        pos += n
 
                         val now = System.currentTimeMillis()
                         if (now - lastTick >= TICK_MS) {
                             val dt = (now - lastTick).coerceAtLeast(1)
-                            val inst = (raf.filePointer - lastPos) * 1000.0 / dt
+                            // filePointer(lseek syscall) 대신 누적 pos 사용
+                            val inst = (pos - lastPos) * 1000.0 / dt
                             emaBps = if (firstTick) inst else emaBps * 0.6 + inst * 0.4
                             firstTick = false
                             lastTick = now
-                            lastPos = raf.filePointer
-                            val curBytes = raf.filePointer
+                            lastPos = pos
+                            val curBytes = pos
                             JobsRepository.update(id) { j ->
                                 j.copy(
                                     downloadedBytes = curBytes,
@@ -422,7 +448,7 @@ class DownloadEngine(
                 DebugLogger.w(TAG, "MediaStore insert null → 게시 생략 id=$jobId"); return
             }
             resolver.openOutputStream(uri)?.use { out ->
-                file.inputStream().use { it.copyTo(out, BUFFER_SIZE) }
+                file.inputStream().use { it.copyTo(out, PUBLISH_BUFFER_SIZE) }
             }
             values.clear()
             values.put(MediaStore.Downloads.IS_PENDING, 0)
@@ -440,7 +466,9 @@ class DownloadEngine(
     }
 
     companion object {
-        private const val BUFFER_SIZE = 64 * 1024
+        // 64KB → 256KB: syscall 횟수 1/4, 대용량 처리량 향상 (모바일 메모리 부담은 미미)
+        private const val BUFFER_SIZE = 256 * 1024
+        private const val PUBLISH_BUFFER_SIZE = 512 * 1024
         private const val TICK_MS = 2_000L
         private const val MAX_RETRY = 3
     }

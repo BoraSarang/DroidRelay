@@ -25,6 +25,17 @@ object StreamDetector {
     private val directManifest = Regex("^https?://\\S+\\.(m3u8|mpd)([?#].*)?$", RegexOption.IGNORE_CASE)
     private val directMp4 = Regex("^https?://\\S+\\.(mp4|webm|mov)([?#].*)?$", RegexOption.IGNORE_CASE)
     private val EXTINF_RE = Regex("""#EXTINF:\s*([0-9]+(?:\.[0-9]+)?)""")
+    private val HLS_RES_RE = Regex("RESOLUTION=(\\d+)x(\\d+)")
+    private val DASH_REP_RE = Regex(
+        "<Representation[^>]*>(.*?)</Representation>",
+        setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL),
+    )
+    private val DASH_W_RE = Regex("width=\"(\\d+)\"")
+    private val DASH_H_RE = Regex("height=\"(\\d+)\"")
+    private val DASH_BASE_RE = Regex("<BaseURL[^>]*>([^<]+)</BaseURL>", RegexOption.IGNORE_CASE)
+    private val DASH_BASE_ATTR_RE = Regex("baseURL=\"([^\"]+)\"")
+    // 대용량 HTML/매니페스트 OOM 방지 상한
+    private const val MAX_BODY_BYTES = 3 * 1024 * 1024
 
     /** 해상도 선택 가능한 스트림 variant — label(예: 720p) + 실제 다운로드 URL + 프로토콜 */
     data class Quality(
@@ -85,6 +96,7 @@ object StreamDetector {
         OkHttpClient.Builder()
             .connectTimeout(15, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)
+            .callTimeout(60, TimeUnit.SECONDS)
             .followRedirects(true)
             .build()
     }
@@ -134,16 +146,28 @@ object StreamDetector {
         val body = fetch(manifestUrl, extra)
         val isDash = manifestUrl.contains(".mpd", true)
         val variants = if (isDash) parseDashManifest(body, manifestUrl) else parseHlsMaster(body, manifestUrl)
-        var mediaBody: String? = null
-        if (!isDash) {
-            mediaBody = if (countHlsSegments(body) > 0) body
-            else variants.firstOrNull()?.url?.let { fetch(it, extra) }
+        if (isDash) return ManifestResult(variants, 0, 0)
+        // 단일 패스로 세그먼트 수+총 재생시간 계산 (기존 2패스 제거)
+        val mediaBody: String? = if (countHlsSegments(body) > 0) body
+        else variants.firstOrNull()?.url?.let { fetch(it, extra) }
+        val (segments, durationMs) = mediaBody?.let { scanMediaStats(it) } ?: (0 to 0L)
+        return ManifestResult(variants, segments, durationMs)
+    }
+
+    /** 미디어 플레이리스트 단일 패스 통계 — 세그먼트 수 + 총 재생시간(ms) */
+    private fun scanMediaStats(playlist: String): Pair<Int, Long> {
+        var n = 0
+        var total = 0L
+        for (line in playlist.lineSequence()) {
+            val t = line.trim()
+            if (t.startsWith("#EXTINF")) {
+                n++
+                EXTINF_RE.find(t)?.groupValues?.get(1)?.let { v ->
+                    total += ((v.toDoubleOrNull() ?: 0.0) * 1000).toLong()
+                }
+            } else if (t.startsWith("#EXT-X-ENDLIST")) break
         }
-        return ManifestResult(
-            variants,
-            mediaBody?.let { countHlsSegments(it) } ?: 0,
-            mediaBody?.let { playlistDurationMs(it) } ?: 0,
-        )
+        return n to total
     }
 
     /** 입력 URL이 무엇인지 판정 — kindOf: stream(m3u8/mpd) / mp4 / page(그 외 웹페이지) */
@@ -180,24 +204,25 @@ object StreamDetector {
 
     /** HLS 마스터 매니페스트에서 #EXT-X-STREAM-INF(RESOLUTION) variant를 해상도별로 추출 */
     fun parseHlsMaster(manifest: String, baseUrl: String): List<Quality> {
-        val lines = manifest.lineSequence().map { it.trim() }.toList()
+        // 전행 toList() 제거 — 스트리밍走査 + STREAM-INF 직후 비주석 라인만 variant로
         val out = mutableListOf<Quality>()
-        var i = 0
-        while (i < lines.size) {
-            val line = lines[i]
+        var pendingRes: String? = null
+        var pending = false
+        for (raw in manifest.lineSequence()) {
+            val line = raw.trim()
             if (line.startsWith("#EXT-X-STREAM-INF")) {
-                val res = Regex("RESOLUTION=(\\d+)x(\\d+)").find(line)
-                // 다음 줄이 variant URI (주석/빈 줄이 올 수 있으므로 다음 비주석 라인 탐색)
-                var j = i + 1
-                while (j < lines.size && (lines[j].startsWith("#") || lines[j].isBlank())) j++
-                if (j < lines.size) {
-                    val uri = lines[j].split(',')[0].trim()
-                    val label = res?.let { "${it.groupValues[2]}p" } ?: "자동"
+                pendingRes = HLS_RES_RE.find(line)?.groupValues?.get(2)
+                pending = true
+            } else if (pending) {
+                if (line.isBlank() || line.startsWith("#")) continue
+                val uri = line.split(',')[0].trim()
+                if (uri.isNotEmpty()) {
+                    val label = pendingRes?.let { "${it}p" } ?: "자동"
                     out.add(Quality(label, resolve(baseUrl, uri), "hls"))
                 }
-                i = j + 1
-            } else {
-                i++
+                pending = false
+                pendingRes = null
+                if (out.size >= 16) break
             }
         }
         return out.distinctBy { it.url }
@@ -206,20 +231,16 @@ object StreamDetector {
     /** DASH 매니페스트에서 Representation 해상도(w/h) + BaseURL 추출 */
     fun parseDashManifest(manifest: String, baseUrl: String): List<Quality> {
         val out = mutableListOf<Quality>()
-        val repRe = Regex(
-            "<Representation[^>]*>(.*?)</Representation>",
-            setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL),
-        )
-        for (m in repRe.findAll(manifest)) {
+        for (m in DASH_REP_RE.findAll(manifest)) {
             val tag = m.value
-            val w = Regex("width=\"(\\d+)\"").find(tag)?.groupValues?.get(1)
-            val h = Regex("height=\"(\\d+)\"").find(tag)?.groupValues?.get(1)
-            val base = Regex("<BaseURL[^>]*>([^<]+)</BaseURL>", RegexOption.IGNORE_CASE)
+            val h = DASH_H_RE.find(tag)?.groupValues?.get(1)
+            val base = DASH_BASE_RE
                 .find(tag)?.groupValues?.get(1)?.trim()?.takeUnless { it.isBlank() }
-                ?: Regex("baseURL=\"([^\"]+)\"").find(tag)?.groupValues?.get(1)
+                ?: DASH_BASE_ATTR_RE.find(tag)?.groupValues?.get(1)
             if (h != null && base != null) {
                 out.add(Quality("${h}p", resolve(baseUrl, base), "dash"))
             }
+            if (out.size >= 16) break
         }
         return out
     }
@@ -253,7 +274,16 @@ object StreamDetector {
                         "페이지 응답 오류(HTTP ${resp.code}). 스트림 주소를 직접 입력해 주세요.",
                     )
                 }
-                return resp.body?.string().orEmpty()
+                // Content-Length 선검사 — 대용량 OOM 방지
+                val declared = resp.body?.contentLength() ?: -1L
+                if (declared > MAX_BODY_BYTES) {
+                    throw VideoException("E-AND-VID-0200", "페이지가 너무 큽니다 (${declared / 1024}KB)")
+                }
+                val text = resp.body?.string().orEmpty()
+                if (text.length > MAX_BODY_BYTES) {
+                    throw VideoException("E-AND-VID-0200", "페이지가 너무 큽니다")
+                }
+                return text
             }
         } catch (e: IOException) {
             DebugLogger.e(TAG, "페이지 조회 실패 (E-AND-VID-0100)", e)

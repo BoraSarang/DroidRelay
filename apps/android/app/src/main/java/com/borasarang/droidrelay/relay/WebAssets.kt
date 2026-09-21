@@ -2,8 +2,8 @@ package com.borasarang.droidrelay.relay
 
 object WebAssets {
 
-    val dashboardHtml: String
-        get() = """<!doctype html>
+    val dashboardHtml: String by lazy {
+        """<!doctype html>
 <html lang="ko"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
@@ -2621,9 +2621,10 @@ function checkOverlay(){
   }).catch(function(){});
 }
 </script></body></html>"""
+    }
 
-    val debugHtml: String
-        get() = """<!doctype html>
+    val debugHtml: String by lazy {
+        """<!doctype html>
 <html lang="ko"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
@@ -2763,4 +2764,5 @@ function exportLogs(){
 function poll(){fetchLogs();timer=setTimeout(poll,1000);}
 poll();
 </script></body></html>"""
+    }
 }

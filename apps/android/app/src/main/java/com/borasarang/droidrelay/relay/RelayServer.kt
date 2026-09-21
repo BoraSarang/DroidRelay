@@ -63,7 +63,7 @@ private fun Any?.toJsonElement(): Any = when (this) {
     is Boolean, is Number, is String -> this
     else -> toString()
 }
-internal fun Map<String, Any?>.toJson(): String = (this.toJsonElement() as JSONObject).toString(2)
+internal fun Map<String, Any?>.toJson(): String = (this.toJsonElement() as JSONObject).toString()
 
 object RelayApp {
     private const val TAG = "App"
@@ -115,7 +115,20 @@ object RelayApp {
     }
 }
 
+/** LAN IP + 서브넷 판정 캐시 — 매 요청 NetworkInterface 열거 제거 (10s TTL) */
+private object NetCache {
+    @Volatile var lan: String? = null
+    @Volatile var lanAt = 0L
+    val subnet = ConcurrentHashMap<String, Pair<Long, Boolean>>()
+    val favicon = ConcurrentHashMap<String, Pair<String, ByteArray>>()
+    @Volatile var authKey = ""
+    @Volatile var authExpected = ""
+    @Volatile var guestExpected = ""
+}
+
 fun lanAddress(): String? {
+    val now = System.currentTimeMillis()
+    if (now - NetCache.lanAt < 10_000) return NetCache.lan
     val preferred = listOf("swlan0", "ap0", "wlan0")
     val candidates = mutableListOf<String>()
     val ifaces = NetworkInterface.getNetworkInterfaces() ?: return null
@@ -125,11 +138,18 @@ fun lanAddress(): String? {
             val host = addr.hostAddress ?: continue
             if (addr.isLoopbackAddress || addr.address.size != 4) continue
             if (host.startsWith("169.254")) continue
-            if (nif.name in preferred) return host
+            if (nif.name in preferred) {
+                NetCache.lan = host
+                NetCache.lanAt = now
+                return host
+            }
             candidates += host
         }
     }
-    return candidates.firstOrNull()
+    return candidates.firstOrNull().also {
+        NetCache.lan = it
+        NetCache.lanAt = now
+    }
 }
 
 /** 신규 기기 승인 게이트 (T-112) */
@@ -309,6 +329,8 @@ private fun ipToLong(ip: String): Long? = runCatching {
  * 개인 테더링 AP에 붙은 기기는 사용자가 비밀번호를 공유한 대상이므로 신뢰한다. (Transfer식 승인 팝업은 타 서브넷만)
  */
 private fun sameSubnetAsLocal(host: String): Boolean {
+    val now = System.currentTimeMillis()
+    NetCache.subnet[host]?.let { (at, v) -> if (now - at < 10_000) return v }
     val h = ipToLong(host) ?: return false
     val ifaces = NetworkInterface.getNetworkInterfaces() ?: return false
     for (nif in ifaces.asSequence()) {
@@ -319,9 +341,13 @@ private fun sameSubnetAsLocal(host: String): Boolean {
             val prefix = addr.networkPrefixLength
             if (prefix !in 1..32) continue
             val mask = (-1L shl (32 - prefix)) and 0xFFFFFFFFL
-            if ((self and mask) == (h and mask)) return true
+            if ((self and mask) == (h and mask)) {
+                NetCache.subnet[host] = now to true
+                return true
+            }
         }
     }
+    NetCache.subnet[host] = now to false
     return false
 }
 
@@ -374,7 +400,8 @@ private fun Application.relayRoutes(context: Context, serverRef: RelayServer) {
                     return@intercept
                 }
                 host !in s.allowedIps -> {
-                    val allowed = DeviceGate.awaitDecision(host)
+                    // Netty 워커 블로킹 방지 — IO 디스패처에서 승인 대기
+                    val allowed = withContext(Dispatchers.IO) { DeviceGate.awaitDecision(host) }
                     if (!allowed) {
                         call.respondText("거부된 기기입니다", ContentType.Text.Plain, HttpStatusCode.Forbidden)
                         finish()
@@ -389,10 +416,17 @@ private fun Application.relayRoutes(context: Context, serverRef: RelayServer) {
             // /s/ 공유 링크는 토큰 자체가 권한이라 인증 예외 (T-951)
             if (!reqPath.startsWith("/s/")) {
                 val auth = call.request.headers[HttpHeaders.Authorization] ?: ""
-                val expected = "Basic " + Base64.getEncoder()
-                    .encodeToString("${s.webUser}:${s.webPassword}".toByteArray())
-                val guestExpected = "Basic " + Base64.getEncoder()
-                    .encodeToString("guest:${s.guestPassword}".toByteArray())
+                // 매 요청 Base64 2회 생성 제거 — 설정 변경 시만 재계산
+                val key = "${s.webUser}\u0000${s.webPassword}\u0000${s.guestPassword}\u0000${s.guestEnabled}"
+                if (key != NetCache.authKey) {
+                    NetCache.authExpected = "Basic " + Base64.getEncoder()
+                        .encodeToString("${s.webUser}:${s.webPassword}".toByteArray())
+                    NetCache.guestExpected = "Basic " + Base64.getEncoder()
+                        .encodeToString("guest:${s.guestPassword}".toByteArray())
+                    NetCache.authKey = key
+                }
+                val expected = NetCache.authExpected
+                val guestExpected = NetCache.guestExpected
                 val isGuest = s.guestEnabled && s.guestPassword.isNotEmpty() && auth == guestExpected
                 if (auth != expected && !isGuest) {
                     DebugLogger.w("Security", "인증 실패 from=$host ${call.request.path()} (E-AND-DOWN-1003)")
@@ -475,16 +509,25 @@ private fun Application.relayRoutes(context: Context, serverRef: RelayServer) {
 /** 파비콘/북마크 아이콘 서빙 — assets/web 고정 매핑, 장기 캐시 (T-1007) */
 internal suspend fun ApplicationCall.serveFavicon(context: Context, path: String) {
     val asset = Favicon.assetFor(path)
-    val bytes = asset?.let {
-        runCatching { context.assets.open("web/${it.file}").use { stream -> stream.readBytes() } }.getOrNull()
-    }
-    if (asset == null || bytes == null) {
-        DebugLogger.w("Web", "파비콘 에셋 없음 $path")
+    if (asset == null) {
         respondText("없음", ContentType.Text.Plain, HttpStatusCode.NotFound)
         return
     }
+    // 매 요청 assets.open+readBytes 제거 — 메모리 캐시
+    val bytes = NetCache.favicon[path]?.let { (f, b) ->
+        if (f == asset.file) b else null
+    } ?: run {
+        val loaded = withContext(Dispatchers.IO) {
+            runCatching { context.assets.open("web/${asset.file}").use { stream -> stream.readBytes() } }.getOrNull()
+        } ?: run {
+            DebugLogger.w("Web", "파비콘 에셋 없음 $path")
+            respondText("없음", ContentType.Text.Plain, HttpStatusCode.NotFound)
+            return
+        }
+        NetCache.favicon[path] = asset.file to loaded
+        loaded
+    }
     response.header(HttpHeaders.CacheControl, "public, max-age=86400")
-    DebugLogger.i("Web", "[FEATURE] 파비콘 응답 $path (${bytes.size}B)")
     respondBytes(bytes, asset.contentType)
 }
 
@@ -519,20 +562,22 @@ internal suspend fun ApplicationCall.serveFile(
 
     val t0 = System.currentTimeMillis()
     respondBytesWriter(contentType = contentType ?: ContentType.Application.OctetStream, contentLength = length) {
-        RandomAccessFile(file, "r").use { raf ->
-            raf.seek(range.from)
-            val buf = ByteArray(BUFFER_SIZE)
-            var remaining = length
-            while (remaining > 0) {
-                val want = minOf(buf.size.toLong(), remaining).toInt()
-                val n = raf.read(buf, 0, want)
-                if (n <= 0) break
-                writeFully(buf, 0, n)
-                remaining -= n
+        withContext(Dispatchers.IO) {
+            RandomAccessFile(file, "r").use { raf ->
+                raf.seek(range.from)
+                val buf = ByteArray(SERVE_BUFFER_SIZE)
+                var remaining = length
+                while (remaining > 0) {
+                    val want = minOf(buf.size.toLong(), remaining).toInt()
+                    val n = raf.read(buf, 0, want)
+                    if (n <= 0) break
+                    writeFully(buf, 0, n)
+                    remaining -= n
+                }
             }
         }
     }
-    DebugLogger.i(
+    DebugLogger.d(
         "Serve",
         "전송 종료 id=$jobId '${file.name}' ${fmt(length)} " +
             "(${if (range.partial) "206 부분" else "200 전체"}) 소요=${System.currentTimeMillis() - t0}ms",
@@ -629,6 +674,7 @@ internal object RangeParser {
 }
 
 internal const val BUFFER_SIZE = 64 * 1024
+internal const val SERVE_BUFFER_SIZE = 256 * 1024
 
 private fun fmt(n: Long): String = when {
     n < 1_048_576 -> "${n / 1024}KB"

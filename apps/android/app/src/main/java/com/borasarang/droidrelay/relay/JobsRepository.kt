@@ -29,10 +29,14 @@ data class Job(
 )
 
 object JobsRepository {
-    private val TAG = "Jobs"
+    private const val TAG = "Jobs"
     private val _jobs = MutableStateFlow<List<Job>>(emptyList())
     val jobs: StateFlow<List<Job>> = _jobs
     private val map = ConcurrentHashMap<String, Job>()
+    // 진행 틱 방출 스로틀 — 500ms / 0.5% 미만 변동은 Flow 미방출 (리컴포지션·JSON 폭증 방지)
+    @Volatile private var lastEmitAt = 0L
+    private const val PROGRESS_EMIT_MS = 500L
+    private const val PROGRESS_EMIT_DELTA = 0.005f
 
     fun all(): List<Job> = _jobs.value
     fun get(id: String): Job? = map[id]
@@ -55,6 +59,7 @@ object JobsRepository {
 
     fun update(id: String, transform: (Job) -> Job) {
         var changed = false
+        var suppressEmit = false
         map.computeIfPresent(id) { _, before ->
             val after = transform(before)
             changed = after != before
@@ -73,9 +78,20 @@ object JobsRepository {
                     before.filename
                 }' $pct% (${fmt(after.downloadedBytes)})")
             }
+            // RUNNING 진행 틱은 map만 갱신, Flow 방출은 스로틀
+            if (changed && before.state == JobState.RUNNING && after.state == JobState.RUNNING) {
+                val dProgress = kotlin.math.abs(after.progress - before.progress)
+                val now = System.currentTimeMillis()
+                if (dProgress < PROGRESS_EMIT_DELTA && now - lastEmitAt < PROGRESS_EMIT_MS) {
+                    suppressEmit = true
+                }
+            }
             after
         }
-        if (changed) refresh()
+        if (changed && !suppressEmit) {
+            lastEmitAt = System.currentTimeMillis()
+            refresh()
+        }
     }
 
     fun remove(id: String): Boolean {        val removed = map.remove(id)
@@ -123,17 +139,23 @@ object JobsRepository {
 
         val host = url.substringAfter("//").substringBefore('/').substringBefore(':')
             .takeLast(24).ifBlank { "download" }
-        val ts = java.text.SimpleDateFormat("MMdd-HHmmss", java.util.Locale.US)
-            .format(System.currentTimeMillis())
+        val ts = fallbackDateFormat.get().format(System.currentTimeMillis())
         val fallback = "file-$host-$ts"
         DebugLogger.d(TAG, "파일명 결정(범용 폴백): '$raw' → '$fallback'")
         return fallback
     }
 
+    private val fallbackDateFormat = ThreadLocal.withInitial {
+        java.text.SimpleDateFormat("MMdd-HHmmss", java.util.Locale.US)
+    }
+    private val fallbackNameRe = Regex("""^file-.+-\d{4}-\d{6}$""")
+    private val cntrlRe = Regex("\\p{Cntrl}+")
+    private val reservedCharsRe = Regex("[\\\\/:*?\"<>|\\s]+")
+
     /** 폴백 이름 여부 — 응답 헤더 교정 대상 판단용 (T-1004) */
     fun isFallbackName(name: String): Boolean {
         if (!name.startsWith("file-")) return false
-        return Regex("""^file-.+-\d{4}-\d{6}$""").matches(name)
+        return fallbackNameRe.matches(name)
     }
 
     /** 응답 Content-Disposition 헤더로 교정할 이름 반환 — 폴백일 때만, 아니면 null (T-1004) */
@@ -177,8 +199,8 @@ object JobsRepository {
     internal fun sanitizeLeaf(raw: String?): String? {
         if (raw.isNullOrBlank()) return null
         val cleaned = raw
-            .replace(Regex("\\p{Cntrl}+"), "")
-            .replace(Regex("[\\\\/:*?\"<>|\\s]+"), "_")
+            .replace(cntrlRe, "")
+            .replace(reservedCharsRe, "_")
             .trim('.', '_', ' ')
             .take(120)
         if (cleaned.isBlank() || cleaned == "." || cleaned == "..") return null
@@ -233,10 +255,17 @@ object JobsRepository {
     fun findDuplicateUrl(url: String): Job? {
         val norm = normalizedUrl(url)
         return map.values.firstOrNull {
-            normalizedUrl(it.url) == norm &&
-                it.state != JobState.CANCELED && it.state != JobState.FAILED
+            if (it.state == JobState.CANCELED || it.state == JobState.FAILED) return@firstOrNull false
+            // 정규화 캐시: 같은 id는 재파싱 스킵
+            val cached = normalizedCache[it.id]
+            val itNorm = if (cached != null && cached.first == it.url) cached.second else {
+                normalizedUrl(it.url).also { n -> normalizedCache[it.id] = it.url to n }
+            }
+            itNorm == norm
         }
     }
+
+    private val normalizedCache = ConcurrentHashMap<String, Pair<String, String>>()
 
     private fun refresh() {
         _jobs.value = map.values.sortedBy { it.order }
