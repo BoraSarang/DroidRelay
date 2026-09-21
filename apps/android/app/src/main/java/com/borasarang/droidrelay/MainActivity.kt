@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Download
@@ -50,6 +51,7 @@ import com.borasarang.droidrelay.ui.DebugPanelContent
 import com.borasarang.droidrelay.ui.DownloadsScreen
 import com.borasarang.droidrelay.ui.FilesScreen
 import com.borasarang.droidrelay.ui.SettingsScreen
+import com.borasarang.droidrelay.ui.StatsScreen
 import com.borasarang.droidrelay.ui.TorrentScreen
 import com.borasarang.droidrelay.ui.theme.DroidRelayTheme
 import kotlinx.coroutines.launch
@@ -67,8 +69,12 @@ class MainActivity : ComponentActivity() {
 
         val settingsRepo = SettingsRepository.get(this)
         val initial = settingsRepo.firstBlocking()
-        // MVP: 서버 미기동 방지 위해 항상 기동 (autoStart 토글 반영은 후속)
-        RelayService.start(this)
+        // v0.36: 앱 실행 자동시작 토글 존중 (OFF면 서버 미기동)
+        if (initial.launchAutoStart) {
+            RelayService.start(this)
+        } else {
+            DebugLogger.i("UI", "앱 실행 자동시작 꺼짐 — 서버 미기동")
+        }
         requestNotificationPermission()
         requestStoragePermission()
 
@@ -177,7 +183,7 @@ fun RootApp() {
     val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
     val context = androidx.compose.ui.platform.LocalContext.current
     val engine = com.borasarang.droidrelay.relay.RelayApp.get(context)
-    val tabTitles = listOf("다운로드", "토렌트", "보관함", "설정")
+    val tabTitles = listOf("다운로드", "토렌트", "보관함", "설정", "통계")
 
     // 클립보드 URL 감지 제안 (T-110) + 공유 받기 (T-941) + 알림 탭 이동 (v0.24)
     LaunchedEffect(Unit) {
@@ -273,6 +279,12 @@ fun RootApp() {
                     icon = { Icon(Icons.Filled.Settings, null) },
                     label = { Text("설정") },
                 )
+                NavigationBarItem(
+                    selected = tab == 4,
+                    onClick = { tab = 4 },
+                    icon = { Icon(Icons.Filled.BarChart, null) },
+                    label = { Text("통계") },
+                )
             }
         },
     ) { inner ->
@@ -291,7 +303,8 @@ fun RootApp() {
                 )
                 1 -> TorrentScreen(onShowSnack = { msg -> scope.launch { snackbar.showSnackbar(msg) } })
                 2 -> FilesScreen(onShowSnack = { msg -> scope.launch { snackbar.showSnackbar(msg) } })
-                else -> SettingsScreen(onPortChanged = {})
+                3 -> SettingsScreen(onPortChanged = {})
+                else -> StatsScreen()
             }
         }
     }

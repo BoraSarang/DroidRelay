@@ -409,9 +409,22 @@ internal fun Route.storageRoutes(context: Context, serverRef: RelayServer) {
         val startedAt = System.currentTimeMillis()
         var fileCount = 0
         var totalBytes = 0L
+        var sentBytes = 0L
         call.respondOutputStream(contentType = ContentType.Application.Zip) {
+            val raw = this
+            // 트래픽 통계 (v0.37) — 실제 전송 바이트 계수
+            val counting = object : java.io.OutputStream() {
+                override fun write(b: Int) {
+                    raw.write(b); sentBytes++
+                }
+                override fun write(b: ByteArray, off: Int, len: Int) {
+                    raw.write(b, off, len); sentBytes += len
+                }
+                override fun flush() = raw.flush()
+                override fun close() = raw.close()
+            }
             val root = dir.canonicalFile
-            java.io.BufferedOutputStream(this, 256 * 1024).use { buffered ->
+            java.io.BufferedOutputStream(counting, 256 * 1024).use { buffered ->
                 java.util.zip.ZipOutputStream(buffered).use { zip ->
                     zip.setLevel(0)
                     fun addDir(d: java.io.File, prefix: String) {
@@ -443,6 +456,8 @@ internal fun Route.storageRoutes(context: Context, serverRef: RelayServer) {
         }
         val elapsedSec = (System.currentTimeMillis() - startedAt).coerceAtLeast(1) / 1000.0
         val totalMb = totalBytes / (1024.0 * 1024.0)
+        // 트래픽 통계 (v0.37) — ZIP 실전송 바이트
+        TrafficLedger.addUpServe(sentBytes)
         DebugLogger.i("Http", "폴더 다운로드 완료 name=$name 파일 ${fileCount}개 원본 ${"%.1f".format(totalMb)}MB 소요 ${"%.1f".format(elapsedSec)}초 (${"%.1f".format(totalMb / elapsedSec)}MB/s)")
     }
 
@@ -466,6 +481,8 @@ internal fun Route.storageRoutes(context: Context, serverRef: RelayServer) {
                     }
                 }
             }
+            // 트래픽 통계 (v0.37)
+            TrafficLedger.addUpServe(file.length())
         }
     }
 

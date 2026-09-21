@@ -87,7 +87,7 @@ class ThrottleInterceptor(
     private class TokenBucket {
         private val tokens = AtomicLong(0)
         private val lastRefill = AtomicLong(System.currentTimeMillis())
-        private var limitForRefill: Long = 0
+        @Volatile private var limitForRefill: Long = 0
 
         fun take(bytes: Long): Long {
             refill()
@@ -159,11 +159,22 @@ class ThrottleInterceptor(
         private val bucket: TokenBucket,
         private val getLimit: () -> Long,
     ) : ForwardingSource(delegate) {
+        // 상한 조회 캐시 — 8KB 청크마다 JobsRepository.get() 호출 제거 (500ms TTL)
+        private var cachedLimit = 0L
+        private var cachedAt = 0L
 
         override fun read(sink: Buffer, byteCount: Long): Long {
             val n = super.read(sink, byteCount)
             if (n == -1L) return -1L
-            val currentLimit = getLimit()
+            val now = System.currentTimeMillis()
+            val currentLimit = if (now - cachedAt >= LIMIT_CACHE_MS) {
+                runCatching { getLimit() }.getOrDefault(0L).also {
+                    cachedLimit = it
+                    cachedAt = now
+                }
+            } else {
+                cachedLimit
+            }
             if (currentLimit > 0) {
                 bucket.setLimit(currentLimit)
                 val sleepMs = bucket.take(n)
@@ -173,6 +184,10 @@ class ThrottleInterceptor(
                 }
             }
             return n
+        }
+
+        companion object {
+            private const val LIMIT_CACHE_MS = 500L
         }
     }
 }

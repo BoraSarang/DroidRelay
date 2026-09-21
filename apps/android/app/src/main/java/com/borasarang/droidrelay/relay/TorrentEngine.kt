@@ -145,6 +145,7 @@ class TorrentEngine(
     /** 매핑 해제 — job.infoHash 폴백으로 좀비 hashToId 방지 (T-934 S3) */
     private fun unregisterMapping(id: String) {
         handleMap.remove(id)
+        TorrentCounters.forget(id)
         val hash = TorrentRepository.get(id)?.infoHash?.takeIf { it.isNotEmpty() }
         if (hash != null) hashToId.remove(hash, id) else hashToId.entries.removeIf { it.value == id }
     }
@@ -853,6 +854,11 @@ val th = withGate { session?.find(Sha1Hash.parseHex(expectedHash)) }
                                 peers = status.listPeers(),
                             )
                         }
+
+                        // 트래픽 통계 (v0.37) — 누적 카운터 diff (첫 관측·역행은 0)
+                        val (countDown, countUp) = TorrentCounters.diff(id, status.totalDone(), status.totalUpload())
+                        if (countDown > 0) TrafficLedger.addDownTorrent(countDown)
+                        if (countUp > 0) TrafficLedger.addUpTorrent(countUp)
 
                         // 시더 부재 자동 중단 (이슈 4) — 설정 토글 시에만 동작
                         val seedLimit = torrentMinSeedWaitSec

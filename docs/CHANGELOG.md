@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.37.0] - 2026-09-21 (미배포)
+
+### Added [android+web] — 트래픽 통계 (T-1030~T-1037)
+- `TrafficLedger` 일별 원장 (`traffic.json`, 400일 보관, 손상 시 .bak 후 빈 복구): down 3종(HTTP/비디오/토렌트) + up 2종(서빙/토렌트), 합산+개별 보관
+- 계측: HTTP 완료 실수신(이어받기 중복 제외)·비디오 완료·토렌트 누적 diff(첫 관측 베이스라인, 역행 리셋) / 서빙 실전송(serveFile·dl-file·dl-folder ZIP 계수, 썸네일 제외)
+- API: `GET /api/stats/summary`(오늘/이번달/누적) + `GET /api/stats/daily?days=30`
+- 웹 📊 통계 탭: 요약 3카드 + 최근 30일 자체 SVG 막대(다운/업) + 최근일 breakdown
+- 앱 통계 탭(5번째): 오늘/이번달/누적 카드 + 최근 7일 Canvas 미니바, 5초 갱신
+- 검증: unit 151건 GREEN(TrafficLedgerTest 12건) + ktlint 본문 GREEN(kts 파서 기존 이슈 제외) + assembleDebug+실기기 설치 성공(0.37.0/29)
+
+## [0.36.0] - 2026-09-21 (미배포)
+
+### Added [android+web] — 서버 제어 분리 + HTTPS 개별 (T-1020~T-1025)
+- 자동시작 분리: `bootAutoStart`/`launchAutoStart` (기존 `auto_start`값 마이그레이션 폴백). `BootReceiver`는 부팅용, `MainActivity`는 앱실행용 토글 존중 (기존 항상 기동 MVP 주석 제거)
+- 홈 `ServerCard` 시작/정지 버튼 (상태줄 우측) + `HTTPS 끔` 분리 표시. 복사/공유는 켜진 프로토콜만, QR은 HTTP 유지
+- `httpsEnabled`(기본 true): OFF면 HTTP 단일 커넥터 (`sslConnector` 미등록), HTTP→HTTPS 강제 리다이렉트 스킵, 포트 충돌 검사 완화, 설정 UI에서 HTTPS 포트·리다이렉트 비활성화
+- API: `/api/info`에 `httpsEnabled` 추가 + `/api/settings/server` GET/POST 신규 (포트·HTTPS·자동시작, 충돌 시 `E-AND-SRV-0111`)
+- 웹 가드 섹션에 서버 제어 블록 (HTTPS 사용·재부팅/앱실행 자동시작 + 저장)
+- 검증: unit 139건 GREEN(ServerControlTest 10건) + ktlint 본문 GREEN(kts 파서 기존 이슈 제외) + assembleDebug+실기기 설치 성공(0.36.0/28)
+
 ## [0.35.0] - 2026-09-13
 
 > v0.21.1~0.35.0 묶음 릴리즈. versionCode 27, versionName 0.35.0.

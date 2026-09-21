@@ -24,7 +24,8 @@ object DebugLogger {
     private const val MAX_LINES = 300
     private val buf = ArrayDeque<String>(MAX_LINES + 16)
     private val apiBuf = ArrayDeque<String>(MAX_LINES + 16)
-    private val time = SimpleDateFormat("HH:mm:ss.SSS", Locale.US)
+    // SimpleDateFormat 매 로그 생성+락 제거 — 스레드별 포매터
+    private val time = ThreadLocal.withInitial { SimpleDateFormat("HH:mm:ss.SSS", Locale.US) }
 
     fun d(tag: String, message: String) = write("D", tag, message)
     fun i(tag: String, message: String) = write("I", tag, message)
@@ -33,7 +34,7 @@ object DebugLogger {
     /** API 호출 자동 기록 (path, method, status, bytes, ms) */
     fun api(method: String, path: String, status: Int, bytes: Long = 0, ms: Long = 0) {
         if (!enabled) return
-        val line = "[${time.format(Date())}][API] $method $path → $status ${bytes}B ${ms}ms"
+        val line = "[${time.get().format(Date())}][API] $method $path → $status ${bytes}B ${ms}ms"
         synchronized(apiBuf) {
             if (apiBuf.size >= MAX_LINES) apiBuf.removeFirst()
             apiBuf.addLast(line)
@@ -82,7 +83,7 @@ object DebugLogger {
     @Synchronized
     private fun write(level: String, tag: String, message: String) {
         if (!enabled) return
-        val line = "[${time.format(Date())}][$level][$tag] $message"
+        val line = "[${time.get().format(Date())}][$level][$tag] $message"
         if (buf.size >= MAX_LINES) buf.removeFirst()
         buf.addLast(line)
         when (level) {

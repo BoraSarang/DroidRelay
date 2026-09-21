@@ -483,3 +483,27 @@ T-001~T-008 전부 완료 (커밋 7574486).
 | T-번호 | 내용 | 상태 |
 |--------|------|------|
 | T-1004 | 쿼리 response-content-disposition + 응답 Content-Disposition 헤더 우선, 폴백명 1회 교정 (UI 변경 없음) | ✅ |
+
+## v0.36 (2026-09-21) — 서버 제어 분리 + HTTPS 개별 (PLAN_v0.36_server-control_android.md)
+
+| T-번호 | 내용 | 상태 |
+|--------|------|------|
+| T-1020 | PLAN 작성 + TODO 등록 + 0.36.0/28 버전 | ✅ |
+| T-1021 | 설정 모델 분리(bootAutoStart/launchAutoStart/httpsEnabled)+마이그레이션+단위테스트 10건 | ✅ |
+| T-1022 | BootReceiver+MainActivity+RelayService(재시작 감시) 배선 | ✅ |
+| T-1023 | ServerCard 시작/정지 버튼+HTTPS 상태 분리 표시 | ✅ |
+| T-1024 | 설정 UI 3토글+웹 API(/api/info·/api/settings/server) 미러 | ✅ |
+| T-1025 | 검증(게이트+CHANGELOG+세션 로그) | ✅ |
+
+## v0.37 (2026-09-21) — 트래픽 통계 (PLAN_v0.37_traffic-stats_android.md)
+
+| T-번호 | 내용 | 상태 |
+|--------|------|------|
+| T-1030 | PLAN 작성 + TODO 등록 + 0.37.0/29 버전 | ✅ |
+| T-1031 | TrafficLedger 원장+영속+단위테스트 12건 | ✅ |
+| T-1032 | 다운로드 3종 계측(엔진/비디오/토렌트 diff) | ✅ |
+| T-1033 | 업로드 계측(serveFile/dl-file/dl-folder+토렌트 diff) | ✅ |
+| T-1034 | API summary/daily 2종 + 라우트 등록 | ✅ |
+| T-1035 | 웹 📊 통계 탭(SVG 30일 그래프+요약 카드) | ✅ |
+| T-1036 | 앱 통계 탭(Canvas 7일 미니바+요약) | ✅ |
+| T-1037 | 검증(게이트+CHANGELOG+세션 로그) | ✅ |

@@ -10,8 +10,11 @@ import java.util.concurrent.ConcurrentHashMap
 object ThumbManager {
     private const val TAG = "Thumb"
     private val locks = ConcurrentHashMap<String, Any>()
+    // 메모리 캐시 — 동일 세션 반복 stat/디코딩 제거 (50개)
+    private val memCache = object : android.util.LruCache<String, File>(50) {}
 
     private val VIDEO_EXTS = setOf("mp4", "mkv", "webm", "mov", "avi", "m4v", "ogv", "ts")
+    private val HEX = "0123456789abcdef".toCharArray()
 
     fun isThumbable(name: String): Boolean =
         name.substringAfterLast('.', "").lowercase() in VIDEO_EXTS
@@ -21,11 +24,17 @@ object ThumbManager {
         if (!isThumbable(src.name) || !src.exists() || !src.isFile || src.length() <= 0) return null
         val dir = File(context.cacheDir, "thumbs").apply { mkdirs() }
         val key = md5("${src.name}|${src.lastModified()}|${src.length()}")
+        memCache.get(key)?.takeIf { it.exists() && it.length() > 0 }?.let { return it }
         val out = File(dir, "$key.jpg")
-        if (out.exists() && out.length() > 0) return out
+        if (out.exists() && out.length() > 0) {
+            memCache.put(key, out)
+            return out
+        }
         synchronized(locks.getOrPut(key) { Any() }) {
-            if (out.exists() && out.length() > 0) return out
-            prune(dir)
+            if (out.exists() && out.length() > 0) {
+                memCache.put(key, out)
+                return out
+            }
             for (ss in listOf("10", "1")) {
                 val ok = runCatching {
                     val s = FFmpegKit.execute(
@@ -36,6 +45,9 @@ object ThumbManager {
                 }.getOrDefault(false)
                 if (ok) {
                     DebugLogger.i(TAG, "[FEATURE] 썸네일 생성 '${src.name}'")
+                    memCache.put(key, out)
+                    // 생성 후에만 prune — 미스마다 listFiles+sort 제거
+                    prune(dir)
                     return out
                 }
                 out.delete()
@@ -53,6 +65,11 @@ object ThumbManager {
 
     private fun md5(s: String): String {
         val d = java.security.MessageDigest.getInstance("MD5").digest(s.toByteArray())
-        return d.joinToString("") { "%02x".format(it) }
+        val sb = StringBuilder(d.size * 2)
+        for (b in d) {
+            val v = b.toInt() and 0xFF
+            sb.append(HEX[v ushr 4]).append(HEX[v and 0x0F])
+        }
+        return sb.toString()
     }
 }

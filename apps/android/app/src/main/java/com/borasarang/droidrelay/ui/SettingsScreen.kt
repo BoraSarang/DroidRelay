@@ -100,7 +100,7 @@ fun SettingsScreen(onPortChanged: (Int) -> Unit) {
                     val p = portText.toIntOrNull()
                     if (p == null || p !in 1024..65535) {
                         DebugLogger.w("Settings", "포트 무효 값: $portText (E-AND-DOWN-2002)")
-                    } else if (!SettingsConstraints.validPorts(p, s.httpsPort)) {
+                    } else if (s.httpsEnabled && !SettingsConstraints.validPorts(p, s.httpsPort)) {
                         DebugLogger.w("Settings", "HTTP 포트 충돌: HTTP $p = HTTPS ${s.httpsPort} (E-AND-SRV-0111)")
                     } else if (p != s.port) {
                         DebugLogger.i("Settings", "포트 변경 ${s.port} → $p")
@@ -112,7 +112,13 @@ fun SettingsScreen(onPortChanged: (Int) -> Unit) {
                 }) { Text("적용") }
             }
 
-            // Line 1b: HTTPS 포트 입력 + 랜덤 + 적용
+            // Line 1b: HTTPS 사용 스위치 + 포트 입력 + 랜덤 + 적용 (v0.36 개별 제어)
+            SwitchRow("HTTPS 사용", s.httpsEnabled) { v ->
+                kotlinx.coroutines.MainScope().launch {
+                    repo.setHttpsEnabled(v)
+                    DebugLogger.i("Settings", if (v) "[FEATURE] HTTPS 사용 설정" else "[FEATURE] HTTPS 끔 설정 — HTTP 단일 동작")
+                }
+            }
             var httpsPortText by remember(s.httpsPort) { mutableStateOf(s.httpsPort.toString()) }
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
                 OutlinedTextField(
@@ -120,11 +126,12 @@ fun SettingsScreen(onPortChanged: (Int) -> Unit) {
                     onValueChange = { httpsPortText = it.filter { c -> c.isDigit() } },
                     label = { Text("HTTPS 포트") },
                     singleLine = true,
+                    enabled = s.httpsEnabled,
                     shape = MaterialTheme.shapes.small,
                     modifier = Modifier.weight(1f),
                 )
                 Spacer(Modifier.width(8.dp))
-                OutlinedButton(onClick = {
+                OutlinedButton(enabled = s.httpsEnabled, onClick = {
                     val random = (9000..9999).random()
                     httpsPortText = random.toString()
                     DebugLogger.i("Settings", "랜덤 HTTPS 포트 생성 $random")
@@ -138,7 +145,7 @@ fun SettingsScreen(onPortChanged: (Int) -> Unit) {
                     }
                 }) { Text("랜덤") }
                 Spacer(Modifier.width(4.dp))
-                Button(onClick = {
+                Button(enabled = s.httpsEnabled, onClick = {
                     val p = httpsPortText.toIntOrNull()
                     if (p == null || p !in 1024..65535) {
                         DebugLogger.w("Settings", "HTTPS 포트 무효 값: $httpsPortText (E-AND-DOWN-2002)")
@@ -166,8 +173,10 @@ fun SettingsScreen(onPortChanged: (Int) -> Unit) {
                 Text(
                     when {
                         serverState.error != null -> "에러: ${serverState.error}"
-                        serverState.running -> "${serverState.port}(HTTP) · ${serverState.httpsPort}(HTTPS) 실행 중"
-                        else -> "${serverState.port}(HTTP) · ${serverState.httpsPort}(HTTPS) 대기 중"
+                        serverState.running && serverState.httpsEnabled -> "${serverState.port}(HTTP) · ${serverState.httpsPort}(HTTPS) 실행 중"
+                        serverState.running -> "${serverState.port}(HTTP) 실행 중 · HTTPS 끔"
+                        serverState.httpsEnabled -> "${serverState.port}(HTTP) · ${serverState.httpsPort}(HTTPS) 대기 중"
+                        else -> "${serverState.port}(HTTP) 대기 중 · HTTPS 끔"
                     },
                     color = dotColor,
                     style = MaterialTheme.typography.labelMedium,
@@ -184,8 +193,9 @@ fun SettingsScreen(onPortChanged: (Int) -> Unit) {
                 }
             }
 
-            // Line 3: 자동 시작
-            SwitchRow("앱 실행 시 서버 자동 시작", s.autoStart) { v -> kotlinx.coroutines.MainScope().launch { repo.setAutoStart(v) } }
+            // Line 3: 자동 시작 분리 (v0.36)
+            SwitchRow("재부팅 시 서버 자동 시작", s.bootAutoStart) { v -> kotlinx.coroutines.MainScope().launch { repo.setBootAutoStart(v) } }
+            SwitchRow("앱 실행 시 서버 자동 시작", s.launchAutoStart) { v -> kotlinx.coroutines.MainScope().launch { repo.setLaunchAutoStart(v) } }
 
             // Line 4: 배터리 최적화 예외 (백그라운드 안정성)
             val pm = ctx.getSystemService(Context.POWER_SERVICE) as PowerManager
@@ -772,10 +782,11 @@ fun SettingsScreen(onPortChanged: (Int) -> Unit) {
 
             SwitchRow(
                 "HTTP → HTTPS 강제 리다이렉트",
-                s.forceHttpsRedirect,
-            ) { v -> kotlinx.coroutines.MainScope().launch { repo.setForceHttpsRedirect(v) } }
+                s.forceHttpsRedirect && s.httpsEnabled,
+                enabled = s.httpsEnabled,
+            ) { v -> kotlinx.coroutines.MainScope().launch { repo.setForceHttpsRedirect(v && s.httpsEnabled) } }
             Text(
-                "켜면 웨일/사파리에서 HTTPS 인증서 신뢰가 필요할 수 있습니다",
+                if (s.httpsEnabled) "켜면 웨일/사파리에서 HTTPS 인증서 신뢰가 필요할 수 있습니다" else "HTTPS가 꺼져 있어 리다이렉트를 사용할 수 없습니다",
                 color = cs.onSurfaceVariant,
                 style = MaterialTheme.typography.labelSmall,
             )
@@ -1010,10 +1021,10 @@ private fun SettingSection(title: String, content: @Composable () -> Unit) {
 }
 
 @Composable
-private fun SwitchRow(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+private fun SwitchRow(label: String, checked: Boolean, enabled: Boolean = true, onChange: (Boolean) -> Unit) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Text(label, Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurface)
-        Switch(checked = checked, onCheckedChange = {
+        Switch(checked = checked, enabled = enabled, onCheckedChange = {
             DebugLogger.i("Settings", "$label → $it")
             onChange(it)
         })

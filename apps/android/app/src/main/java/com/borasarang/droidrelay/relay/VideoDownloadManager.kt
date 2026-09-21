@@ -31,16 +31,21 @@ class VideoDownloadManager(
 
     private val sessions = ConcurrentHashMap<String, FFmpegSession>()
     private val logBuffers = ConcurrentHashMap<String, StringBuilder>()
+    // 증분 세그먼트 카운터 — 매초 전체 로그 toString+정규식 제거용
+    private val segKeys = ConcurrentHashMap<String, MutableSet<String>>()
     private val progressFiles = ConcurrentHashMap<String, File>()
+    private val pollJobs = ConcurrentHashMap<String, kotlinx.coroutines.Job>()
     private val cancelRequested = ConcurrentHashMap.newKeySet<String>()
     @Volatile private var inited = false
     @Volatile private var scope: CoroutineScope? = null
 
+    @Synchronized
     private fun ensureScope(): CoroutineScope =
-        scope ?: CoroutineScope(SupervisorJob() + Dispatchers.IO).also { scope = it }
+        scope ?: CoroutineScope(SupervisorJob() + Dispatchers.Default).also { scope = it }
 
-    val workDir: File
-        get() = File(context.getExternalFilesDir(null), "downloads").apply { mkdirs() }
+    val workDir: File by lazy {
+        File(context.getExternalFilesDir(null), "downloads").apply { mkdirs() }
+    }
 
     fun init() {
         if (inited) return
@@ -50,13 +55,16 @@ class VideoDownloadManager(
     }
 
     private fun smokeTest() {
-        try {
-            val session = FFmpegKit.execute("-hide_banner -version")
-            val line = session.allLogsAsString.lines().firstOrNull { "ffmpeg version" in it }
-                ?.trim()?.take(80)
-            DebugLogger.i(TAG, "[FEATURE] FFmpeg 스모크 성공 — ${line ?: "버전 확인"}")
-        } catch (e: Throwable) {
-            DebugLogger.e(TAG, "FFmpeg 네이티브 로드 실패 (E-AND-VID-0201)", e)
+        // 블로킹 FFmpeg 실행을 백그라운드로 — 메인/호출 스레드 ANR 방지
+        ensureScope().launch(Dispatchers.IO) {
+            try {
+                val session = FFmpegKit.execute("-hide_banner -version")
+                val line = session.allLogsAsString.lines().firstOrNull { "ffmpeg version" in it }
+                    ?.trim()?.take(80)
+                DebugLogger.i(TAG, "[FEATURE] FFmpeg 스모크 성공 — ${line ?: "버전 확인"}")
+            } catch (e: Throwable) {
+                DebugLogger.e(TAG, "FFmpeg 네이티브 로드 실패 (E-AND-VID-0201)", e)
+            }
         }
     }
 
@@ -112,15 +120,30 @@ class VideoDownloadManager(
             add("-progress"); add(progressFile.absolutePath)
             addAll(argv)
         }
-        // HLS 세그먼트 진행 로그 수집용 버퍼 (보조 표시용 — 읽기 전용)
+        // HLS 세그먼트 진행 로그 수집용 버퍼 (보조 표시용 — 증분 distinct 카운트, 512KB cap)
         val logBuf = StringBuilder()
+        val keys = ConcurrentHashMap.newKeySet<String>()
+        segKeys[jobId] = keys
         val logCb = LogCallback { log ->
             if (log != null && log.message.isNotBlank()) {
-                synchronized(logBuf) { logBuf.append(log.message).append('\n') }
+                val msg = log.message
+                // 세그먼트 키는 증분 추출 — 폴링 시 전체 스캔 불필요
+                SEG_OPEN_RE.find(msg)?.let { m ->
+                    if (m.groupValues.size > 1) {
+                        val u = m.groupValues[1].substringBefore('?')
+                        if (u.isNotBlank()) keys.add(u)
+                    }
+                }
+                synchronized(logBuf) {
+                    if (logBuf.length < LOG_CAP) {
+                        logBuf.append(msg).append('\n')
+                    }
+                }
             }
         }
         val done = FFmpegSessionCompleteCallback { session ->
-            handleComplete(jobId, session, out)
+            // 콜백 스레드 장기 점유 방지 — IO로 오프로드
+            ensureScope().launch(Dispatchers.IO) { handleComplete(jobId, session, out) }
         }
         val session = FFmpegKit.executeWithArgumentsAsync(full.toTypedArray(), done, logCb, null)
         sessions[jobId] = session
@@ -130,7 +153,7 @@ class VideoDownloadManager(
 
     /** 출력 파일 크기 1초 폴링 + HLS 진행률 — 우선순위: -progress 재생시간 → 세그먼트 로그 → 파일 크기 */
     private fun pollProgress(jobId: String, session: FFmpegSession, out: File) {
-        ensureScope().launch {
+        val job = ensureScope().launch {
             var lastSize = 0L
             var lastTime = 0L
             while (true) {
@@ -153,12 +176,29 @@ class VideoDownloadManager(
                 delay(1_000L)
             }
         }
+        pollJobs[jobId] = job
+        job.invokeOnCompletion { pollJobs.remove(jobId) }
+    }
+
+    /** -progress 파일 꼬리 8KB만 읽어 마지막 out_time_us 파싱 — 전량 readText() 제거 */
+    private fun tailOutTimeUs(f: File): Long {
+        return runCatching {
+            val len = f.length()
+            if (len <= 0) return 0L
+            val take = minOf(len, 8192L).toInt()
+            val buf = ByteArray(take)
+            java.io.RandomAccessFile(f, "r").use { raf ->
+                raf.seek(len - take)
+                raf.readFully(buf)
+            }
+            parseOutTimeUs(String(buf, Charsets.UTF_8))
+        }.getOrDefault(0L)
     }
 
     /** 진행률 결정: -progress 파일의 out_time / 총재생시간(신뢰) → 세그먼트(불안정) → 파일크기/총용량 순 */
     private fun computeProgress(jobId: String, job: Job): Float {
         if (job.totalDurationMs > 0) {
-            val us = progressFiles[jobId]?.let { f -> runCatching { parseOutTimeUs(f.readText()) }.getOrDefault(0L) } ?: 0L
+            val us = progressFiles[jobId]?.let { tailOutTimeUs(it) } ?: 0L
             if (us > 0) return (us / 1000.0 / job.totalDurationMs).toFloat().coerceIn(0f, 1f)
         }
         if (job.segmentsTotal > 0) {
@@ -169,15 +209,14 @@ class VideoDownloadManager(
         return job.progress
     }
 
-    /** 축적된 FFmpeg 로그에서 현재 처리된 HLS 세그먼트 수를 파싱 (보조 표시용) */
+    /** 증분 distinct 카운트 반환 — 매초 전체 복사+정규식 제거 */
     private fun currentSegmentProgress(jobId: String, job: Job): Int {
         if (job.segmentsTotal <= 0) return 0
-        val buf = logBuffers[jobId]?.toString() ?: return 0
-        val done = synchronized(buf) { segmentsDoneFromLog(buf, job.segmentsTotal) }
-        return done
+        return (segKeys[jobId]?.size ?: 0).coerceIn(0, job.segmentsTotal.coerceAtLeast(0))
     }
 
     companion object {
+        private const val LOG_CAP = 512 * 1024
         // HLS 세그먼트 오픈 로그: [hls @ 0x..] Opening '0000.ts' for reading (버전/경로에 따라 Text/정규화 URI)
         private val SEG_OPEN_RE = Regex("""Opening\s+['"]([^'"]+\.ts)['"]\s+for\s+reading""", RegexOption.IGNORE_CASE)
 
@@ -229,8 +268,15 @@ class VideoDownloadManager(
 
     private fun handleComplete(jobId: String, session: FFmpegSession, out: File) {
         sessions.remove(jobId)
-        logBuffers.remove(jobId)
+        segKeys.remove(jobId)
+        pollJobs.remove(jobId)?.cancel()
         progressFiles.remove(jobId)?.delete()
+        val logTail: String = logBuffers.remove(jobId)?.let { buf ->
+            synchronized(buf) {
+                val s = buf.toString()
+                if (s.length > 20_000) s.takeLast(20_000) else s
+            }
+        } ?: ""
         val now = System.currentTimeMillis()
         val canceled = cancelRequested.remove(jobId) || ReturnCode.isCancel(session.returnCode)
         val size = runCatching { out.length() }.getOrDefault(0L)
@@ -256,17 +302,19 @@ class VideoDownloadManager(
                     )
                 }
                 DebugLogger.perf(TAG, "비디오 완료 id=$jobId '${out.name}' ${size / 1024}KB") {}
+                // 트래픽 통계 (v0.37)
+                TrafficLedger.addDownVideo(size)
                 // 보관함 자동 운영 (분류·쿼터, v0.19)
                 runCatching { StorageJanitor.onCompleted(context, java.io.File(StorageGuard.dlRoot, out.name)) }
             }
             else -> {
-                val log = runCatching { session.allLogsAsString }.getOrDefault("")
+                // 전량 allLogsAsString 복사 제거 — 링버퍼 꼬리(20KB)로 판정
                 val code = when {
-                    log.contains("encrypted", true) || log.contains("widevine", true) ||
-                        log.contains("cannot decrypt", true) -> "E-AND-VID-0300"
+                    logTail.contains("encrypted", true) || logTail.contains("widevine", true) ||
+                        logTail.contains("cannot decrypt", true) -> "E-AND-VID-0300"
                     else -> "E-AND-VID-0202"
                 }
-                val tail = log.lines().takeLast(6).joinToString(" ").take(220)
+                val tail = logTail.lines().takeLast(6).joinToString(" ").take(220)
                 out.delete()
                 val msg = when (code) {
                     "E-AND-VID-0300" -> "DRM(저작권 보호) 콘텐츠는 다운로드할 수 없습니다"
@@ -286,6 +334,7 @@ class VideoDownloadManager(
 
     fun cancel(jobId: String) {
         cancelRequested += jobId
+        pollJobs.remove(jobId)?.cancel()
         val s = sessions[jobId]
         if (s != null) {
             DebugLogger.w(TAG, "취소 요청 id=$jobId")
@@ -306,7 +355,9 @@ class VideoDownloadManager(
         sessions.forEach { (_, s) -> s.cancel() }
         sessions.clear()
         cancelRequested.clear()
-        scope?.cancel()
-        scope = null
+        // 공유 스코프는 유지 — 개별 poll Job만 취소 (전체 cancel 시 이후 잡 기동 불가 버그 방지)
+        pollJobs.values.forEach { it.cancel() }
+        pollJobs.clear()
+        segKeys.clear()
     }
 }

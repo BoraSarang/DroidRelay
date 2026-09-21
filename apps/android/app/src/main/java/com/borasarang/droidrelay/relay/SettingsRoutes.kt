@@ -27,6 +27,7 @@ internal fun Route.settingsRoutes(context: Context, serverRef: RelayServer) {
             put("ip", lanAddress() ?: JSONObject.NULL)
             put("port", serverRef.port)
             put("httpsPort", serverRef.effectiveHttpsPort)
+            put("httpsEnabled", serverRef.settings.httpsEnabled)
             put("version", appVersion)
             put("storageFree", stat?.availableBytes ?: JSONObject.NULL)
             put("storageTotal", stat?.totalBytes ?: JSONObject.NULL)
@@ -100,6 +101,70 @@ internal fun Route.settingsRoutes(context: Context, serverRef: RelayServer) {
         }
         // 엔진에 즉시 반영
         RelayApp.get(context).applySettings(repo.firstBlocking())
+        serverRef.settings = repo.firstBlocking()
+        call.respondText("""{"ok":true}""", ContentType.Application.Json)
+    }
+
+    // ── 서버 제어 (v0.36) — 포트·HTTPS 개별·자동시작 ──
+    get("/api/settings/server") {
+        val s = serverRef.settings
+        call.respondText(
+            JSONObject().apply {
+                put("port", s.port)
+                put("httpsPort", s.httpsPort)
+                put("httpsEnabled", s.httpsEnabled)
+                put("bootAutoStart", s.bootAutoStart)
+                put("launchAutoStart", s.launchAutoStart)
+                put("forceHttpsRedirect", s.forceHttpsRedirect)
+            }.toString(),
+            ContentType.Application.Json
+        )
+    }
+
+    post("/api/settings/server") {
+        val body = call.receiveText()
+        val json = try { JSONObject(body) } catch (_: Exception) { null }
+        val repo = SettingsRepository.get(context)
+        if (json == null) {
+            call.respondText("잘못된 요청", ContentType.Text.Plain, HttpStatusCode.BadRequest)
+            return@post
+        }
+        val cur = repo.firstBlocking()
+        // HTTPS 스위치 먼저 (포트 충돌 검사 기준이 달라짐)
+        if (json.has("httpsEnabled")) {
+            val on = json.optBoolean("httpsEnabled", cur.httpsEnabled)
+            repo.setHttpsEnabled(on)
+            if (!on) repo.setForceHttpsRedirect(false)
+        }
+        val httpsOn = repo.firstBlocking().httpsEnabled
+        json.optInt("port", -1).let { p ->
+            if (p in 1024..65535 && p != cur.port) {
+                if (!httpsOn || SettingsConstraints.validPorts(p, repo.firstBlocking().httpsPort)) {
+                    repo.setPort(p)
+                } else {
+                    call.respondText("""{"ok":false,"error":"E-AND-SRV-0111"}""", ContentType.Application.Json)
+                    return@post
+                }
+            }
+        }
+        json.optInt("httpsPort", -1).let { p ->
+            if (p in 1024..65535 && p != cur.httpsPort) {
+                if (!httpsOn) {
+                    repo.setHttpsPort(p)
+                } else if (SettingsConstraints.validPorts(repo.firstBlocking().port, p)) {
+                    repo.setHttpsPort(p)
+                } else {
+                    call.respondText("""{"ok":false,"error":"E-AND-SRV-0111"}""", ContentType.Application.Json)
+                    return@post
+                }
+            }
+        }
+        if (json.has("bootAutoStart")) json.optBoolean("bootAutoStart").let { repo.setBootAutoStart(it) }
+        if (json.has("launchAutoStart")) json.optBoolean("launchAutoStart").let { repo.setLaunchAutoStart(it) }
+        if (json.has("forceHttpsRedirect")) {
+            val v = json.optBoolean("forceHttpsRedirect", false)
+            repo.setForceHttpsRedirect(v && repo.firstBlocking().httpsEnabled)
+        }
         serverRef.settings = repo.firstBlocking()
         call.respondText("""{"ok":true}""", ContentType.Application.Json)
     }

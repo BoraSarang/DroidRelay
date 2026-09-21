@@ -29,6 +29,10 @@ class GuardDaemon(
     @Volatile private var cachedSettings: AppSettings? = null
     private var cachedAt = 0L
     private val cacheTtlMs = 5 * 60 * 1000L
+    // 센서 상태 캐시 — /api/guard/status 폴링마다 thermal/Binder/stat 반복 제거 (15s TTL)
+    @Volatile private var cachedStatus: GuardStatus? = null
+    @Volatile private var cachedStatusAt = 0L
+    private val statusTtlMs = 15_000L
 
     /** 현재 가드 상태 */
     @Volatile var isThrottled = false
@@ -67,6 +71,8 @@ class GuardDaemon(
      * 현재 센서 값 조회.
      */
     fun getStatus(): GuardStatus {
+        val now = System.currentTimeMillis()
+        cachedStatus?.let { if (now - cachedStatusAt < statusTtlMs) return it }
         val thermal = readThermal()
         val battery = readBattery()
         val storage = readStorage()
@@ -96,7 +102,10 @@ class GuardDaemon(
             throttled = throttled,
             guardEnabled = s.guardEnabled,
             reason = reason,
-        )
+        ).also {
+            cachedStatus = it
+            cachedStatusAt = now
+        }
     }
 
     private suspend fun checkGuard() {
