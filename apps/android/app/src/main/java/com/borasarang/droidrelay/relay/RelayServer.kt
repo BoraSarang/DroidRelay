@@ -457,6 +457,8 @@ private fun Application.relayRoutes(context: Context, serverRef: RelayServer) {
 
         debugRoutes(context, serverRef)
 
+        statsRoutes(context, serverRef)
+
         jobRoutes(context, serverRef)
 
         // ── Torrent API ──
@@ -535,6 +537,8 @@ internal suspend fun ApplicationCall.serveFile(
         "전송 종료 id=$jobId '${file.name}' ${fmt(length)} " +
             "(${if (range.partial) "206 부분" else "200 전체"}) 소요=${System.currentTimeMillis() - t0}ms",
     )
+    // 트래픽 통계 (v0.37) — 썸네일(내부 UI 에셋)은 제외
+    if (jobId != "thumb") TrafficLedger.addUpServe(length)
 }
 
 /** 재생용 Content-Type — 확장자 기반 (T-940) */

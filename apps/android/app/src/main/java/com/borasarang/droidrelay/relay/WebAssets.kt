@@ -258,6 +258,7 @@ object WebAssets {
     <div class="tab" onclick="switchTab('torrent')">토렌트</div>
     <div class="tab" onclick="switchTab('storage')">보관함</div>
     <div class="tab" onclick="switchTab('settings')">설정</div>
+    <div class="tab" onclick="switchTab('stats')">📊 통계</div>
   </div>
 
     <!-- 다운로드 탭 -->
@@ -800,6 +801,20 @@ object WebAssets {
           </div>
         </div>
       </div>
+    </div>
+  </div>
+
+    <!-- 통계 탭 -->
+  <div class="panel" id="panel-stats">
+    <div class="sg" style="margin-bottom:12px">
+      <div class="sh">📊 트래픽 통계</div>
+      <div class="sb">일별 · 이번달 · 누적 업/다운로드 (서빙+토렌트 업로드 포함)</div>
+      <div id="statsCards" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px"></div>
+    </div>
+    <div class="sg">
+      <div class="sh">최근 30일 일별 그래프 <span class="sb" style="display:inline">■다운 ■업</span></div>
+      <div id="statsChart" style="overflow-x:auto"></div>
+      <div class="sb" id="statsBreakdown" style="margin-top:8px"></div>
     </div>
   </div>
 </div>
@@ -1504,6 +1519,7 @@ function refresh(){
     if(window.__wantsRenderInfo){window.__wantsRenderInfo=false;updateInfoBar();}
   }).catch(function(){window.__guardStatus=null;window.__wantsRenderInfo=false;updateInfoBar();});
   if(curTab==='storage')refreshStorage();
+  if(curTab==='stats')refreshStats();
 }
 function add(){
   var raw=document.getElementById('url').value.trim();if(!raw)return;
@@ -1853,14 +1869,16 @@ function switchTab(t){
   curTab=t;
   if(trashMode&&t!=='storage')toggleTrash();
   document.querySelectorAll('.tab').forEach(function(el,i){
-    el.classList.toggle('active',(['dl','torrent','storage','settings'])[i]===t);
+    el.classList.toggle('active',(['dl','torrent','storage','settings','stats'])[i]===t);
   });
   document.getElementById('panel-dl').classList.toggle('active',t==='dl');
   document.getElementById('panel-torrent').classList.toggle('active',t==='torrent');
   document.getElementById('panel-storage').classList.toggle('active',t==='storage');
   document.getElementById('panel-settings').classList.toggle('active',t==='settings');
+  document.getElementById('panel-stats').classList.toggle('active',t==='stats');
   if(t==='storage')refreshStorage();
   if(t==='torrent')refreshSearchVisibility();
+  if(t==='stats')refreshStats();
   if(t==='settings'){loadSettings();loadSearchSettings();loadTrackerCount();}
 }
 
@@ -2432,6 +2450,41 @@ function saveServerSettings(){
   apiPost('/api/settings/server',body)
     .then(function(d){if(d.ok)showDlToast('서버 설정 저장됨');else alert('저장 실패: '+(d.error||''));})
     .catch(function(e){alert('저장 실패: '+e);});
+}
+
+// ── 트래픽 통계 (v0.37, 외부 CDN 없이 자체 SVG) ──
+function statsCard(title,b){
+  return '<div class="card" style="flex:1;min-width:150px"><div style="min-width:0;flex:1">'
+    +'<div class="name">'+title+'</div>'
+    +'<div class="file-meta">⬇ '+fmt(b.down)+' · ⬆ '+fmt(b.up)+'</div>'
+    +'<div class="file-meta" style="font-size:11px">받기 HTTP '+fmt(b.downHttp)+' · 비디오 '+fmt(b.downVideo)+' · 토렌트 '+fmt(b.downTorrent)+'</div>'
+    +'<div class="file-meta" style="font-size:11px">보내기 서빙 '+fmt(b.upServe)+' · 토렌트 '+fmt(b.upTorrent)+'</div>'
+    +'</div></div>';
+}
+function refreshStats(){
+  fetch('/api/stats/summary').then(function(r){return r.json();}).then(function(s){
+    document.getElementById('statsCards').innerHTML=statsCard('오늘',s.today)+statsCard('이번달',s.month)+statsCard('누적',s.total);
+  }).catch(function(){});
+  fetch('/api/stats/daily?days=30').then(function(r){return r.json();}).then(function(d){renderStatsChart(d.days||[]);}).catch(function(){});
+}
+function renderStatsChart(days){
+  var el=document.getElementById('statsChart');
+  if(!days.length){el.innerHTML='<div class="empty">기록 없음</div>';return;}
+  var max=1;days.forEach(function(d){max=Math.max(max,d.down,d.up);});
+  var W=days.length*24+44,H=170,base=H-22,bw=8;
+  var h='<svg width="'+W+'" height="'+H+'" style="display:block">';
+  days.forEach(function(d,i){
+    var x=40+i*24;
+    var dh=Math.round((d.down/max)*(base-8)),uh=Math.round((d.up/max)*(base-8));
+    h+='<rect x="'+x+'" y="'+(base-dh)+'" width="'+bw+'" height="'+dh+'" fill="var(--accent)"><title>'+esc(d.date)+' 받기 '+fmt(d.down)+'</title></rect>';
+    h+='<rect x="'+(x+bw+1)+'" y="'+(base-uh)+'" width="'+bw+'" height="'+uh+'" fill="#f96"><title>'+esc(d.date)+' 보내기 '+fmt(d.up)+'</title></rect>';
+    if(i%5===0||i===days.length-1)h+='<text x="'+x+'" y="'+(H-6)+'" font-size="9" fill="var(--dim)">'+esc(d.date.slice(5))+'</text>';
+  });
+  h+='<line x1="36" y1="8" x2="36" y2="'+base+'" stroke="var(--line)"/><line x1="36" y1="'+base+'" x2="'+W+'" y2="'+base+'" stroke="var(--line)"/>';
+  h+='<text x="2" y="16" font-size="9" fill="var(--dim)">'+fmt(max)+'</text></svg>';
+  el.innerHTML=h;
+  var t=days[days.length-1];
+  document.getElementById('statsBreakdown').textContent='최근일('+t.date+') 받기 HTTP '+fmt(t.downHttp)+' · 비디오 '+fmt(t.downVideo)+' · 토렌트 '+fmt(t.downTorrent)+' / 보내기 서빙 '+fmt(t.upServe)+' · 토렌트 '+fmt(t.upTorrent);
 }
 
 // ── 가드 데몬 설정 ──

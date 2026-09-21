@@ -58,6 +58,10 @@ class RelayService : Service() {
         // 설정 스키마 마이그레이션 (v0.22 Phase A) — 실패해도 기동 계속
         scope.launch(kotlinx.coroutines.Dispatchers.IO) { settingsRepo.ensureMigrated() }
 
+        // 트래픽 통계 원장 로드 (v0.37)
+        runCatching { TrafficLedger.init(applicationContext) }
+            .onFailure { DebugLogger.e(TAG, "트래픽 원장 로드 실패(무시하고 계속)", it) }
+
         // TorrentEngine 시작
         torrentEng.start()
         DebugLogger.i(TAG, "TorrentEngine 시작 완료")
@@ -342,6 +346,8 @@ class RelayService : Service() {
         DebugLogger.i(TAG, "서비스 종료 완료 — 영구 저장 실행")
         // 서버 상태 갱신
         SettingsRepository.get(applicationContext).updateServerState(ServerState(running = false, port = currentPort, httpsPort = currentHttpsPort, httpsEnabled = currentHttpsEnabled))
+        // 트래픽 통계 원장 저장 (v0.37)
+        runCatching { TrafficLedger.flush() }
         // 강제종료/서비스 종료 시 즉시 영구 저장 (T-111)
         val jobs = com.borasarang.droidrelay.relay.JobsRepository.all()
         JobsPersistence(applicationContext).save(jobs)

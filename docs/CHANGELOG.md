@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.37.0] - 2026-09-21 (미배포)
+
+### Added [android+web] — 트래픽 통계 (T-1030~T-1037)
+- `TrafficLedger` 일별 원장 (`traffic.json`, 400일 보관, 손상 시 .bak 후 빈 복구): down 3종(HTTP/비디오/토렌트) + up 2종(서빙/토렌트), 합산+개별 보관
+- 계측: HTTP 완료 실수신(이어받기 중복 제외)·비디오 완료·토렌트 누적 diff(첫 관측 베이스라인, 역행 리셋) / 서빙 실전송(serveFile·dl-file·dl-folder ZIP 계수, 썸네일 제외)
+- API: `GET /api/stats/summary`(오늘/이번달/누적) + `GET /api/stats/daily?days=30`
+- 웹 📊 통계 탭: 요약 3카드 + 최근 30일 자체 SVG 막대(다운/업) + 최근일 breakdown
+- 앱 통계 탭(5번째): 오늘/이번달/누적 카드 + 최근 7일 Canvas 미니바, 5초 갱신
+- 검증: unit 151건 GREEN(TrafficLedgerTest 12건) + ktlint 본문 GREEN(kts 파서 기존 이슈 제외) + assembleDebug+실기기 설치 성공(0.37.0/29)
+
 ## [0.36.0] - 2026-09-21 (미배포)
 
 ### Added [android+web] — 서버 제어 분리 + HTTPS 개별 (T-1020~T-1025)

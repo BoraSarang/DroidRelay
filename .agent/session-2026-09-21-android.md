@@ -35,3 +35,38 @@
 
 ## E2E
 - 실기기 E2E는 사용자 직접 진행 예정
+
+---
+
+## v0.37 트래픽 통계 세션 추가분 (T-1030~T-1037)
+
+## 무엇을
+- TrafficLedger 일별 원장 + 다운 3종/업 2종 계측 + /api/stats 2종 + 웹 📊 탭 + 앱 통계 탭(5번째)
+
+## 플랫폼
+- android (Kotlin+Compose+Ktor) + web (대시보드 통계 탭)
+
+## 빌드+PERF+CACHE
+- testDebugUnitTest 151건 GREEN (TrafficLedgerTest 12건 신규, failures 0)
+- ktlint 본문 GREEN (kts 파서 기존 이슈만)
+- assembleDebug + 실기기 설치 성공 (0.37.0/29 확인)
+- 원장 쓰기 완료·서빙 시 1회 + 10초 디바운스 → PERF 영향 없음
+
+## 남은TODO
+- 사용자 실기기 확인: 1MB 파일 up/down 후 오늘 집계 반영 + 재시작 후 누적 유지 + 웹 그래프/앱 탭目視
+- full/E2E full은 사용자 허락 후
+- v0.36 PR #4 + v0.37 커밋/PR (미실시)
+
+## 전달로그
+- Serve 전송 종료 로그 뒤 upServe 가산 (썸네일 제외)
+- 원장 손상 시 Persist 손상 파일 백업 + Traffic 빈 복구 로그 재사용
+
+## 문서갱신
+- PLAN_v0.37 신규, TODO T-1030~T-1037 ✅, CHANGELOG 0.37.0(미배포)
+- error_message_ko.json 변경 없음 (신규 에러코드 없음)
+
+## 큐상태
+- beads DB 없음 → TODO/CHANGELOG로만 관리
+
+## E2E
+- 실기기 E2E는 사용자 직접 진행 예정

@@ -256,6 +256,8 @@ class VideoDownloadManager(
                     )
                 }
                 DebugLogger.perf(TAG, "비디오 완료 id=$jobId '${out.name}' ${size / 1024}KB") {}
+                // 트래픽 통계 (v0.37)
+                TrafficLedger.addDownVideo(size)
                 // 보관함 자동 운영 (분류·쿼터, v0.19)
                 runCatching { StorageJanitor.onCompleted(context, java.io.File(StorageGuard.dlRoot, out.name)) }
             }
