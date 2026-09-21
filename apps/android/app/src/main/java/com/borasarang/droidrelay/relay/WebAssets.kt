@@ -663,6 +663,23 @@ object WebAssets {
               <div class="sb">이 수준 이상이면 다운로드 일시정지</div>
             </div>
           </div>
+          <div class="ti">서버 제어 (v0.36)</div>
+          <div class="ck">
+            <input type="checkbox" id="httpsEnabled" checked>
+            <label for="httpsEnabled">HTTPS 사용 (끔이면 HTTP 단일 동작)</label>
+          </div>
+          <div class="ck">
+            <input type="checkbox" id="bootAutoStart" checked>
+            <label for="bootAutoStart">재부팅 시 서버 자동 시작</label>
+          </div>
+          <div class="ck">
+            <input type="checkbox" id="launchAutoStart" checked>
+            <label for="launchAutoStart">앱 실행 시 서버 자동 시작</label>
+          </div>
+          <div class="sb">포트 변경은 앱 설정 화면에서 (충돌 시 E-AND-SRV-0111). 서버 시작/정지는 홈 ServerCard·위젯·퀵타일에서.</div>
+          <div class="rb" style="margin-top:8px">
+            <button class="ghost sm" onclick="saveServerSettings()">서버 설정 저장</button>
+          </div>
           <div class="ti">서버 안정성 (watchdog)</div>
           <div class="si">
             <div class="sl">헬스체크 주기 (초)</div>
@@ -1869,9 +1886,10 @@ function loadSettings(){
     fetch('/api/settings/tunnel').then(function(r){return r.json();}),
     fetch('/api/settings/guard').then(function(r){return r.json();}),
     fetch('/api/settings/mcp').then(function(r){return r.json();}),
-    fetch('/api/settings/schedule').then(function(r){return r.json();})
+    fetch('/api/settings/schedule').then(function(r){return r.json();}),
+    fetch('/api/settings/server').then(function(r){return r.json();})
   ]).then(function(res){
-    var sl=res[0], dl=res[1], tr=res[2], db=res[3], tn=res[4], gd=res[5], mc=res[6], sch=res[7];
+    var sl=res[0], dl=res[1], tr=res[2], db=res[3], tn=res[4], gd=res[5], mc=res[6], sch=res[7], sv=res[8];
     // 전역 속도 제한
     document.getElementById('dlSpeedEnabled').checked=sl.maxDownloadBps>0;
     document.getElementById('maxDownloadMbps').disabled=sl.maxDownloadBps<=0;
@@ -1928,6 +1946,10 @@ function loadSettings(){
     document.getElementById('guardStorageLabel').textContent=(gd.guardStorageLimit!=null?gd.guardStorageLimit:90)+'%';
     document.getElementById('watchdogIntervalSec').value=gd.watchdogIntervalSec!=null?gd.watchdogIntervalSec:60;
     document.getElementById('forceHttpsRedirect').checked=gd.forceHttpsRedirect===true;
+    // 서버 제어 (v0.36)
+    document.getElementById('httpsEnabled').checked=sv.httpsEnabled!==false;
+    document.getElementById('bootAutoStart').checked=sv.bootAutoStart!==false;
+    document.getElementById('launchAutoStart').checked=sv.launchAutoStart!==false;
     // MCP 설정
     document.getElementById('mcpPrivacyMode').checked=mc.mcpPrivacyMode===true;
     var disabled=mc.mcpToolsDisabled||[];
@@ -2398,6 +2420,18 @@ function checkTunnelStatus(){
       }
     })
     .catch(function(e){el.innerHTML='<span style="color:var(--err)">✗ 오류: '+esc(e.message)+'</span>';});
+}
+
+// ── 서버 제어 (v0.36) ──
+function saveServerSettings(){
+  var body={
+    httpsEnabled:document.getElementById('httpsEnabled').checked,
+    bootAutoStart:document.getElementById('bootAutoStart').checked,
+    launchAutoStart:document.getElementById('launchAutoStart').checked
+  };
+  apiPost('/api/settings/server',body)
+    .then(function(d){if(d.ok)showDlToast('서버 설정 저장됨');else alert('저장 실패: '+(d.error||''));})
+    .catch(function(e){alert('저장 실패: '+e);});
 }
 
 // ── 가드 데몬 설정 ──

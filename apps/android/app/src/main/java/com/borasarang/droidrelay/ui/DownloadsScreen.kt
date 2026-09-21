@@ -77,6 +77,7 @@ import com.borasarang.droidrelay.relay.Job
 import com.borasarang.droidrelay.relay.JobState
 import com.borasarang.droidrelay.relay.JobsRepository
 import com.borasarang.droidrelay.relay.RelayApp
+import com.borasarang.droidrelay.relay.RelayService
 import com.borasarang.droidrelay.relay.SettingsConstraints
 import com.borasarang.droidrelay.relay.SettingsRepository
 import com.borasarang.droidrelay.relay.StreamDetector
@@ -221,7 +222,8 @@ private fun ServerCard(httpPort: Int, httpsPort: Int, onCopyAddress: (String) ->
 
     Card(colors = CardDefaults.cardColors(containerColor = cs.surfaceContainerHigh), shape = MaterialTheme.shapes.large) {
         Column(Modifier.fillMaxWidth().padding(16.dp)) {
-            // 실행 상태 (T-1014)
+            // 실행 상태 (T-1014, v0.36 HTTPS 개별 표시 + 시작/정지)
+            val httpsPart = if (serverState.httpsEnabled) " · HTTPS ${serverState.httpsPort}" else " · HTTPS 끔"
             Row(verticalAlignment = Alignment.CenterVertically) {
                 val dotColor = when {
                     serverState.error != null -> cs.error
@@ -233,12 +235,24 @@ private fun ServerCard(httpPort: Int, httpsPort: Int, onCopyAddress: (String) ->
                 Text(
                     when {
                         serverState.error != null -> "에러: ${serverState.error}"
-                        serverState.running -> "HTTP ${serverState.port} · HTTPS ${serverState.httpsPort} 실행 중"
-                        else -> "HTTP ${serverState.port} · HTTPS ${serverState.httpsPort} 대기 중"
+                        serverState.running -> "HTTP ${serverState.port}$httpsPart 실행 중"
+                        else -> "HTTP ${serverState.port}$httpsPart 대기 중"
                     },
                     color = dotColor,
                     style = MaterialTheme.typography.labelMedium,
+                    modifier = Modifier.weight(1f),
                 )
+                if (serverState.running) {
+                    OutlinedButton(onClick = {
+                        RelayService.stop(ctx)
+                        DebugLogger.i("UI", "서버 정지 (ServerCard)")
+                    }) { Text("정지") }
+                } else {
+                    Button(onClick = {
+                        RelayService.start(ctx)
+                        DebugLogger.i("UI", "[FEATURE] 서버 시작 (ServerCard)")
+                    }) { Text("시작") }
+                }
             }
             Spacer(Modifier.height(12.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -260,8 +274,15 @@ private fun ServerCard(httpPort: Int, httpsPort: Int, onCopyAddress: (String) ->
                         style = MaterialTheme.typography.titleMedium.copy(textDecoration = TextDecoration.Underline),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.clickable(enabled = httpsAddr.isNotEmpty()) { openUrlInBrowser(ctx, httpsAddr) },
+                        modifier = Modifier.clickable(enabled = serverState.httpsEnabled && httpsAddr.isNotEmpty()) { openUrlInBrowser(ctx, httpsAddr) },
                     )
+                    if (!serverState.httpsEnabled) {
+                        Text(
+                            "HTTPS 끔 (설정에서 사용 가능)",
+                            color = cs.onSurfaceVariant,
+                            style = MaterialTheme.typography.labelSmall,
+                        )
+                    }
                     Spacer(Modifier.height(4.dp))
                     val nt = netType.value
                     Text(
@@ -273,12 +294,13 @@ private fun ServerCard(httpPort: Int, httpsPort: Int, onCopyAddress: (String) ->
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(onClick = {
                             val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                            val both = "$httpAddr\n$httpsAddr"
+                            val both = if (serverState.httpsEnabled) "$httpAddr\n$httpsAddr" else httpAddr
                             cm.setPrimaryClip(ClipData.newPlainText("DroidRelay", both))
                             onCopyAddress(both)
                         }) { Text("복사") }
                         OutlinedButton(onClick = {
-                            val shareText = "DroidRelay 접속 주소\n$httpAddr\n$httpsAddr\nQR 코드를 스캔하거나 위 주소를 브라우저에 입력하세요."
+                            val both = if (serverState.httpsEnabled) "$httpAddr\n$httpsAddr" else httpAddr
+                            val shareText = "DroidRelay 접속 주소\n$both\nQR 코드를 스캔하거나 위 주소를 브라우저에 입력하세요."
                             val sendIntent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
                                 type = "text/plain"
                                 putExtra(android.content.Intent.EXTRA_TEXT, shareText)

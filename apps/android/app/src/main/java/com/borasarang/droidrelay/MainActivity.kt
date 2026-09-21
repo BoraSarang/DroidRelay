@@ -67,8 +67,12 @@ class MainActivity : ComponentActivity() {
 
         val settingsRepo = SettingsRepository.get(this)
         val initial = settingsRepo.firstBlocking()
-        // MVP: 서버 미기동 방지 위해 항상 기동 (autoStart 토글 반영은 후속)
-        RelayService.start(this)
+        // v0.36: 앱 실행 자동시작 토글 존중 (OFF면 서버 미기동)
+        if (initial.launchAutoStart) {
+            RelayService.start(this)
+        } else {
+            DebugLogger.i("UI", "앱 실행 자동시작 꺼짐 — 서버 미기동")
+        }
         requestNotificationPermission()
         requestStoragePermission()
 

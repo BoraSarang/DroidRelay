@@ -24,6 +24,7 @@ data class ServerState(
     val running: Boolean = false,
     val port: Int = 8080,
     val httpsPort: Int = 8443,
+    val httpsEnabled: Boolean = true,
     val url: String? = null,
     val error: String? = null,
 )
@@ -36,6 +37,10 @@ data class AppSettings(
     val dynamicColor: Boolean = true,
     val concurrency: Int = SettingsConstraints.DEFAULT_CONCURRENCY,
     val autoStart: Boolean = true,
+    // v0.36 서버 제어 분리 — boot/launch 개별 + HTTPS 개별 (autoStart는 마이그레이션 소스로 유지)
+    val bootAutoStart: Boolean = true,
+    val launchAutoStart: Boolean = true,
+    val httpsEnabled: Boolean = true,
     val notifications: Boolean = true,
     val webAuthEnabled: Boolean = false,
     val webUser: String = "droidrelay",
@@ -120,6 +125,10 @@ class SettingsRepository(private val context: Context) {
         val DYNAMIC = booleanPreferencesKey("dynamic_color")
         val CONCURRENCY = intPreferencesKey("concurrency")
         val AUTO_START = booleanPreferencesKey("auto_start")
+        // v0.36 분리 키 (없으면 AUTO_START 레거시값으로 폴백)
+        val BOOT_AUTO_START = booleanPreferencesKey("boot_auto_start")
+        val LAUNCH_AUTO_START = booleanPreferencesKey("launch_auto_start")
+        val HTTPS_ENABLED = booleanPreferencesKey("https_enabled")
         val NOTIFICATIONS = booleanPreferencesKey("notifications")
         val WEB_AUTH = booleanPreferencesKey("web_auth_enabled")
         val WEB_USER = stringPreferencesKey("web_user")
@@ -192,6 +201,9 @@ class SettingsRepository(private val context: Context) {
             concurrency = (p[Keys.CONCURRENCY] ?: SettingsConstraints.DEFAULT_CONCURRENCY)
                 .coerceIn(SettingsConstraints.CONCURRENCY_MIN, SettingsConstraints.CONCURRENCY_MAX),
             autoStart = p[Keys.AUTO_START] ?: true,
+            bootAutoStart = SettingsMigration.resolveAutoStart(p[Keys.BOOT_AUTO_START], p[Keys.AUTO_START]),
+            launchAutoStart = SettingsMigration.resolveAutoStart(p[Keys.LAUNCH_AUTO_START], p[Keys.AUTO_START]),
+            httpsEnabled = p[Keys.HTTPS_ENABLED] ?: true,
             notifications = p[Keys.NOTIFICATIONS] ?: true,
             webAuthEnabled = p[Keys.WEB_AUTH] ?: false,
             webUser = p[Keys.WEB_USER] ?: "droidrelay",
@@ -282,7 +294,21 @@ class SettingsRepository(private val context: Context) {
         }
 
     suspend fun setAutoStart(b: Boolean) =
-        context.settingsDataStore.edit { it[Keys.AUTO_START] = b }
+        context.settingsDataStore.edit {
+            it[Keys.AUTO_START] = b
+            // 호환: 레거시 호출 시 분리값도 함께 갱신
+            it[Keys.BOOT_AUTO_START] = b
+            it[Keys.LAUNCH_AUTO_START] = b
+        }
+
+    suspend fun setBootAutoStart(b: Boolean) =
+        context.settingsDataStore.edit { it[Keys.BOOT_AUTO_START] = b }
+
+    suspend fun setLaunchAutoStart(b: Boolean) =
+        context.settingsDataStore.edit { it[Keys.LAUNCH_AUTO_START] = b }
+
+    suspend fun setHttpsEnabled(b: Boolean) =
+        context.settingsDataStore.edit { it[Keys.HTTPS_ENABLED] = b }
 
     suspend fun setNotifications(b: Boolean) =
         context.settingsDataStore.edit { it[Keys.NOTIFICATIONS] = b }

@@ -483,3 +483,14 @@ T-001~T-008 전부 완료 (커밋 7574486).
 | T-번호 | 내용 | 상태 |
 |--------|------|------|
 | T-1004 | 쿼리 response-content-disposition + 응답 Content-Disposition 헤더 우선, 폴백명 1회 교정 (UI 변경 없음) | ✅ |
+
+## v0.36 (2026-09-21) — 서버 제어 분리 + HTTPS 개별 (PLAN_v0.36_server-control_android.md)
+
+| T-번호 | 내용 | 상태 |
+|--------|------|------|
+| T-1020 | PLAN 작성 + TODO 등록 + 0.36.0/28 버전 | ✅ |
+| T-1021 | 설정 모델 분리(bootAutoStart/launchAutoStart/httpsEnabled)+마이그레이션+단위테스트 10건 | ✅ |
+| T-1022 | BootReceiver+MainActivity+RelayService(재시작 감시) 배선 | ✅ |
+| T-1023 | ServerCard 시작/정지 버튼+HTTPS 상태 분리 표시 | ✅ |
+| T-1024 | 설정 UI 3토글+웹 API(/api/info·/api/settings/server) 미러 | ✅ |
+| T-1025 | 검증(게이트+CHANGELOG+세션 로그) | ✅ |

@@ -202,7 +202,8 @@ class RelayServer(
         server = runCatching { createServer() }
             .onSuccess { s ->
                 s.start(wait = false)
-                DebugLogger.i("Server", "[FEATURE] HTTPS 포트 기동 완료 http://0.0.0.0:$port + https://0.0.0.0:$effectiveHttpsPort (LAN=${lanAddress() ?: "?"})")
+                val httpsPart = if (settings.httpsEnabled) " + https://0.0.0.0:$effectiveHttpsPort" else " (HTTPS 끔)"
+                DebugLogger.i("Server", "[FEATURE] HTTPS 포트 기동 완료 http://0.0.0.0:$port$httpsPart (LAN=${lanAddress() ?: "?"})")
             }
             .onFailure { e ->
                 DebugLogger.e("Server", "서버 기동 실패 E-SRV-NET-1421 ${e.message}")
@@ -248,11 +249,15 @@ class RelayServer(
         }
     }
 
-    /** HTTP + HTTPS(TLS) 이중 커넥터 생성. 인증서는 assets/certs/server.p12 (mkcert 로컬 CA 서명) */
+    /** HTTP + HTTPS(TLS) 이중 커넥터 생성. 인증서는 assets/certs/server.p12 (mkcert 로컬 CA 서명).
+     * v0.36: httpsEnabled=false면 HTTP 단일 커넥터만 (HTTPS 포트 미바인드). */
     private fun createServer(): EmbeddedServer<NettyApplicationEngine, NettyApplicationEngine.Configuration> {
-        val keystore = context.assets.open(KEY_STORE_ASSET).use { stream ->
-            KeyStore.getInstance("PKCS12").also { it.load(stream, KEY_STORE_PASSWORD.toCharArray()) }
-        }
+        val httpsOn = settings.httpsEnabled
+        val keystore = if (httpsOn) {
+            context.assets.open(KEY_STORE_ASSET).use { stream ->
+                KeyStore.getInstance("PKCS12").also { it.load(stream, KEY_STORE_PASSWORD.toCharArray()) }
+            }
+        } else null
         val httpPort = port
         val env = applicationEnvironment { }
         return embeddedServer(
@@ -263,9 +268,11 @@ class RelayServer(
                     this.port = httpPort
                     host = "0.0.0.0"
                 }
-                sslConnector(keystore, KEY_ALIAS, { KEY_STORE_PASSWORD.toCharArray() }, { KEY_STORE_PASSWORD.toCharArray() }) {
-                    this.port = effectiveHttpsPort
-                    host = "0.0.0.0"
+                if (httpsOn && keystore != null) {
+                    sslConnector(keystore, KEY_ALIAS, { KEY_STORE_PASSWORD.toCharArray() }, { KEY_STORE_PASSWORD.toCharArray() }) {
+                        this.port = effectiveHttpsPort
+                        host = "0.0.0.0"
+                    }
                 }
             },
             module = { relayRoutes(context, this@RelayServer) },
@@ -328,8 +335,8 @@ private fun Application.relayRoutes(context: Context, serverRef: RelayServer) {
         runCatching {
             val remoteHost = call.request.origin.remoteHost
             // forceHttpsRedirect=false(기본)면 LAN HTTP를 그대로 서빙(자체서명 인증서 미신뢰 브라우저 호환).
-            // true면 HTTPS로 강제 이동.
-            if (call.request.local.scheme != "https" && !isLocalHost(remoteHost) && s.forceHttpsRedirect) {
+            // true면 HTTPS로 강제 이동. HTTPS OFF(v0.36)면 리다이렉트 무의미 → 스킵.
+            if (call.request.local.scheme != "https" && !isLocalHost(remoteHost) && s.httpsEnabled && s.forceHttpsRedirect) {
                 // 리다이렉트 대상은 실제 클라이언트가 접근 가능한 LAN IP(핫스팟 우선)로 고정.
                 // call.request.local.localHost는 바인드 주소(0.0.0.0)나 VPN 인터페이스 IP를 줄 수 있어
                 // iPad 등이 접속 불가한 IP로 유도될 수 있음 → lanAddress() 우선, 실패 시 localHost 폴백.

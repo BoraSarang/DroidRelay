@@ -35,4 +35,7 @@ object SettingsMigration {
 
     /** 가드 열 임계 수리 — 50~70 */
     fun clampThermal(v: Int?): Int = (v ?: 50).coerceIn(50, 70)
+
+    /** v0.36 자동시작 분리 폴백 — 분리값이 없으면 레거시 auto_start(기본 true) 사용 */
+    fun resolveAutoStart(split: Boolean?, legacy: Boolean?): Boolean = split ?: legacy ?: true
 }
