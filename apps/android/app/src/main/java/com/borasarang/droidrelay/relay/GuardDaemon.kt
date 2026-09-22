@@ -186,7 +186,7 @@ class GuardDaemon(
      */
     private fun readStorage(): Int {
         return try {
-            val dir = File("/sdcard/Download/DroidRelay")
+            val dir = StorageGuard.dlRoot
             if (!dir.exists()) return 0
             val total = dir.totalSpace
             val free = dir.freeSpace

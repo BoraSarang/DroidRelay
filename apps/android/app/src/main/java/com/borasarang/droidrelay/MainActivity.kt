@@ -12,6 +12,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BarChart
@@ -43,6 +44,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.core.app.ActivityCompat
 import com.borasarang.droidrelay.relay.DebugLogger
 import com.borasarang.droidrelay.relay.RelayService
@@ -166,7 +168,7 @@ class MainActivity : ComponentActivity() {
     private fun handleOpenTab(intent: android.content.Intent?) {
         if (intent?.action != ACTION_OPEN_TAB) return
         val tab = intent.getIntExtra(EXTRA_TAB, -1)
-        if (tab in 0..3) {
+        if (tab in 0..4) {
             pendingOpenTab = tab
             DebugLogger.i("UI", "[FEATURE] 알림 탭 이동 tab=$tab")
         }
@@ -176,7 +178,7 @@ class MainActivity : ComponentActivity() {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RootApp() {
-    var tab by remember { mutableIntStateOf(0) }
+    var tab by rememberSaveable { mutableIntStateOf(0) }
     var showDebug by remember { mutableStateOf(false) }
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -291,7 +293,8 @@ fun RootApp() {
         Column(
             Modifier
                 .fillMaxSize()
-                .padding(inner),
+                .padding(inner)
+                .imePadding(),
         ) {
             when (tab) {
                 0 -> DownloadsScreen(

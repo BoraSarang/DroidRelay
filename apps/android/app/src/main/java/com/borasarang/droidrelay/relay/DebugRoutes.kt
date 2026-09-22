@@ -2,6 +2,7 @@ package com.borasarang.droidrelay.relay
 
 import android.content.Context
 import android.provider.Settings
+import com.borasarang.droidrelay.BuildConfig
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
@@ -61,8 +62,12 @@ internal fun Route.debugRoutes(context: Context, serverRef: RelayServer) {
         }
     }
 
-    // ── 디버그 API ──
+    // ── 디버그 API — 릴리즈 빌드에서는 차단 (시크릿·로그 노출 방지) ──
     get("/api/debug/logs") {
+        if (!BuildConfig.DEBUG) {
+            call.respondText("""{"error":"forbidden"}""", ContentType.Application.Json, HttpStatusCode.Forbidden)
+            return@get
+        }
         val level = call.request.queryParameters["level"]
         val tag = call.request.queryParameters["tag"]
         val limit = call.request.queryParameters["limit"]?.toIntOrNull() ?: 300
@@ -83,6 +88,10 @@ internal fun Route.debugRoutes(context: Context, serverRef: RelayServer) {
     }
 
     get("/api/debug/api-calls") {
+        if (!BuildConfig.DEBUG) {
+            call.respondText("""{"error":"forbidden"}""", ContentType.Application.Json, HttpStatusCode.Forbidden)
+            return@get
+        }
         val limit = call.request.queryParameters["limit"]?.toIntOrNull() ?: 100
         val lines = DebugLogger.apiLines().takeLast(limit)
         call.respondText(
@@ -96,6 +105,10 @@ internal fun Route.debugRoutes(context: Context, serverRef: RelayServer) {
     }
 
     get("/api/debug/status") {
+        if (!BuildConfig.DEBUG) {
+            call.respondText("""{"error":"forbidden"}""", ContentType.Application.Json, HttpStatusCode.Forbidden)
+            return@get
+        }
         call.respondText(
             JSONObject().apply {
                 put("enabled", DebugLogger.enabled)
@@ -116,6 +129,10 @@ internal fun Route.debugRoutes(context: Context, serverRef: RelayServer) {
     }
 
     get("/api/debug/bundle") {
+        if (!BuildConfig.DEBUG) {
+            call.respondText("""{"error":"forbidden"}""", ContentType.Application.Json, HttpStatusCode.Forbidden)
+            return@get
+        }
         try {
             DebugLogger.i("Debug", "[FEATURE] 진단번들 요청")
             val settings = runCatching { SettingsRepository.get(context).firstBlocking() }.getOrNull()
@@ -183,11 +200,19 @@ internal fun Route.debugRoutes(context: Context, serverRef: RelayServer) {
     }
 
     post("/api/debug/clear") {
+        if (!BuildConfig.DEBUG) {
+            call.respondText("""{"error":"forbidden"}""", ContentType.Application.Json, HttpStatusCode.Forbidden)
+            return@post
+        }
         DebugLogger.clear()
         call.respondText("""{"ok":true}""", ContentType.Application.Json)
     }
 
     get("/api/debug/overlay") {
+        if (!BuildConfig.DEBUG) {
+            call.respondText("""{"error":"forbidden"}""", ContentType.Application.Json, HttpStatusCode.Forbidden)
+            return@get
+        }
         val hasPermission = Settings.canDrawOverlays(context)
         call.respondText(
             JSONObject().apply {
@@ -198,6 +223,10 @@ internal fun Route.debugRoutes(context: Context, serverRef: RelayServer) {
     }
 
     post("/api/debug/overlay/toggle") {
+        if (!BuildConfig.DEBUG) {
+            call.respondText("""{"error":"forbidden"}""", ContentType.Application.Json, HttpStatusCode.Forbidden)
+            return@post
+        }
         val hasPermission = Settings.canDrawOverlays(context)
         if (!hasPermission) {
             call.respondText("""{"error":"권한 없음","running":false}""", ContentType.Application.Json)

@@ -54,9 +54,15 @@ class TunnelManager(private val context: Context) {
     /**
      * 터널 중지.
      */
+    @Volatile private var tunnelProcess: Process? = null
+
     fun stop() {
         isRunning = false
         currentUrl = null
+        tunnelProcess?.let { p ->
+            runCatching { p.destroy() }
+            tunnelProcess = null
+        }
         DebugLogger.i(TAG, "터널 중지")
     }
 
@@ -168,6 +174,7 @@ class TunnelManager(private val context: Context) {
                 "--url", "http://localhost:8080",
                 "--no-autoupdate",
             ))
+            tunnelProcess = process
 
             // 출력에서 URL 추출 (비동기)
             Thread {

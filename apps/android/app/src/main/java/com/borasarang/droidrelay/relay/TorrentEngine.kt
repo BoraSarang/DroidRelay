@@ -157,7 +157,7 @@ class TorrentEngine(
     @Volatile private var torrentMinSeedWaitSec: Int = 0
     @Volatile private var latestSeedRatio: Float = 2.0f
     @Volatile private var latestDhtEnabled: Boolean = true
-    @Volatile private var latestSavePath: String = "/sdcard/Download/DroidRelay"
+    @Volatile private var latestSavePath: String = StorageGuard.dlRoot.path
     /** id → 시더 부재 대기 시작 시각(ms). 0이면 미측정 */
     private val seedWaitSince = ConcurrentHashMap<String, Long>()
     private var lastPersistAt = 0L
@@ -185,7 +185,7 @@ class TorrentEngine(
                 latestSequentialDownload = s.torrentSequentialDownload
                 latestSeedRatio = s.torrentSeedRatio
                 latestDhtEnabled = s.torrentDhtEnabled
-                latestSavePath = s.torrentSavePath.ifBlank { "/sdcard/Download/DroidRelay" }
+                latestSavePath = s.torrentSavePath.ifBlank { StorageGuard.dlRoot.path }
                 DebugLogger.d(TAG, "설정 반영 업로드=${s.torrentUploadLimit}KB/s 다운로드=${s.torrentDownloadLimit}KB/s 시퀀셜=${s.torrentSequentialDownload} 비율=${s.torrentSeedRatio} DHT=${s.torrentDhtEnabled}")
                 applyRateLimits()
                 applySequentialToAll(s.torrentSequentialDownload)
@@ -197,7 +197,7 @@ class TorrentEngine(
     val saveDir: File
         get() = File(context.getExternalFilesDir(null), "torrents").apply { mkdirs() }
 
-    /** 보관함 경로 — 설정값 (기본 /sdcard/Download/DroidRelay, T-958) */
+    /** 보관함 경로 — 설정값 (기본 StorageGuard.dlRoot, T-958) */
     private val storageDir: File
         get() = File(latestSavePath).apply { mkdirs() }
 
@@ -680,7 +680,7 @@ val th = withGate { session?.find(Sha1Hash.parseHex(expectedHash)) }
             torrentMinSeedWaitSec = s.torrentMinSeedWaitSec
             latestSeedRatio = s.torrentSeedRatio
             latestDhtEnabled = s.torrentDhtEnabled
-            latestSavePath = s.torrentSavePath.ifBlank { "/sdcard/Download/DroidRelay" }
+            latestSavePath = s.torrentSavePath.ifBlank { StorageGuard.dlRoot.path }
             applyDhtEnabled(s.torrentDhtEnabled)
         }
     }

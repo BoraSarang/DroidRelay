@@ -227,7 +227,7 @@ object McpServer {
 
     private fun fileList(args: JSONObject): JSONArray {
         val subPath = args.optString("path", "")
-        val dlRoot = File("/sdcard/Download/DroidRelay")
+        val dlRoot = StorageGuard.dlRoot
         val dir = if (subPath.isNotBlank()) File(dlRoot, subPath) else dlRoot
 
         if (!dir.exists() || !dir.isDirectory) {
@@ -255,7 +255,7 @@ object McpServer {
         val path = args.optString("path", "")
         if (path.isBlank()) error("path 필요")
 
-        val dlRoot = File("/sdcard/Download/DroidRelay")
+        val dlRoot = StorageGuard.dlRoot
         val file = File(dlRoot, path)
         val canonical = file.canonicalFile
         if (!canonical.path.startsWith(dlRoot.canonicalPath)) error("경로 탈출 차단")

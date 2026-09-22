@@ -117,13 +117,30 @@ object RelayApp {
 
 /** LAN IP + 서브넷 판정 캐시 — 매 요청 NetworkInterface 열거 제거 (10s TTL) */
 private object NetCache {
+    class AuthPair(val expected: String, val guestExpected: String)
     @Volatile var lan: String? = null
     @Volatile var lanAt = 0L
     val subnet = ConcurrentHashMap<String, Pair<Long, Boolean>>()
     val favicon = ConcurrentHashMap<String, Pair<String, ByteArray>>()
     @Volatile var authKey = ""
-    @Volatile var authExpected = ""
-    @Volatile var guestExpected = ""
+    @Volatile var auth: AuthPair = AuthPair("", "")
+    private val authLock = Any()
+
+    fun authFor(key: String, user: String, password: String, guestPassword: String): AuthPair {
+        if (key == authKey) return auth
+        synchronized(authLock) {
+            if (key == authKey) return auth
+            val next = AuthPair(
+                expected = "Basic " + Base64.getEncoder()
+                    .encodeToString("$user:$password".toByteArray()),
+                guestExpected = "Basic " + Base64.getEncoder()
+                    .encodeToString("guest:$guestPassword".toByteArray()),
+            )
+            auth = next
+            authKey = key
+            return next
+        }
+    }
 }
 
 fun lanAddress(): String? {
@@ -416,17 +433,11 @@ private fun Application.relayRoutes(context: Context, serverRef: RelayServer) {
             // /s/ 공유 링크는 토큰 자체가 권한이라 인증 예외 (T-951)
             if (!reqPath.startsWith("/s/")) {
                 val auth = call.request.headers[HttpHeaders.Authorization] ?: ""
-                // 매 요청 Base64 2회 생성 제거 — 설정 변경 시만 재계산
+                // 매 요청 Base64 2회 생성 제거 — 설정 변경 시만 재계산 (원자화)
                 val key = "${s.webUser}\u0000${s.webPassword}\u0000${s.guestPassword}\u0000${s.guestEnabled}"
-                if (key != NetCache.authKey) {
-                    NetCache.authExpected = "Basic " + Base64.getEncoder()
-                        .encodeToString("${s.webUser}:${s.webPassword}".toByteArray())
-                    NetCache.guestExpected = "Basic " + Base64.getEncoder()
-                        .encodeToString("guest:${s.guestPassword}".toByteArray())
-                    NetCache.authKey = key
-                }
-                val expected = NetCache.authExpected
-                val guestExpected = NetCache.guestExpected
+                val pair = NetCache.authFor(key, s.webUser, s.webPassword, s.guestPassword)
+                val expected = pair.expected
+                val guestExpected = pair.guestExpected
                 val isGuest = s.guestEnabled && s.guestPassword.isNotEmpty() && auth == guestExpected
                 if (auth != expected && !isGuest) {
                     DebugLogger.w("Security", "인증 실패 from=$host ${call.request.path()} (E-AND-DOWN-1003)")

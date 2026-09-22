@@ -536,7 +536,7 @@ object WebAssets {
           <div class="sb" style="margin-top:4px">변경 시 토렌트 엔진 재시작 필요</div>
           <div class="ti">저장 경로</div>
           <div class="fp">
-            <input type="text" id="torrentSavePath" value="/sdcard/Download/DroidRelay">
+            <input type="text" id="torrentSavePath" value="${com.borasarang.droidrelay.relay.StorageGuard.dlRoot.path}">
             <button class="ghost sm" onclick="testPath()">테스트</button>
           </div>
           <div id="pathTestResult" class="sb"></div>
@@ -854,7 +854,7 @@ object WebAssets {
   </div>
 </div>
 <script>
-var BASE='/sdcard/Download/DroidRelay';
+var BASE='${com.borasarang.droidrelay.relay.StorageGuard.dlRoot.path}';
 var curPath='';
 var selItem=null;
 var curTab='dl';
@@ -1967,7 +1967,7 @@ function loadSettings(){
     document.getElementById('torrentSequentialDownload').checked=tr.torrentSequentialDownload===true;
     document.getElementById('torrentTrackerSync').checked=tr.torrentTrackerSync!==false;
     document.getElementById('torrentListenPort').value=tr.torrentListenPort!=null?tr.torrentListenPort:6881;
-    document.getElementById('torrentSavePath').value=tr.torrentSavePath||'/sdcard/Download/DroidRelay';
+    document.getElementById('torrentSavePath').value=tr.torrentSavePath||'${com.borasarang.droidrelay.relay.StorageGuard.dlRoot.path}';
     document.getElementById('torrentMinSeedWaitSec').value=tr.torrentMinSeedWaitSec!=null?tr.torrentMinSeedWaitSec:0;
     document.getElementById('pathTestResult').textContent='';
     // Debrid 설정

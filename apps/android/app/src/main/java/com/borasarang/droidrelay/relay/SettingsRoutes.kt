@@ -321,7 +321,7 @@ internal fun Route.settingsRoutes(context: Context, serverRef: RelayServer) {
                 repo.setTorrentDhtEnabled(true)
                 repo.setTorrentPexEnabled(true)
                 repo.setTorrentListenPort(SettingsConstraints.randomEphemeralPort())
-                repo.setTorrentSavePath("/sdcard/Download/DroidRelay")
+                repo.setTorrentSavePath(StorageGuard.dlRoot.path)
                 repo.setTorrentTrackerSync(true)
                 repo.setSearchEnabled(false)
                 repo.setSearchUrl("")
@@ -344,7 +344,7 @@ internal fun Route.settingsRoutes(context: Context, serverRef: RelayServer) {
                 repo.setTorrentPexEnabled(true)
                 repo.setTorrentTrackerSync(true)
                 repo.setTorrentListenPort(SettingsConstraints.randomEphemeralPort())
-                repo.setTorrentSavePath("/sdcard/Download/DroidRelay")
+                repo.setTorrentSavePath(StorageGuard.dlRoot.path)
                 repo.setSearchEnabled(false)
                 repo.setSearchUrl("")
                 repo.setSearchApiKey("")
@@ -598,7 +598,7 @@ internal fun Route.settingsRoutes(context: Context, serverRef: RelayServer) {
         val batteryManager = ctx.getSystemService(android.content.Context.BATTERY_SERVICE) as? android.os.BatteryManager
         val batteryLevel = batteryManager?.getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY) ?: -1
 
-        val storageDir = java.io.File("/sdcard/Download/DroidRelay")
+        val storageDir = StorageGuard.dlRoot
         val storageUsed = if (storageDir.exists()) {
             val total = storageDir.totalSpace
             val free = storageDir.freeSpace

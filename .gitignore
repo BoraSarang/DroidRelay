@@ -19,5 +19,10 @@ keystore.properties
 # 보안 — HTTPS 자체서명 키스토어 비밀번호 (절대 커밋 금지)
 tls.properties
 
+# 보안 — TLS 재생성 산출물 (server.p12는 앱 assets 번들로 추적 유지)
+*.pem
+*.key
+*.p12.tmp
+
 # 스크린샷 — 개발 용도 (저장소 제외)
 docs/screenshots/

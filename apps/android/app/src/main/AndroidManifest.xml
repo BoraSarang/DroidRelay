@@ -3,8 +3,6 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
-    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
@@ -24,6 +22,7 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.DroidRelay"
         android:requestLegacyExternalStorage="true"
+        android:networkSecurityConfig="@xml/network_security_config"
         android:usesCleartextTraffic="true">
 
         <activity

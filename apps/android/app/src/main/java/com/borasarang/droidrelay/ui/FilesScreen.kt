@@ -117,7 +117,7 @@ private fun shareZip(context: android.content.Context, zip: File) {
     context.startActivity(android.content.Intent.createChooser(send, "폴더 ZIP 공유"))
 }
 
-private val DL_ROOT = File("/sdcard/Download/DroidRelay")
+private val DL_ROOT = com.borasarang.droidrelay.relay.StorageGuard.dlRoot
 
 @Composable
 fun FilesScreen(onShowSnack: (String) -> Unit = {}) {
@@ -260,7 +260,7 @@ fun FilesScreen(onShowSnack: (String) -> Unit = {}) {
                         }
                         // 이름 변경
                         IconButton(onClick = { renameTarget.value = item; renameText.value = item.name }) {
-                            Icon(Icons.Filled.Edit, "이름변경", tint = cs.onSurfaceVariant, modifier = Modifier.size(20.dp))
+                            Icon(Icons.Filled.Edit, "이름변경", tint = cs.onSurfaceVariant, modifier = Modifier.size(24.dp))
                         }
                         // 폴더 ZIP 공유 (T-938 — 서버 /dl-folder와 동일 level 0 패스스루)
                         if (item.isDir) {
@@ -277,18 +277,18 @@ fun FilesScreen(onShowSnack: (String) -> Unit = {}) {
                                         }
                                 }
                             }) {
-                                Icon(Icons.Filled.Share, "폴더 ZIP 공유", tint = cs.onSurfaceVariant, modifier = Modifier.size(20.dp))
+                                Icon(Icons.Filled.Share, "폴더 ZIP 공유", tint = cs.onSurfaceVariant, modifier = Modifier.size(24.dp))
                             }
                         }
                         // 잘라내기 (파일만)
                         if (!item.isDir) {
                             IconButton(onClick = { cutItem.value = item; toast("${item.name} 잘라냄") }) {
-                                Icon(Icons.Filled.ContentCut, "잘라내기", tint = cs.onSurfaceVariant, modifier = Modifier.size(20.dp))
+                                Icon(Icons.Filled.ContentCut, "잘라내기", tint = cs.onSurfaceVariant, modifier = Modifier.size(24.dp))
                             }
                         }
                         // 삭제
                         IconButton(onClick = { deleteTarget.value = item }) {
-                            Icon(Icons.Filled.Delete, "삭제", tint = cs.error, modifier = Modifier.size(20.dp))
+                            Icon(Icons.Filled.Delete, "삭제", tint = cs.error, modifier = Modifier.size(24.dp))
                         }
                     }
                 }

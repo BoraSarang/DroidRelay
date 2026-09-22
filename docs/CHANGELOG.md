@@ -1,5 +1,35 @@
 # Changelog
 
+## [Unreleased] — 종합 정리 (버그·보안·UI)
+
+### Fixed
+- `StorageGuard.storageFile` 경로 탈출 가드 — `DroidRelayEvil` 같은 접두사 폴더 통과 가능했던 `startsWith` 구분자 미검사 수정
+- `RelayServer` NetCache 인증캐시 3필드 비원자 갱신 → `authFor()` synchronized 원자화 (동시 요청 시 stale Basic 헤더 비교 레이스)
+- `RelayService.onDestroy`에 `tunnelManager?.stop()` 미호출 → cloudflared 좀비 프로세스 누수 수정
+- `TunnelManager.stop()` cloudflared `Process` 참조 보관·`destroy()` 호출
+- `SettingsScreen` `MainScope().launch` 66곳 → 컴포지션 범위 스코프 (구독 누수)
+- 터치 타깃 48dp 미만 개선 (Torrent/Files 순서 화살표·아이콘 버튼)
+- 다운로드 QR 확대 오버레이 BackHandler 추가
+- `build.gradle.kts` `ndk abiFilters` 중복 블록 정리 → `defaultConfig` 내 위치 수정
+- `.gitignore` TLS 패턴 3중복 블록 정리
+- `MainActivity` 중복 `rememberSaveable` import 제거
+- `DownloadEngine` 좀비 RUNNING 복원 → QUEUED 강등, cancel() 레이스 4건
+- `JobRoutes` `/file/{id}` 보관함 폴백 + 404 처리
+- `SettingsScreen` `scope` 미참조/충돌 (`resetSettings`, `TrackerProbeRow`, `SpeedScheduleSection` 로컬 scope 추가)
+- `/sdcard/Download/DroidRelay` 하드코드 → `StorageGuard.dlRoot` 상수화 (7개 파일)
+- `network_security_config.xml` 중복 12줄 정리
+
+### Security
+- `network_security_config.xml` 신설 — LAN 사설망만 cleartext 허용 (base는 차단)
+- 미사용 권한 제거: `ACCESS_FINE_LOCATION`, `READ_PHONE_STATE`
+- `/api/debug/*` 7종 릴리즈 빌드에서 403 게이트 (`BuildConfig.DEBUG`)
+- `assets/certs/README.md` 평문 비밀번호 제거 (환경변수 방식)
+
+### Changed
+- README APK 버전 0.35.0 → 0.38.0
+- TODO 미구현 체크박스 3건 구현 완료 반영
+- `build.gradle.kts` `import`를 `plugins` 블록 위로 이동 (ktlint 파싱 수정)
+
 ## [0.38.0] - 2026-09-22 (미배포)
 
 ### Fixed [web] — 통계 3열 깨짐 + 메뉴 클릭 불능

@@ -23,9 +23,14 @@ if [ -z "$CUR_CODE" ] || [ -z "$CUR_NAME" ]; then
 fi
 NEW_CODE="${2:-$((CUR_CODE + 1))}"
 
-# macOS/BSD sed 호환 (백업 없이 직접 교체)
-sed -i '' "s/^versionCode=.*/versionCode=$NEW_CODE/" "$PROPS"
-sed -i '' "s/^versionName=.*/versionName=$NEW_NAME/" "$PROPS"
+# macOS/BSD sed 호환 (백업 없이 직접 교체) — GNU sed도 동작하도록 -i 분기
+if sed --version >/dev/null 2>&1; then
+    sed -i "s/^versionCode=.*/versionCode=$NEW_CODE/" "$PROPS"
+    sed -i "s/^versionName=.*/versionName=$NEW_NAME/" "$PROPS"
+else
+    sed -i '' "s/^versionCode=.*/versionCode=$NEW_CODE/" "$PROPS"
+    sed -i '' "s/^versionName=.*/versionName=$NEW_NAME/" "$PROPS"
+fi
 
 echo "✅ $CUR_NAME($CUR_CODE) → $NEW_NAME($NEW_CODE)"
 echo "다음: docs/CHANGELOG.md 헤더 추가 → ./build_and_run.sh test android → 커밋·태그(v$NEW_NAME)·gh release (수동)"

@@ -229,7 +229,11 @@ internal fun Route.jobRoutes(context: Context, serverRef: RelayServer) {
     get("/file/{id}") {
         val id = call.parameters["id"]!!
         val job = JobsRepository.get(id)
-        val file = job?.let { RelayApp.get(context).doneFile(it) }
+        // 완료 후 앱 전용 원본은 MediaStore로 게시 후 삭제됨 → 보관함 경로 폴백
+        val file = job?.let { j ->
+            val appFile = RelayApp.get(context).doneFile(j)
+            if (appFile.exists()) appFile else StorageGuard.storageFile(j.filename)?.takeIf { it.exists() }
+        }
         when {
             job == null || file == null ->
                 call.respondText("404 없음", ContentType.Text.Plain, HttpStatusCode.NotFound)
@@ -239,6 +243,8 @@ internal fun Route.jobRoutes(context: Context, serverRef: RelayServer) {
                     ContentType.Text.Plain,
                     HttpStatusCode.Conflict,
                 )
+            !file.exists() ->
+                call.respondText("파일이 없습니다", ContentType.Text.Plain, HttpStatusCode.NotFound)
             else -> {
                 DebugLogger.d(
                     "Http",

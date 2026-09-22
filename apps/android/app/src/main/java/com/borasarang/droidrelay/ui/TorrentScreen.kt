@@ -305,13 +305,13 @@ private fun TorrentItem(
         Column(Modifier.fillMaxWidth().padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(
-                    modifier = Modifier.width(28.dp),
+                    modifier = Modifier.width(40.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
-                    IconButton(onClick = onMoveUp, modifier = Modifier.size(28.dp)) {
+                    IconButton(onClick = onMoveUp, modifier = Modifier.size(40.dp)) {
                         Icon(Icons.Filled.ArrowDropUp, "위로", modifier = Modifier.size(16.dp))
                     }
-                    IconButton(onClick = onMoveDown, modifier = Modifier.size(28.dp)) {
+                    IconButton(onClick = onMoveDown, modifier = Modifier.size(40.dp)) {
                         Icon(Icons.Filled.ArrowDropDown, "아래로", modifier = Modifier.size(16.dp))
                     }
                 }

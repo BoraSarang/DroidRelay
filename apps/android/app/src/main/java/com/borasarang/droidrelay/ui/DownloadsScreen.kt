@@ -103,6 +103,7 @@ fun DownloadsScreen(onCopyAddress: (String) -> Unit) {
     val qr = remember(httpPort) { qrBitmap("http://${lanAddress()}:$httpPort") }
     var qrFull by remember { mutableStateOf(false) }
     val qrScale by animateFloatAsState(if (qrFull) 1f else 0.85f, animationSpec = tween(180), label = "qrScale")
+    androidx.activity.compose.BackHandler(enabled = qrFull) { qrFull = false }
 
     Box(Modifier.fillMaxSize()) {
         LazyColumn(
@@ -608,18 +609,18 @@ private fun JobCard(job: Job) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 // 좌측 순서 변경 화살표 (고정폭)
                 Column(
-                    modifier = Modifier.width(28.dp),
+                    modifier = Modifier.width(40.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     IconButton(
                         onClick = { engine.reorder(job.id, -1) },
-                        modifier = Modifier.size(28.dp),
+                        modifier = Modifier.size(40.dp),
                     ) {
                         Icon(Icons.Filled.ArrowDropUp, "위로", tint = cs.onSurfaceVariant, modifier = Modifier.size(16.dp))
                     }
                     IconButton(
                         onClick = { engine.reorder(job.id, 1) },
-                        modifier = Modifier.size(28.dp),
+                        modifier = Modifier.size(40.dp),
                     ) {
                         Icon(Icons.Filled.ArrowDropDown, "아래로", tint = cs.onSurfaceVariant, modifier = Modifier.size(16.dp))
                     }

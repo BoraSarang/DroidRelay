@@ -26,7 +26,8 @@ class RelayService : Service() {
 
     private val TAG = "Service"
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    private var server: RelayServer? = null
+    @Volatile private var server: RelayServer? = null
+    private val serverLock = Any()
     private var currentPort: Int = -1
     private var currentHttpsPort: Int = -1
     private var currentHttpsEnabled: Boolean = true
@@ -44,9 +45,10 @@ class RelayService : Service() {
     override fun onCreate() {
         super.onCreate()
         DebugLogger.i(TAG, "서비스 생성 시작")
+        // 채널 생성이 최초 알림 게시보다 앞서야 Android 8+에서 무시되지 않음
+        createChannel()
         // FGS 승격을 가장 먼저 시도 — startForegroundService fallback 경로의 5초 의무 창 확보
         startInForeground()
-        createChannel()
 
         val settingsRepo = SettingsRepository.get(applicationContext)
         val engine = RelayApp.get(applicationContext)
@@ -94,8 +96,13 @@ class RelayService : Service() {
                     }
                 }
             } else {
-                // 대기 중인 다운로드 재개
+                // 가드가 pause한 잡(PAUSED)과 실패 잡을 재개 — retryFailed만으로는 일시정지가 풀리지 않음
                 engine.retryFailed()
+                JobsRepository.jobs.value.forEach { j ->
+                    if (j.state == JobState.PAUSED) {
+                        engine.resume(j.id)
+                    }
+                }
             }
         }
 
@@ -130,27 +137,33 @@ class RelayService : Service() {
                 currentHttpsPort = s.httpsPort
                 currentHttpsEnabled = s.httpsEnabled
                 if (server == null) {
-                    try {
-                        server = RelayServer(applicationContext, s.port, s.httpsPort).also { it.updateSettings(s); it.start() }
-                        val url = lanAddress()?.let { "http://$it:${s.port}" }
-                        settingsRepo.updateServerState(ServerState(running = true, port = s.port, httpsPort = s.httpsPort, httpsEnabled = s.httpsEnabled, url = url))
-                    } catch (e: Exception) {
-                        DebugLogger.e(TAG, "서버 기동 실패: ${e.message}", e)
-                        settingsRepo.updateServerState(ServerState(running = false, port = s.port, httpsPort = s.httpsPort, httpsEnabled = s.httpsEnabled, error = "서버 기동 실패: ${e.message}"))
+                    synchronized(serverLock) {
+                        if (server == null) {
+                            try {
+                                server = RelayServer(applicationContext, s.port, s.httpsPort).also { it.updateSettings(s); it.start() }
+                                val url = lanAddress()?.let { "http://$it:${s.port}" }
+                                settingsRepo.updateServerState(ServerState(running = true, port = s.port, httpsPort = s.httpsPort, httpsEnabled = s.httpsEnabled, url = url))
+                            } catch (e: Exception) {
+                                DebugLogger.e(TAG, "서버 기동 실패: ${e.message}", e)
+                                settingsRepo.updateServerState(ServerState(running = false, port = s.port, httpsPort = s.httpsPort, httpsEnabled = s.httpsEnabled, error = "서버 기동 실패: ${e.message}"))
+                            }
+                        }
                     }
                     lastPorts = Triple(s.port, s.httpsPort, s.httpsEnabled)
                 } else {
                     server?.updateSettings(s)
                     if (s.port != lastPorts.first || s.httpsPort != lastPorts.second || s.httpsEnabled != lastPorts.third) {
                         DebugLogger.i(TAG, "[FEATURE] HTTPS 설정 변경 감지 ${lastPorts.first}/${lastPorts.second}/${lastPorts.third} → ${s.port}/${s.httpsPort}/${s.httpsEnabled} — 서버 재시작")
-                        server?.stop()
-                        try {
-                            server = RelayServer(applicationContext, s.port, s.httpsPort).also { it.updateSettings(s); it.start() }
-                            val url = lanAddress()?.let { "http://$it:${s.port}" }
-                            settingsRepo.updateServerState(ServerState(running = true, port = s.port, httpsPort = s.httpsPort, httpsEnabled = s.httpsEnabled, url = url))
-                        } catch (e: Exception) {
-                            DebugLogger.e(TAG, "서버 재시작 실패: ${e.message}", e)
-                            settingsRepo.updateServerState(ServerState(running = false, port = s.port, httpsPort = s.httpsPort, httpsEnabled = s.httpsEnabled, error = "서버 재시작 실패: ${e.message}"))
+                        synchronized(serverLock) {
+                            server?.stop()
+                            try {
+                                server = RelayServer(applicationContext, s.port, s.httpsPort).also { it.updateSettings(s); it.start() }
+                                val url = lanAddress()?.let { "http://$it:${s.port}" }
+                                settingsRepo.updateServerState(ServerState(running = true, port = s.port, httpsPort = s.httpsPort, httpsEnabled = s.httpsEnabled, url = url))
+                            } catch (e: Exception) {
+                                DebugLogger.e(TAG, "서버 재시작 실패: ${e.message}", e)
+                                settingsRepo.updateServerState(ServerState(running = false, port = s.port, httpsPort = s.httpsPort, httpsEnabled = s.httpsEnabled, error = "서버 재시작 실패: ${e.message}"))
+                            }
                         }
                         lastPorts = Triple(s.port, s.httpsPort, s.httpsEnabled)
                         updateRunningNotification(s.port)
@@ -178,10 +191,14 @@ class RelayService : Service() {
                         DebugLogger.w(TAG, "watchdog: 서버가 없음 → 기동 시도")
                         healthyCount = 0
                         runCatching {
-                            val s2 = settingsRepo.firstBlocking()
-                            server = RelayServer(applicationContext, s2.port, s2.httpsPort).also { it.updateSettings(s2); it.start() }
-                            val url = lanAddress()?.let { "http://$it:${s2.port}" }
-                            settingsRepo.updateServerState(ServerState(running = true, port = s2.port, httpsPort = s2.httpsPort, httpsEnabled = s2.httpsEnabled, url = url))
+                            synchronized(serverLock) {
+                                if (server == null) {
+                                    val s2 = settingsRepo.firstBlocking()
+                                    server = RelayServer(applicationContext, s2.port, s2.httpsPort).also { it.updateSettings(s2); it.start() }
+                                    val url = lanAddress()?.let { "http://$it:${s2.port}" }
+                                    settingsRepo.updateServerState(ServerState(running = true, port = s2.port, httpsPort = s2.httpsPort, httpsEnabled = s2.httpsEnabled, url = url))
+                                }
+                            }
                         }.onFailure { e ->
                             DebugLogger.e(TAG, "watchdog 서버 기동 실패: ${e.message}")
                         }
@@ -372,6 +389,8 @@ class RelayService : Service() {
         }
         networkMonitor?.unregister()
         networkMonitor = null
+        tunnelManager?.stop()
+        tunnelManager = null
         rssManager?.stop()
         rssManager = null
         guardDaemon?.stop()
