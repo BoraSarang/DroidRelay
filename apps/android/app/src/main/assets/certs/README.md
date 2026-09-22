@@ -9,8 +9,10 @@
 # 1) 인증서 생성 (새 IP 포함)
 mkcert -key-file key.pem -cert-file cert.pem 10.64.228.42 localhost 127.0.0.1 ::1
 
-# 2) PKCS12 변환 (alias=relay, password=droidrelay01 — RelayServer.kt 상수와 일치)
-openssl pkcs12 -export -inkey key.pem -in cert.pem -out server.p12 -name relay -password pass:droidrelay01
+# 2) PKCS12 변환 (alias=relay)
+#    비밀번호는 앱에 하드코딩하지 말고 apps/android/tls.properties 의
+#    tlsKeystorePassword 값 사용 (gitignore 대상, 절대 커밋 금지)
+read -rs TLS_PW && openssl pkcs12 -export -inkey key.pem -in cert.pem -out server.p12 -name relay -password "pass:$TLS_PW"
 
 # 3) assets에 교체 후 재빌드
 cp server.p12 apps/android/app/src/main/assets/certs/server.p12

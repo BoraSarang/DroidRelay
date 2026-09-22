@@ -1,5 +1,5 @@
 #!/bin/bash
-# usage: ./build_and_run.sh [debug|test|lint|clean|a11y]
+# usage: ./build_and_run.sh [debug|test|lint|clean|a11y] [android|macos]
 # AGENTS.md 9장 빌드 디스패처 — DroidRelay Android
 set -e
 CMD="${1:-debug}"
@@ -49,7 +49,7 @@ case "$CMD" in
     echo "✅ a11y 덤프 완료"
     ;;
   *)
-    echo "usage: ./build_and_run.sh [debug|test|lint|clean|a11y]"
+    echo "usage: ./build_and_run.sh [debug|test|lint|clean|a11y] [android|macos]"
     exit 1
     ;;
 esac

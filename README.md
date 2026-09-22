@@ -39,7 +39,7 @@ DroidRelay는 Android 기기 안에서 동작하는 네이티브(Kotlin + Jetpac
 최신 서명 릴리즈 APK를 [Releases](https://github.com/BoraSarang/DroidRelay/releases)에서 받아 폰에 설치합니다.
 
 ```bash
-adb install -r droidrelay-v0.35.0.apk
+adb install -r droidrelay-v0.38.0.apk
 ```
 
 ### 2. 실행

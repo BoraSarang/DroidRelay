@@ -109,6 +109,11 @@ class DownloadEngine(
             if (job.state == JobState.QUEUED) {
                 DebugLogger.i(TAG, "복원 → 재개 큐 진입 id=${job.id} '${job.filename}'")
                 pending.add(job.id)
+            } else if (job.state == JobState.RUNNING) {
+                // 크래시 이력 RUNNING 좀비 → QUEUED 강등 후 재개
+                DebugLogger.i(TAG, "복원 → RUNNING 좀비 강등 재개 id=${job.id} '${job.filename}'")
+                JobsRepository.update(job.id) { it.copy(state = JobState.QUEUED, speedBps = 0L) }
+                pending.add(job.id)
             }
         }
         tryStart()
@@ -160,7 +165,11 @@ class DownloadEngine(
         }
         if (job.state == JobState.DONE) return
         pending.remove(id)
-        JobsRepository.update(id) { it.copy(state = JobState.CANCELED, speedBps = 0L) }
+        // 취소 시점 이후 완료가 레이스로 덮어쓰지 않도록 조건부 전이
+        JobsRepository.update(id) { cur ->
+            if (cur.state == JobState.DONE || cur.state == JobState.CANCELED) cur
+            else cur.copy(state = JobState.CANCELED, speedBps = 0L)
+        }
         throttleInterceptor.forget(id)
         DebugLogger.i(TAG, "취소 id=$id '${job.filename}' (${fmt(job.downloadedBytes)} 시점)")
         scope.launch {
@@ -217,7 +226,8 @@ class DownloadEngine(
             when (runOnce(id)) {
                 Outcome.COMPLETED, Outcome.CANCELED, Outcome.PAUSED -> return
                 Outcome.RETRY -> {
-                    if (JobsRepository.get(id)?.state == JobState.CANCELED) return
+                    val st = JobsRepository.get(id)?.state
+                    if (st == JobState.CANCELED || st == JobState.PAUSED) return
                     val wait = 2000L * attempt
                     val reason = failureReasons.remove(id) ?: "네트워크 오류"
                     DebugLogger.w(TAG, "실패 → ${wait}ms 후 재시도 id=$id 사유=$reason (E-AND-DOWN-1001)")
@@ -225,6 +235,9 @@ class DownloadEngine(
                         it.copy(state = JobState.RUNNING, errorMessage = "재시도 $attempt/$MAX_RETRY · $reason (E-AND-DOWN-1001)")
                     }
                     delay(wait)
+                    // 재시도 대기 중 사용자 일시정지/취소 반영
+                    val after = JobsRepository.get(id)?.state
+                    if (after == JobState.CANCELED || after == JobState.PAUSED) return
                 }
             }
         }
@@ -391,12 +404,14 @@ class DownloadEngine(
 
                 publishToDownloads(done, id)
                 // 보관함(MediaStore)에 게시했으므로 앱 전용 원본 삭제
+                // 단, cancel이 먼저 CANCELED로 전이했다면 DONE으로 덮지 않음
                 try {
                     if (done.exists()) done.delete()
                     DebugLogger.d(TAG, "앱 전용 원본 삭제 id=$id")
                 } catch (_: Exception) {}
                 JobsRepository.update(id) { j ->
-                    j.copy(
+                    if (j.state == JobState.CANCELED) j
+                    else j.copy(
                         state = JobState.DONE, progress = 1f, downloadedBytes = finalSize,
                         totalBytes = finalSize, speedBps = 0L, finishedAt = System.currentTimeMillis(),
                     )

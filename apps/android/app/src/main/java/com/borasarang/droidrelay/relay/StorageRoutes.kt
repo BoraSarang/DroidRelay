@@ -31,7 +31,8 @@ internal object StorageGuard {
         var f = dlRoot
         for (p in parts) { if (p.isNotEmpty()) f = java.io.File(f, p) }
         val c = f.canonicalFile
-        return if (c.path.startsWith(dlRootCanonical.path)) c else null
+        val root = dlRootCanonical.path
+        return if (c.path == root || c.path.startsWith(root + java.io.File.separator)) c else null
     }
 
     /** 파일·폴더 이름 1개 — 경로 구분자/상대경로 금지 */

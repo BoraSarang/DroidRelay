@@ -1,17 +1,18 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.ktlint)
 }
 
-import java.util.Properties
-
 val keystorePropsFile = rootProject.file("keystore.properties")
-val keystoreProps = Properties().apply {
-    if (keystorePropsFile.exists()) {
-        keystorePropsFile.inputStream().use { load(it) }
+val keystoreProps =
+    Properties().apply {
+        if (keystorePropsFile.exists()) {
+            keystorePropsFile.inputStream().use { load(it) }
+        }
     }
-}
 
 // HTTPS 자체서명 키스토어 비밀번호 — tls.properties (없으면 빌드 실패, 시크릿 하드코딩 금지)
 val tlsPropsFile = rootProject.file("tls.properties")
@@ -36,6 +37,10 @@ android {
         versionCode = (project.findProperty("versionCode") as String).toInt()
         versionName = project.findProperty("versionName") as String
         buildConfigField("String", "TLS_KEYSTORE_PASSWORD", "\"$tlsKeystorePassword\"")
+        // libtorrent4j 네이티브는 arm64-v8a 전용 — 미지원 ABI는 설치 차단해 UnsatisfiedLinkError 크래시 방지
+        ndk {
+            abiFilters += "arm64-v8a"
+        }
     }
 
     signingConfigs {

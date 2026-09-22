@@ -7,16 +7,20 @@ import android.os.PowerManager
 import android.provider.Settings
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -32,6 +36,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -61,12 +66,19 @@ import kotlin.math.roundToInt
 fun SettingsScreen(onPortChanged: (Int) -> Unit) {
     val ctx = LocalContext.current
     val repo = remember { SettingsRepository.get(ctx) }
+    val scope = rememberCoroutineScope()
     val settings by repo.settings.collectAsState(initial = null)
-    val s = settings ?: return
+    val s = settings
+    if (s == null) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            CircularProgressIndicator()
+        }
+        return
+    }
     val cs = MaterialTheme.colorScheme
 
     Column(
-        modifier = Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(bottom = 32.dp),
+        modifier = Modifier.verticalScroll(rememberScrollState()).imePadding().padding(horizontal = 16.dp).padding(bottom = 32.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
 
@@ -90,7 +102,7 @@ fun SettingsScreen(onPortChanged: (Int) -> Unit) {
                     val random = (9000..9999).random()
                     portText = random.toString()
                     DebugLogger.i("Settings", "랜덤 포트 생성 $random")
-                    kotlinx.coroutines.MainScope().launch {
+                    scope.launch {
                         repo.setPort(random)
                         onPortChanged(random)
                     }
@@ -104,7 +116,7 @@ fun SettingsScreen(onPortChanged: (Int) -> Unit) {
                         DebugLogger.w("Settings", "HTTP 포트 충돌: HTTP $p = HTTPS ${s.httpsPort} (E-AND-SRV-0111)")
                     } else if (p != s.port) {
                         DebugLogger.i("Settings", "포트 변경 ${s.port} → $p")
-                        kotlinx.coroutines.MainScope().launch {
+                        scope.launch {
                             repo.setPort(p)
                             onPortChanged(p)
                         }
@@ -114,7 +126,7 @@ fun SettingsScreen(onPortChanged: (Int) -> Unit) {
 
             // Line 1b: HTTPS 사용 스위치 + 포트 입력 + 랜덤 + 적용 (v0.36 개별 제어)
             SwitchRow("HTTPS 사용", s.httpsEnabled) { v ->
-                kotlinx.coroutines.MainScope().launch {
+                scope.launch {
                     repo.setHttpsEnabled(v)
                     DebugLogger.i("Settings", if (v) "[FEATURE] HTTPS 사용 설정" else "[FEATURE] HTTPS 끔 설정 — HTTP 단일 동작")
                 }
@@ -135,7 +147,7 @@ fun SettingsScreen(onPortChanged: (Int) -> Unit) {
                     val random = (9000..9999).random()
                     httpsPortText = random.toString()
                     DebugLogger.i("Settings", "랜덤 HTTPS 포트 생성 $random")
-                    kotlinx.coroutines.MainScope().launch {
+                    scope.launch {
                         if (SettingsConstraints.validPorts(s.port, random)) {
                             repo.setHttpsPort(random)
                             onPortChanged(random)
@@ -153,7 +165,7 @@ fun SettingsScreen(onPortChanged: (Int) -> Unit) {
                         DebugLogger.w("Settings", "HTTPS 포트 충돌: HTTP ${s.port} = HTTPS $p (E-AND-SRV-0111)")
                     } else if (p != s.httpsPort) {
                         DebugLogger.i("Settings", "[FEATURE] HTTPS 포트 변경 ${s.httpsPort} → $p")
-                        kotlinx.coroutines.MainScope().launch {
+                        scope.launch {
                             repo.setHttpsPort(p)
                             onPortChanged(p)
                         }
@@ -194,8 +206,8 @@ fun SettingsScreen(onPortChanged: (Int) -> Unit) {
             }
 
             // Line 3: 자동 시작 분리 (v0.36)
-            SwitchRow("재부팅 시 서버 자동 시작", s.bootAutoStart) { v -> kotlinx.coroutines.MainScope().launch { repo.setBootAutoStart(v) } }
-            SwitchRow("앱 실행 시 서버 자동 시작", s.launchAutoStart) { v -> kotlinx.coroutines.MainScope().launch { repo.setLaunchAutoStart(v) } }
+            SwitchRow("재부팅 시 서버 자동 시작", s.bootAutoStart) { v -> scope.launch { repo.setBootAutoStart(v) } }
+            SwitchRow("앱 실행 시 서버 자동 시작", s.launchAutoStart) { v -> scope.launch { repo.setLaunchAutoStart(v) } }
 
             // Line 4: 배터리 최적화 예외 (백그라운드 안정성)
             val pm = ctx.getSystemService(Context.POWER_SERVICE) as PowerManager
@@ -271,14 +283,14 @@ fun SettingsScreen(onPortChanged: (Int) -> Unit) {
                         selected = selected,
                         onClick = {
                             DebugLogger.i("Settings", "테마 변경 → $mode")
-                            kotlinx.coroutines.MainScope().launch { repo.setThemeMode(mode) }
+                            scope.launch { repo.setThemeMode(mode) }
                         },
                         label = { Text(label) },
                     )
                 }
             }
             if (android.os.Build.VERSION.SDK_INT >= 31) {
-                SwitchRow("Material You 동적 색상 (배경화면 따라가기)", s.dynamicColor) { v -> kotlinx.coroutines.MainScope().launch { repo.setDynamicColor(v) } }
+                SwitchRow("Material You 동적 색상 (배경화면 따라가기)", s.dynamicColor) { v -> scope.launch { repo.setDynamicColor(v) } }
             }
         }
 
@@ -293,7 +305,7 @@ fun SettingsScreen(onPortChanged: (Int) -> Unit) {
             )
             Slider(
                 value = s.concurrency.toFloat(),
-                onValueChange = { kotlinx.coroutines.MainScope().launch { repo.setConcurrency(it.toInt()) } },
+                onValueChange = { scope.launch { repo.setConcurrency(it.toInt()) } },
                 valueRange = 1f..4f,
                 steps = 2,
             )
@@ -305,11 +317,11 @@ fun SettingsScreen(onPortChanged: (Int) -> Unit) {
                 value = s.speedLimitKbps.toFloat(),
                 onValueChange = { v ->
                     val kb = (v / 128).toInt() * 128  // 128KB/s 스텝
-                    kotlinx.coroutines.MainScope().launch { repo.setSpeedLimit(kb) }
+                    scope.launch { repo.setSpeedLimit(kb) }
                 },
                 valueRange = 0f..2048f,
             )
-            SwitchRow("다운로드 알림 표시", s.notifications) { v -> kotlinx.coroutines.MainScope().launch { repo.setNotifications(v) } }
+            SwitchRow("다운로드 알림 표시", s.notifications) { v -> scope.launch { repo.setNotifications(v) } }
 
             Spacer(Modifier.height(12.dp))
             Text("보관함 자동 운영", color = cs.onSurfaceVariant, style = MaterialTheme.typography.labelMedium)
@@ -320,11 +332,11 @@ fun SettingsScreen(onPortChanged: (Int) -> Unit) {
             )
             Slider(
                 value = s.storageQuotaGb.toFloat(),
-                onValueChange = { v -> kotlinx.coroutines.MainScope().launch { repo.setStorageQuotaGb(v.toInt()) } },
+                onValueChange = { v -> scope.launch { repo.setStorageQuotaGb(v.toInt()) } },
                 valueRange = 0f..128f,
                 steps = 127,
             )
-            SwitchRow("완료 파일 자동 분류 (영상/음악/문서)", s.autoClassify) { v -> kotlinx.coroutines.MainScope().launch { repo.setAutoClassify(v) } }
+            SwitchRow("완료 파일 자동 분류 (영상/음악/문서)", s.autoClassify) { v -> scope.launch { repo.setAutoClassify(v) } }
 
             Spacer(Modifier.height(12.dp))
             Text("전역 속도 제한 (다운로드·토렌트 공통)", color = cs.onSurfaceVariant, style = MaterialTheme.typography.labelMedium)
@@ -332,12 +344,12 @@ fun SettingsScreen(onPortChanged: (Int) -> Unit) {
             SwitchRow(
                 "전역 다운로드 속도 제한",
                 s.maxDownloadBps > 0,
-            ) { on -> kotlinx.coroutines.MainScope().launch { repo.setMaxDownloadBps(if (on) 3L * 1_048_576 else 0L) } }
+            ) { on -> scope.launch { repo.setMaxDownloadBps(if (on) 3L * 1_048_576 else 0L) } }
             if (dlMbps > 0) {
                 Text("${dlMbps} Mbps", color = cs.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
                 Slider(
                     value = dlMbps.toFloat(),
-                    onValueChange = { v -> kotlinx.coroutines.MainScope().launch { repo.setMaxDownloadBps(v.roundToInt().toLong() * 1_048_576) } },
+                    onValueChange = { v -> scope.launch { repo.setMaxDownloadBps(v.roundToInt().toLong() * 1_048_576) } },
                     valueRange = 1f..10f,
                     steps = 8,
                 )
@@ -346,12 +358,12 @@ fun SettingsScreen(onPortChanged: (Int) -> Unit) {
             SwitchRow(
                 "전역 업로드 속도 제한",
                 s.maxUploadBps > 0,
-            ) { on -> kotlinx.coroutines.MainScope().launch { repo.setMaxUploadBps(if (on) 3L * 1_048_576 else 0L) } }
+            ) { on -> scope.launch { repo.setMaxUploadBps(if (on) 3L * 1_048_576 else 0L) } }
             if (ulMbps > 0) {
                 Text("${ulMbps} Mbps", color = cs.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
                 Slider(
                     value = ulMbps.toFloat(),
-                    onValueChange = { v -> kotlinx.coroutines.MainScope().launch { repo.setMaxUploadBps(v.roundToInt().toLong() * 1_048_576) } },
+                    onValueChange = { v -> scope.launch { repo.setMaxUploadBps(v.roundToInt().toLong() * 1_048_576) } },
                     valueRange = 1f..10f,
                     steps = 8,
                 )
@@ -363,7 +375,7 @@ fun SettingsScreen(onPortChanged: (Int) -> Unit) {
                 androidx.compose.material3.FilterChip(
                     selected = s.completionAction == SettingsConstraints.COMPLETION_ACTION_NONE,
                     onClick = {
-                        kotlinx.coroutines.MainScope().launch { repo.setCompletionAction(SettingsConstraints.COMPLETION_ACTION_NONE) }
+                        scope.launch { repo.setCompletionAction(SettingsConstraints.COMPLETION_ACTION_NONE) }
                     },
                     label = { Text("없음") },
                 )
@@ -371,7 +383,7 @@ fun SettingsScreen(onPortChanged: (Int) -> Unit) {
                     selected = s.completionAction == SettingsConstraints.COMPLETION_ACTION_STOP_SERVER,
                     onClick = {
                         DebugLogger.i("Settings", "완료 후 동작 → 서버 정지")
-                        kotlinx.coroutines.MainScope().launch { repo.setCompletionAction(SettingsConstraints.COMPLETION_ACTION_STOP_SERVER) }
+                        scope.launch { repo.setCompletionAction(SettingsConstraints.COMPLETION_ACTION_STOP_SERVER) }
                     },
                     label = { Text("전체 완료 시 서버 정지") },
                 )
@@ -388,9 +400,9 @@ fun SettingsScreen(onPortChanged: (Int) -> Unit) {
             // 접속 범위
             Text("클라이언트 접속 범위", color = cs.onSurfaceVariant, style = MaterialTheme.typography.labelMedium)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                AccessScope.entries.forEach { scope ->
-                    val selected = s.accessScope == scope
-                    val label = when (scope) {
+                AccessScope.entries.forEach { ascope ->
+                    val selected = s.accessScope == ascope
+                    val label = when (ascope) {
                         AccessScope.SUBNET_ONLY -> "같은 핫스팟"
                         AccessScope.ANY_WITH_PASSWORD -> "암호만 있으면"
                         AccessScope.APPROVED_ONLY -> "승인만"
@@ -398,8 +410,8 @@ fun SettingsScreen(onPortChanged: (Int) -> Unit) {
                     androidx.compose.material3.FilterChip(
                         selected = selected,
                         onClick = {
-                            DebugLogger.i("Settings", "접속 범위 변경 → $scope")
-                            kotlinx.coroutines.MainScope().launch { repo.setAccessScope(scope) }
+                            DebugLogger.i("Settings", "접속 범위 변경 → $ascope")
+                            scope.launch { repo.setAccessScope(ascope) }
                         },
                         label = { Text(label) },
                     )
@@ -421,7 +433,7 @@ fun SettingsScreen(onPortChanged: (Int) -> Unit) {
             var pass by remember(s.webPassword) { mutableStateOf("") }
             SwitchRow("웹 접속 암호 요청 (HTTP Basic)", authEnabled) {
                 authEnabled = it
-                kotlinx.coroutines.MainScope().launch { repo.setWebAuth(it, user, pass) }
+                scope.launch { repo.setWebAuth(it, user, pass) }
             }
             if (authEnabled) {
                 OutlinedTextField(
@@ -436,7 +448,7 @@ fun SettingsScreen(onPortChanged: (Int) -> Unit) {
                 Spacer(Modifier.height(6.dp))
                 Button(onClick = {
                     DebugLogger.i("Settings", "웹 인증 저장 user=$user")
-                    kotlinx.coroutines.MainScope().launch { repo.setWebAuth(true, user, pass.ifBlank { s.webPassword }) }
+                    scope.launch { repo.setWebAuth(true, user, pass.ifBlank { s.webPassword }) }
                 }) { Text("인증 정보 저장") }
             }
             Spacer(Modifier.height(12.dp))
@@ -444,7 +456,7 @@ fun SettingsScreen(onPortChanged: (Int) -> Unit) {
             var guestPass by remember { mutableStateOf("") }
             SwitchRow("게스트 읽기전용 (열람·다운로드만)", guestEnabled) {
                 guestEnabled = it
-                kotlinx.coroutines.MainScope().launch { repo.setGuestEnabled(it) }
+                scope.launch { repo.setGuestEnabled(it) }
             }
             if (guestEnabled) {
                 Text(
@@ -468,7 +480,7 @@ fun SettingsScreen(onPortChanged: (Int) -> Unit) {
                             DebugLogger.w("Settings", "게스트 비밀번호 비어 있음")
                         } else {
                             DebugLogger.i("Settings", "게스트 비밀번호 저장")
-                            kotlinx.coroutines.MainScope().launch { repo.setGuestPassword(guestPass) }
+                            scope.launch { repo.setGuestPassword(guestPass) }
                             guestPass = ""
                         }
                     }) { Text("저장") }
@@ -483,7 +495,7 @@ fun SettingsScreen(onPortChanged: (Int) -> Unit) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(ip, Modifier.weight(1f), color = cs.onSurface)
                     Button(onClick = {
-                        kotlinx.coroutines.MainScope().launch { repo.removeAllowedIp(ip) }
+                        scope.launch { repo.removeAllowedIp(ip) }
                     }) { Text("해제") }
                 }
             }
@@ -503,7 +515,7 @@ fun SettingsScreen(onPortChanged: (Int) -> Unit) {
                 onValueChange = { v ->
                     val kbps = (v.roundToInt() / SettingsConstraints.TORRENT_UPLOAD_STEP * SettingsConstraints.TORRENT_UPLOAD_STEP)
                         .coerceIn(SettingsConstraints.TORRENT_UPLOAD_MIN, SettingsConstraints.TORRENT_UPLOAD_MAX)
-                    kotlinx.coroutines.MainScope().launch { repo.setTorrentUploadLimit(kbps) }
+                    scope.launch { repo.setTorrentUploadLimit(kbps) }
                 },
                 valueRange = SettingsConstraints.TORRENT_UPLOAD_MIN.toFloat()..SettingsConstraints.TORRENT_UPLOAD_MAX.toFloat(),
                 steps = SettingsConstraints.TORRENT_UPLOAD_MAX / SettingsConstraints.TORRENT_UPLOAD_STEP - 1,
@@ -525,7 +537,7 @@ fun SettingsScreen(onPortChanged: (Int) -> Unit) {
                 onValueChange = { v ->
                     val kbps = (v.roundToInt() / SettingsConstraints.TORRENT_DOWNLOAD_STEP * SettingsConstraints.TORRENT_DOWNLOAD_STEP)
                         .coerceIn(SettingsConstraints.TORRENT_DOWNLOAD_MIN, SettingsConstraints.TORRENT_DOWNLOAD_MAX)
-                    kotlinx.coroutines.MainScope().launch { repo.setTorrentDownloadLimit(kbps) }
+                    scope.launch { repo.setTorrentDownloadLimit(kbps) }
                 },
                 valueRange = SettingsConstraints.TORRENT_DOWNLOAD_MIN.toFloat()..SettingsConstraints.TORRENT_DOWNLOAD_MAX.toFloat(),
                 steps = SettingsConstraints.TORRENT_DOWNLOAD_MAX / SettingsConstraints.TORRENT_DOWNLOAD_STEP - 1,
@@ -539,7 +551,7 @@ fun SettingsScreen(onPortChanged: (Int) -> Unit) {
             Text("최대 활성 torrent: ${s.torrentMaxActive}개", color = cs.onSurface)
             Slider(
                 value = s.torrentMaxActive.toFloat(),
-                onValueChange = { kotlinx.coroutines.MainScope().launch { repo.setTorrentMaxActive(it.toInt()) } },
+                onValueChange = { scope.launch { repo.setTorrentMaxActive(it.toInt()) } },
                 valueRange = SettingsConstraints.TORRENT_MAX_ACTIVE_MIN.toFloat()..SettingsConstraints.TORRENT_MAX_ACTIVE_MAX.toFloat(),
                 steps = SettingsConstraints.TORRENT_MAX_ACTIVE_MAX - SettingsConstraints.TORRENT_MAX_ACTIVE_MIN - 1,
             )
@@ -553,21 +565,21 @@ fun SettingsScreen(onPortChanged: (Int) -> Unit) {
             )
             Slider(
                 value = s.torrentSeedRatio,
-                onValueChange = { kotlinx.coroutines.MainScope().launch { repo.setTorrentSeedRatio(it) } },
+                onValueChange = { scope.launch { repo.setTorrentSeedRatio(it) } },
                 valueRange = 0f..10f,
                 steps = 9,
             )
             OutlinedButton(onClick = {
                 DebugLogger.i("Settings", "업로드 최소화 프리셋 적용")
-                kotlinx.coroutines.MainScope().launch {
+                scope.launch {
                     repo.setTorrentSeedRatio(0.5f)
                     repo.setTorrentUploadLimit(32)
                     repo.setTorrentDhtEnabled(false)
                 }
             }) { Text("⬇ 업로드 최소화 (비율 0.5 + 업로드 32KB/s + DHT 끔)") }
 
-            SwitchRow("DHT (분산 해시 테이블)", s.torrentDhtEnabled) { v -> kotlinx.coroutines.MainScope().launch { repo.setTorrentDhtEnabled(v) } }
-            SwitchRow("PEX (피어 교환)", s.torrentPexEnabled) { v -> kotlinx.coroutines.MainScope().launch { repo.setTorrentPexEnabled(v) } }
+            SwitchRow("DHT (분산 해시 테이블)", s.torrentDhtEnabled) { v -> scope.launch { repo.setTorrentDhtEnabled(v) } }
+            SwitchRow("PEX (피어 교환)", s.torrentPexEnabled) { v -> scope.launch { repo.setTorrentPexEnabled(v) } }
             Text(
                 "PEX는 libtorrent에 on/off가 없어 항상 켜짐. 피어 탐색용으로 트래픽은 미미합니다",
                 color = cs.onSurfaceVariant,
@@ -577,7 +589,7 @@ fun SettingsScreen(onPortChanged: (Int) -> Unit) {
             Spacer(Modifier.height(16.dp))
             Text("고급", color = cs.onSurfaceVariant, style = MaterialTheme.typography.labelMedium)
             SwitchRow("시퀀셜 다운로드 (스트리밍 프리뷰)", s.torrentSequentialDownload) { v ->
-                kotlinx.coroutines.MainScope().launch { repo.setTorrentSequentialDownload(v) }
+                scope.launch { repo.setTorrentSequentialDownload(v) }
             }
             Text(
                 "첫 조각부터 순서대로 받아 재생 미리보기를 지원합니다",
@@ -585,7 +597,7 @@ fun SettingsScreen(onPortChanged: (Int) -> Unit) {
                 style = MaterialTheme.typography.labelSmall,
             )
             SwitchRow("트래커 자동 동기 (24시간)", s.torrentTrackerSync) { v ->
-                kotlinx.coroutines.MainScope().launch { repo.setTorrentTrackerSync(v) }
+                scope.launch { repo.setTorrentTrackerSync(v) }
             }
             Text(
                 "커뮤니티 트래커 목록을 받아 새 토렌트에 자동 추가합니다",
@@ -611,7 +623,7 @@ fun SettingsScreen(onPortChanged: (Int) -> Unit) {
                         DebugLogger.w("Settings", "시더 대기 무효 값: $seedWait")
                     } else {
                         DebugLogger.i("Settings", "시더 대기 → $sec 초")
-                        kotlinx.coroutines.MainScope().launch { repo.setTorrentMinSeedWaitSec(sec) }
+                        scope.launch { repo.setTorrentMinSeedWaitSec(sec) }
                     }
                 }) { Text("적용") }
             }
@@ -631,7 +643,7 @@ fun SettingsScreen(onPortChanged: (Int) -> Unit) {
                     val r = (1024..65535).random()
                     listenPort = r.toString()
                     DebugLogger.i("Settings", "리슨 포트 랜덤 → $r")
-                    kotlinx.coroutines.MainScope().launch { repo.setTorrentListenPort(r) }
+                    scope.launch { repo.setTorrentListenPort(r) }
                 }) { Text("랜덤") }
                 Spacer(Modifier.width(4.dp))
                 Button(onClick = {
@@ -640,7 +652,7 @@ fun SettingsScreen(onPortChanged: (Int) -> Unit) {
                         DebugLogger.w("Settings", "리슨 포트 무효 값: $listenPort")
                     } else {
                         DebugLogger.i("Settings", "리슨 포트 → $p")
-                        kotlinx.coroutines.MainScope().launch { repo.setTorrentListenPort(p) }
+                        scope.launch { repo.setTorrentListenPort(p) }
                     }
                 }) { Text("적용") }
             }
@@ -650,7 +662,7 @@ fun SettingsScreen(onPortChanged: (Int) -> Unit) {
                 style = MaterialTheme.typography.labelSmall,
             )
 
-            var savePath by remember(s.torrentSavePath) { mutableStateOf(s.torrentSavePath.ifBlank { "/sdcard/Download/DroidRelay" }) }
+            var savePath by remember(s.torrentSavePath) { mutableStateOf(s.torrentSavePath.ifBlank { com.borasarang.droidrelay.relay.StorageGuard.dlRoot.path }) }
             var pathOk by remember { mutableStateOf<Boolean?>(null) }
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
                 OutlinedTextField(
@@ -667,7 +679,7 @@ fun SettingsScreen(onPortChanged: (Int) -> Unit) {
                     if (dir.exists() || dir.mkdirs()) {
                         pathOk = true
                         DebugLogger.i("Settings", "토렌트 저장 경로 → $savePath")
-                        kotlinx.coroutines.MainScope().launch { repo.setTorrentSavePath(savePath.trimEnd('/')) }
+                        scope.launch { repo.setTorrentSavePath(savePath.trimEnd('/')) }
                     } else {
                         pathOk = false
                         DebugLogger.w("Settings", "토렌트 저장 경로 사용 불가: $savePath")
@@ -684,7 +696,7 @@ fun SettingsScreen(onPortChanged: (Int) -> Unit) {
 
             Spacer(Modifier.height(8.dp))
             Text("토렌트 검색 (Jackett/Prowlarr)", color = cs.onSurfaceVariant, style = MaterialTheme.typography.labelMedium)
-            SwitchRow("검색 사용", s.searchEnabled) { v -> kotlinx.coroutines.MainScope().launch { repo.setSearchEnabled(v) } }
+            SwitchRow("검색 사용", s.searchEnabled) { v -> scope.launch { repo.setSearchEnabled(v) } }
             var searchUrl by remember(s.searchUrl) { mutableStateOf(s.searchUrl) }
             var searchKey by remember(s.searchApiKey) { mutableStateOf(s.searchApiKey) }
             OutlinedTextField(
@@ -708,7 +720,7 @@ fun SettingsScreen(onPortChanged: (Int) -> Unit) {
                 Spacer(Modifier.width(8.dp))
                 Button(onClick = {
                     DebugLogger.i("Settings", "토렌트 검색 설정 저장")
-                    kotlinx.coroutines.MainScope().launch {
+                    scope.launch {
                         repo.setSearchUrl(searchUrl)
                         repo.setSearchApiKey(searchKey)
                     }
@@ -721,7 +733,7 @@ fun SettingsScreen(onPortChanged: (Int) -> Unit) {
         // ── 가드 보호 ──
         SettingSection("가드 보호") {
             SwitchRow("가드 데몬 활성화", s.guardEnabled) { v ->
-                kotlinx.coroutines.MainScope().launch { repo.setGuardEnabled(v) }
+                scope.launch { repo.setGuardEnabled(v) }
             }
             Text(
                 "열·배터리·스토리지 임계치 초과 시 다운로드를 자동 일시정지합니다",
@@ -732,7 +744,7 @@ fun SettingsScreen(onPortChanged: (Int) -> Unit) {
             Text("열 제한: ${s.guardThermalLimit}°C", color = cs.onSurface)
             Slider(
                 value = s.guardThermalLimit.toFloat(),
-                onValueChange = { v -> kotlinx.coroutines.MainScope().launch { repo.setGuardThermalLimit(v.roundToInt()) } },
+                onValueChange = { v -> scope.launch { repo.setGuardThermalLimit(v.roundToInt()) } },
                 valueRange = 50f..70f,
                 steps = 19,
             )
@@ -740,7 +752,7 @@ fun SettingsScreen(onPortChanged: (Int) -> Unit) {
             Text("배터리 제한: ${s.guardBatteryLimit}%", color = cs.onSurface)
             Slider(
                 value = s.guardBatteryLimit.toFloat(),
-                onValueChange = { v -> kotlinx.coroutines.MainScope().launch { repo.setGuardBatteryLimit((v / 5).roundToInt() * 5) } },
+                onValueChange = { v -> scope.launch { repo.setGuardBatteryLimit((v / 5).roundToInt() * 5) } },
                 valueRange = 5f..50f,
                 steps = 8,
             )
@@ -748,7 +760,7 @@ fun SettingsScreen(onPortChanged: (Int) -> Unit) {
             Text("스토리지 제한: ${s.guardStorageLimit}%", color = cs.onSurface)
             Slider(
                 value = s.guardStorageLimit.toFloat(),
-                onValueChange = { v -> kotlinx.coroutines.MainScope().launch { repo.setGuardStorageLimit(v.roundToInt()) } },
+                onValueChange = { v -> scope.launch { repo.setGuardStorageLimit(v.roundToInt()) } },
                 valueRange = 50f..99f,
                 steps = 48,
             )
@@ -770,7 +782,7 @@ fun SettingsScreen(onPortChanged: (Int) -> Unit) {
                         DebugLogger.w("Settings", "watchdog 주기 무효 값: $wd")
                     } else {
                         DebugLogger.i("Settings", "watchdog 주기 → $sec 초")
-                        kotlinx.coroutines.MainScope().launch { repo.setWatchdogIntervalSec(sec) }
+                        scope.launch { repo.setWatchdogIntervalSec(sec) }
                     }
                 }) { Text("적용") }
             }
@@ -784,7 +796,7 @@ fun SettingsScreen(onPortChanged: (Int) -> Unit) {
                 "HTTP → HTTPS 강제 리다이렉트",
                 s.forceHttpsRedirect && s.httpsEnabled,
                 enabled = s.httpsEnabled,
-            ) { v -> kotlinx.coroutines.MainScope().launch { repo.setForceHttpsRedirect(v && s.httpsEnabled) } }
+            ) { v -> scope.launch { repo.setForceHttpsRedirect(v && s.httpsEnabled) } }
             Text(
                 if (s.httpsEnabled) "켜면 웨일/사파리에서 HTTPS 인증서 신뢰가 필요할 수 있습니다" else "HTTPS가 꺼져 있어 리다이렉트를 사용할 수 없습니다",
                 color = cs.onSurfaceVariant,
@@ -797,7 +809,7 @@ fun SettingsScreen(onPortChanged: (Int) -> Unit) {
         // ── 스케줄 ──
         SettingSection("스케줄") {
             SwitchRow("예약 다운로드 활성화", s.scheduleEnabled) { v ->
-                kotlinx.coroutines.MainScope().launch { repo.setScheduleEnabled(v) }
+                scope.launch { repo.setScheduleEnabled(v) }
             }
             Text(
                 "Cron 표현식으로 다운로드 시간대를 예약합니다",
@@ -819,7 +831,7 @@ fun SettingsScreen(onPortChanged: (Int) -> Unit) {
                 Button(onClick = {
                     if (cronValid) {
                         DebugLogger.i("Settings", "스케줄 cron → $cron")
-                        kotlinx.coroutines.MainScope().launch { repo.setScheduleCron(cron) }
+                        scope.launch { repo.setScheduleCron(cron) }
                     } else {
                         DebugLogger.w("Settings", "Cron 형식 무효: $cron (E-AND-VALID-0001)")
                     }
@@ -831,15 +843,15 @@ fun SettingsScreen(onPortChanged: (Int) -> Unit) {
                 style = MaterialTheme.typography.labelSmall,
             )
             SwitchRow("Wi-Fi 연결 시에만", s.scheduleWifiOnly) { v ->
-                kotlinx.coroutines.MainScope().launch { repo.setScheduleWifiOnly(v) }
+                scope.launch { repo.setScheduleWifiOnly(v) }
             }
             SwitchRow("충전 중에만", s.scheduleChargingOnly) { v ->
-                kotlinx.coroutines.MainScope().launch { repo.setScheduleChargingOnly(v) }
+                scope.launch { repo.setScheduleChargingOnly(v) }
             }
             Text("최소 배터리: ${s.scheduleBatteryMin}%", color = cs.onSurface)
             Slider(
                 value = s.scheduleBatteryMin.toFloat(),
-                onValueChange = { v -> kotlinx.coroutines.MainScope().launch { repo.setScheduleBatteryMin(v.roundToInt()) } },
+                onValueChange = { v -> scope.launch { repo.setScheduleBatteryMin(v.roundToInt()) } },
                 valueRange = 5f..100f,
                 steps = 18,
             )
@@ -850,7 +862,7 @@ fun SettingsScreen(onPortChanged: (Int) -> Unit) {
         // ── Debrid ──
         SettingSection("Debrid") {
             SwitchRow("클라우드 다운로드 활성화", s.debridEnabled) { v ->
-                kotlinx.coroutines.MainScope().launch { repo.setDebridEnabled(v) }
+                scope.launch { repo.setDebridEnabled(v) }
             }
             Text(
                 "토렌트/대용량 링크를 제공자 클라우드에서 언리스트링크하여 받습니다",
@@ -864,7 +876,7 @@ fun SettingsScreen(onPortChanged: (Int) -> Unit) {
                         selected = s.debridProvider == provider.name,
                         onClick = {
                             DebugLogger.i("Settings", "Debrid 제공자 → ${provider.name}")
-                            kotlinx.coroutines.MainScope().launch { repo.setDebridProvider(provider.name) }
+                            scope.launch { repo.setDebridProvider(provider.name) }
                         },
                         label = { Text(provider.displayName) },
                     )
@@ -882,7 +894,7 @@ fun SettingsScreen(onPortChanged: (Int) -> Unit) {
             Spacer(Modifier.height(6.dp))
             Button(onClick = {
                 DebugLogger.i("Settings", "Debrid API 키 저장 (${apiKey.length}자)")
-                kotlinx.coroutines.MainScope().launch { repo.setDebridApiKey(apiKey.trim()) }
+                scope.launch { repo.setDebridApiKey(apiKey.trim()) }
             }) { Text("저장") }
         }
 
@@ -891,7 +903,7 @@ fun SettingsScreen(onPortChanged: (Int) -> Unit) {
         // ── 터널 ──
         SettingSection("터널") {
             SwitchRow("터널 사용", s.tunnelEnabled) { v ->
-                kotlinx.coroutines.MainScope().launch { repo.setTunnelEnabled(v) }
+                scope.launch { repo.setTunnelEnabled(v) }
             }
             Text(
                 "Tailscale/Cloudflare Tunnel로 외부 네트워크에서 접속 가능하게 합니다",
@@ -905,7 +917,7 @@ fun SettingsScreen(onPortChanged: (Int) -> Unit) {
                         selected = s.tunnelProvider == provider.name,
                         onClick = {
                             DebugLogger.i("Settings", "터널 제공자 → ${provider.name}")
-                            kotlinx.coroutines.MainScope().launch { repo.setTunnelProvider(provider.name) }
+                            scope.launch { repo.setTunnelProvider(provider.name) }
                         },
                         label = { Text(provider.displayName) },
                     )
@@ -918,7 +930,7 @@ fun SettingsScreen(onPortChanged: (Int) -> Unit) {
         // ── MCP 서버 권한 ──
         SettingSection("MCP 서버 권한") {
             SwitchRow("프라이버시 모드", s.mcpPrivacyMode) { v ->
-                kotlinx.coroutines.MainScope().launch { repo.setMcpPrivacyMode(v) }
+                scope.launch { repo.setMcpPrivacyMode(v) }
             }
             Text(
                 "MCP 클라이언트가 명령 실행 시 상세 내용을 표시합니다",
@@ -934,7 +946,7 @@ fun SettingsScreen(onPortChanged: (Int) -> Unit) {
             )
             mcpTools.forEach { (name, label) ->
                 SwitchRow(label, name !in s.mcpToolsDisabled) { enabled ->
-                    kotlinx.coroutines.MainScope().launch { repo.setMcpToolDisabled(name, !enabled) }
+                    scope.launch { repo.setMcpToolDisabled(name, !enabled) }
                 }
             }
         }
@@ -1033,8 +1045,9 @@ private fun SwitchRow(label: String, checked: Boolean, enabled: Boolean = true, 
 
 private fun resetSettings(ctx: android.content.Context, repo: SettingsRepository, category: String) {
     DebugLogger.w("Settings", "설정 기본값 복원 진행 category=$category")
+    val scope = kotlinx.coroutines.MainScope()
     when (category) {
-        "download" -> kotlinx.coroutines.MainScope().launch {
+        "download" -> scope.launch {
             repo.setConcurrency(SettingsConstraints.DEFAULT_CONCURRENCY)
             repo.setSpeedLimit(0)
             repo.setNotifications(true)
@@ -1042,7 +1055,7 @@ private fun resetSettings(ctx: android.content.Context, repo: SettingsRepository
             repo.setCompletionAction(SettingsConstraints.COMPLETION_ACTION_NONE)
             RelayApp.get(ctx).applySettings(repo.firstBlocking())
         }
-        "torrent" -> kotlinx.coroutines.MainScope().launch {
+        "torrent" -> scope.launch {
             repo.setTorrentUploadLimit(SettingsConstraints.DEFAULT_TORRENT_UPLOAD_KBPS)
             repo.setTorrentDownloadLimit(SettingsConstraints.DEFAULT_TORRENT_DOWNLOAD_KBPS)
             repo.setTorrentMaxActive(SettingsConstraints.DEFAULT_TORRENT_MAX_ACTIVE)
@@ -1050,11 +1063,11 @@ private fun resetSettings(ctx: android.content.Context, repo: SettingsRepository
             repo.setTorrentDhtEnabled(true)
             repo.setTorrentPexEnabled(true)
             repo.setTorrentListenPort(SettingsConstraints.randomEphemeralPort())
-            repo.setTorrentSavePath("/sdcard/Download/DroidRelay")
+                repo.setTorrentSavePath(com.borasarang.droidrelay.relay.StorageGuard.dlRoot.path)
             RelayApp.getTorrent(ctx).applySettings(repo.firstBlocking())
         }
         "all" -> {
-            kotlinx.coroutines.MainScope().launch {
+            scope.launch {
                 repo.setConcurrency(SettingsConstraints.DEFAULT_CONCURRENCY)
                 repo.setSpeedLimit(0)
                 repo.setNotifications(true)
@@ -1062,7 +1075,7 @@ private fun resetSettings(ctx: android.content.Context, repo: SettingsRepository
                 repo.setCompletionAction(SettingsConstraints.COMPLETION_ACTION_NONE)
                 RelayApp.get(ctx).applySettings(repo.firstBlocking())
             }
-            kotlinx.coroutines.MainScope().launch {
+            scope.launch {
                 repo.setTorrentUploadLimit(SettingsConstraints.DEFAULT_TORRENT_UPLOAD_KBPS)
                 repo.setTorrentDownloadLimit(SettingsConstraints.DEFAULT_TORRENT_DOWNLOAD_KBPS)
                 repo.setTorrentMaxActive(SettingsConstraints.DEFAULT_TORRENT_MAX_ACTIVE)
@@ -1070,7 +1083,7 @@ private fun resetSettings(ctx: android.content.Context, repo: SettingsRepository
                 repo.setTorrentDhtEnabled(true)
                 repo.setTorrentPexEnabled(true)
                 repo.setTorrentListenPort(SettingsConstraints.randomEphemeralPort())
-                repo.setTorrentSavePath("/sdcard/Download/DroidRelay")
+                repo.setTorrentSavePath(com.borasarang.droidrelay.relay.StorageGuard.dlRoot.path)
                 RelayApp.getTorrent(ctx).applySettings(repo.firstBlocking())
             }
         }
@@ -1082,9 +1095,10 @@ private fun resetSettings(ctx: android.content.Context, repo: SettingsRepository
 private fun TrackerProbeRow() {
     val ctx = LocalContext.current
     val cs = MaterialTheme.colorScheme
+    val scope = rememberCoroutineScope()
     var status by remember { mutableStateOf("확인 중…") }
     fun refresh() {
-        kotlinx.coroutines.MainScope().launch {
+        scope.launch {
             status = runCatching {
                 val engine = com.borasarang.droidrelay.relay.RelayApp.getTorrent(ctx)
                 val cached = com.borasarang.droidrelay.relay.TrackerProbe.getProbeCached(ctx)
@@ -1101,7 +1115,7 @@ private fun TrackerProbeRow() {
         OutlinedButton(onClick = {
             status = "측정 시작됨"
             DebugLogger.i("Settings", "[FEATURE] 트래커 프로브 수동 시작")
-            kotlinx.coroutines.MainScope().launch {
+            scope.launch {
                 com.borasarang.droidrelay.relay.RelayApp.getTorrent(ctx).probeTrackers()
                 kotlinx.coroutines.delay(6000)
                 refresh()
@@ -1116,11 +1130,12 @@ private fun SpeedScheduleSection(windows: List<com.borasarang.droidrelay.relay.S
     val ctx = LocalContext.current
     val repo = remember { SettingsRepository.get(ctx) }
     val cs = MaterialTheme.colorScheme
+    val scope = rememberCoroutineScope()
     var showAdd by remember { mutableStateOf(false) }
     val dayNames = mapOf(1 to "일", 2 to "월", 3 to "화", 4 to "수", 5 to "목", 6 to "금", 7 to "토")
 
     fun save(next: List<com.borasarang.droidrelay.relay.SpeedWindow>) {
-        kotlinx.coroutines.MainScope().launch { repo.setSpeedSchedule(next) }
+        scope.launch { repo.setSpeedSchedule(next) }
     }
 
     Text("속도 스케줄 (요일+시간)", color = cs.onSurfaceVariant, style = MaterialTheme.typography.labelMedium)
