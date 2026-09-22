@@ -107,6 +107,8 @@ object StorageJanitor {
             ?.filter { it.isDirectory && it.name != ".trash" && (it.listFiles()?.isEmpty() == true) }
             ?.forEach { it.delete() }
         DebugLogger.i("Janitor", "[FEATURE] 쿼터 정리 ${quotaGb}GB 초과 → ${moved}개 휴지통 이동")
+        // 저장공간 스냅샷 (v0.39 P2) — 정리 건수 누적
+        runCatching { StatsSnapshots.recordStorage(dirSize(root), root.usableSpace, moved.toLong()) }
         return moved
     }
 }

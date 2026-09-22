@@ -20,9 +20,17 @@ data class TrafficDay(
     val downTorrent: Long = 0L,
     val upServe: Long = 0L,
     val upTorrent: Long = 0L,
+    // v2 (v0.39): 일별 최고속도 + 완료/실패 건수 — 구버전 원장은 0으로 마이그레이션
+    val maxDownBps: Long = 0L,
+    val maxUpBps: Long = 0L,
+    val doneHttp: Long = 0L,
+    val doneVideo: Long = 0L,
+    val doneTorrent: Long = 0L,
+    val failCount: Long = 0L,
 ) {
     fun downTotal(): Long = downHttp + downVideo + downTorrent
     fun upTotal(): Long = upServe + upTorrent
+    fun doneTotal(): Long = doneHttp + doneVideo + doneTorrent
 }
 
 data class TrafficBucket(
@@ -31,9 +39,17 @@ data class TrafficBucket(
     val downTorrent: Long = 0L,
     val upServe: Long = 0L,
     val upTorrent: Long = 0L,
+    // v2 집계: max는 기간 최대값, done/fail은 합산
+    val maxDownBps: Long = 0L,
+    val maxUpBps: Long = 0L,
+    val doneHttp: Long = 0L,
+    val doneVideo: Long = 0L,
+    val doneTorrent: Long = 0L,
+    val failCount: Long = 0L,
 ) {
     fun downTotal(): Long = downHttp + downVideo + downTorrent
     fun upTotal(): Long = upServe + upTorrent
+    fun doneTotal(): Long = doneHttp + doneVideo + doneTorrent
 }
 
 data class TrafficSummary(
@@ -86,6 +102,29 @@ object TrafficLedger {
     @Synchronized
     fun addUpTorrent(bytes: Long, nowMs: Long = System.currentTimeMillis()) = add(nowMs) { it.copy(upTorrent = it.upTorrent + bytes) }
 
+    /** v2: 순간 속도 max 기록 (전송 중에만 호출, 0 이하는 무시) */
+    @Synchronized
+    fun recordSpeed(downBps: Long, upBps: Long, nowMs: Long = System.currentTimeMillis()) = add(nowMs) {
+        it.copy(
+            maxDownBps = maxOf(it.maxDownBps, downBps.coerceAtLeast(0)),
+            maxUpBps = maxOf(it.maxUpBps, upBps.coerceAtLeast(0)),
+        )
+    }
+
+    /** v2: 완료 건수 (타입별) */
+    @Synchronized
+    fun addDoneHttp(nowMs: Long = System.currentTimeMillis()) = add(nowMs) { it.copy(doneHttp = it.doneHttp + 1) }
+
+    @Synchronized
+    fun addDoneVideo(nowMs: Long = System.currentTimeMillis()) = add(nowMs) { it.copy(doneVideo = it.doneVideo + 1) }
+
+    @Synchronized
+    fun addDoneTorrent(nowMs: Long = System.currentTimeMillis()) = add(nowMs) { it.copy(doneTorrent = it.doneTorrent + 1) }
+
+    /** v2: 실패 건수 (http/video/torrent 공용) */
+    @Synchronized
+    fun addFail(nowMs: Long = System.currentTimeMillis()) = add(nowMs) { it.copy(failCount = it.failCount + 1) }
+
     private fun add(nowMs: Long, transform: (TrafficDay) -> TrafficDay) {
         if (nowMs <= 0) return
         val key = dayKey(nowMs)
@@ -98,6 +137,12 @@ object TrafficLedger {
                 downTorrent = it.downTorrent.coerceAtLeast(0),
                 upServe = it.upServe.coerceAtLeast(0),
                 upTorrent = it.upTorrent.coerceAtLeast(0),
+                maxDownBps = it.maxDownBps.coerceAtLeast(0),
+                maxUpBps = it.maxUpBps.coerceAtLeast(0),
+                doneHttp = it.doneHttp.coerceAtLeast(0),
+                doneVideo = it.doneVideo.coerceAtLeast(0),
+                doneTorrent = it.doneTorrent.coerceAtLeast(0),
+                failCount = it.failCount.coerceAtLeast(0),
             )
         }
         days[key] = next
@@ -112,7 +157,10 @@ object TrafficLedger {
         var m = TrafficBucket()
         var all = TrafficBucket()
         days.values.forEach { d ->
-            val b = TrafficBucket(d.downHttp, d.downVideo, d.downTorrent, d.upServe, d.upTorrent)
+            val b = TrafficBucket(
+                d.downHttp, d.downVideo, d.downTorrent, d.upServe, d.upTorrent,
+                d.maxDownBps, d.maxUpBps, d.doneHttp, d.doneVideo, d.doneTorrent, d.failCount,
+            )
             all = all + b
             if (d.date == today) t = t + b
             if (d.date.startsWith(month)) m = m + b
@@ -154,7 +202,7 @@ object TrafficLedger {
             val sb = StringBuilder("{\"days\":[")
             days.toSortedMap().values.forEachIndexed { i, d ->
                 if (i > 0) sb.append(',')
-                sb.append("{\"date\":\"${d.date}\",\"downHttp\":${d.downHttp},\"downVideo\":${d.downVideo},\"downTorrent\":${d.downTorrent},\"upServe\":${d.upServe},\"upTorrent\":${d.upTorrent}}")
+                sb.append("{\"date\":\"${d.date}\",\"downHttp\":${d.downHttp},\"downVideo\":${d.downVideo},\"downTorrent\":${d.downTorrent},\"upServe\":${d.upServe},\"upTorrent\":${d.upTorrent},\"maxDownBps\":${d.maxDownBps},\"maxUpBps\":${d.maxUpBps},\"doneHttp\":${d.doneHttp},\"doneVideo\":${d.doneVideo},\"doneTorrent\":${d.doneTorrent},\"failCount\":${d.failCount}}")
             }
             sb.append("]}")
             val tmp = File(f.parentFile, "${f.name}.tmp")
@@ -171,8 +219,9 @@ object TrafficLedger {
         if (!f.exists()) return
         runCatching {
             val text = f.readText()
-            val rec = Regex("""\{"date":"(\d{4}-\d{2}-\d{2})","downHttp":(\d+),"downVideo":(\d+),"downTorrent":(\d+),"upServe":(\d+),"upTorrent":(\d+)\}""")
-            rec.findAll(text).forEach { m ->
+            // v2 레코드 우선, 없으면 v1(6필드) 마이그레이션 (신규 필드 0)
+            val recV2 = Regex("""\{"date":"(\d{4}-\d{2}-\d{2})","downHttp":(\d+),"downVideo":(\d+),"downTorrent":(\d+),"upServe":(\d+),"upTorrent":(\d+),"maxDownBps":(\d+),"maxUpBps":(\d+),"doneHttp":(\d+),"doneVideo":(\d+),"doneTorrent":(\d+),"failCount":(\d+)\}""")
+            recV2.findAll(text).forEach { m ->
                 val d = TrafficDay(
                     date = m.groupValues[1],
                     downHttp = m.groupValues[2].toLong(),
@@ -180,8 +229,28 @@ object TrafficLedger {
                     downTorrent = m.groupValues[4].toLong(),
                     upServe = m.groupValues[5].toLong(),
                     upTorrent = m.groupValues[6].toLong(),
+                    maxDownBps = m.groupValues[7].toLong(),
+                    maxUpBps = m.groupValues[8].toLong(),
+                    doneHttp = m.groupValues[9].toLong(),
+                    doneVideo = m.groupValues[10].toLong(),
+                    doneTorrent = m.groupValues[11].toLong(),
+                    failCount = m.groupValues[12].toLong(),
                 )
                 days[d.date] = d
+            }
+            if (days.isEmpty()) {
+                val rec = Regex("""\{"date":"(\d{4}-\d{2}-\d{2})","downHttp":(\d+),"downVideo":(\d+),"downTorrent":(\d+),"upServe":(\d+),"upTorrent":(\d+)\}""")
+                rec.findAll(text).forEach { m ->
+                    val d = TrafficDay(
+                        date = m.groupValues[1],
+                        downHttp = m.groupValues[2].toLong(),
+                        downVideo = m.groupValues[3].toLong(),
+                        downTorrent = m.groupValues[4].toLong(),
+                        upServe = m.groupValues[5].toLong(),
+                        upTorrent = m.groupValues[6].toLong(),
+                    )
+                    days[d.date] = d
+                }
             }
             if (days.isEmpty() && text.isNotBlank() && !text.contains("\"days\":[]")) {
                 throw IllegalStateException("원장 파싱 0건 (손상 의심)")
@@ -210,6 +279,9 @@ object TrafficLedger {
     private operator fun TrafficBucket.plus(o: TrafficBucket) = TrafficBucket(
         downHttp + o.downHttp, downVideo + o.downVideo, downTorrent + o.downTorrent,
         upServe + o.upServe, upTorrent + o.upTorrent,
+        maxOf(maxDownBps, o.maxDownBps), maxOf(maxUpBps, o.maxUpBps),
+        doneHttp + o.doneHttp, doneVideo + o.doneVideo, doneTorrent + o.doneTorrent,
+        failCount + o.failCount,
     )
 }
 

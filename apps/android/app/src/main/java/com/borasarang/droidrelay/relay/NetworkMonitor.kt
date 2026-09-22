@@ -26,13 +26,22 @@ class NetworkMonitor(
     private var registered = false
 
     /** 네트워크 연결 복구 시 호출 */
+    private var wasLost = false
     private val callback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) {
             DebugLogger.i(TAG, "네트워크 연결 복구 → FAILED 작업 재시도")
+            if (wasLost) {
+                wasLost = false
+                runCatching { StatsSnapshots.recordNet(true) }
+            }
             onRecovered()
         }
         override fun onLost(network: Network) {
             DebugLogger.w(TAG, "네트워크 연결 끊김")
+            if (!wasLost) {
+                wasLost = true
+                runCatching { StatsSnapshots.recordNet(false) }
+            }
         }
     }
 

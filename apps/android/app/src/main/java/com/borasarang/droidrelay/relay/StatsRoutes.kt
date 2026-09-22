@@ -8,7 +8,7 @@ import io.ktor.server.routing.get
 import org.json.JSONArray
 import org.json.JSONObject
 
-/** 트래픽 통계 API (v0.37) — 일별·이번달·누적 up/down + breakdown */
+/** 트래픽 통계 API (v0.37 summary/daily + v0.39 P2 extended) */
 internal fun Route.statsRoutes(context: Context, serverRef: RelayServer) {
     get("/api/stats/summary") {
         val s = TrafficLedger.summary()
@@ -35,10 +35,50 @@ internal fun Route.statsRoutes(context: Context, serverRef: RelayServer) {
                 put("downTorrent", d.downTorrent)
                 put("upServe", d.upServe)
                 put("upTorrent", d.upTorrent)
+                put("maxDownBps", d.maxDownBps)
+                put("maxUpBps", d.maxUpBps)
+                put("done", d.doneTotal())
+                put("doneHttp", d.doneHttp)
+                put("doneVideo", d.doneVideo)
+                put("doneTorrent", d.doneTorrent)
+                put("failCount", d.failCount)
             })
         }
         call.respondText(
             JSONObject().apply { put("days", arr) }.toString(),
+            ContentType.Application.Json
+        )
+    }
+
+    get("/api/stats/extended") {
+        val stor = StatsSnapshots.storage()
+        val lastStor = stor.lastOrNull()
+        call.respondText(
+            JSONObject().apply {
+                put("peers", JSONObject().apply {
+                    put("seeds", StatsSnapshots.lastSeeds)
+                    put("peers", StatsSnapshots.lastPeers)
+                    put("peakSeeds", StatsSnapshots.peakSeeds)
+                    put("peakPeers", StatsSnapshots.peakPeers)
+                })
+                put("uptime", JSONObject().apply {
+                    put("bootCount", StatsSnapshots.bootCount)
+                    put("firstBootAt", StatsSnapshots.firstBootAt)
+                    put("lastBootAt", StatsSnapshots.lastBootAt)
+                    put("appUptimeMs", System.currentTimeMillis() - RelayApp.startTime)
+                })
+                put("storage", JSONObject().apply {
+                    put("dirSize", lastStor?.dirSize ?: 0L)
+                    put("quotaMovedTotal", stor.sumOf { it.quotaMoved })
+                    put("snapshots", stor.size)
+                })
+                put("net", JSONObject().apply {
+                    put("lossCount", StatsSnapshots.netLossCount())
+                })
+                put("throttle", JSONObject().apply {
+                    put("throttleCount", StatsSnapshots.throttleCount())
+                })
+            }.toString(),
             ContentType.Application.Json
         )
     }
@@ -52,4 +92,11 @@ private fun bucketJson(b: TrafficBucket): JSONObject = JSONObject().apply {
     put("downTorrent", b.downTorrent)
     put("upServe", b.upServe)
     put("upTorrent", b.upTorrent)
+    put("maxDownBps", b.maxDownBps)
+    put("maxUpBps", b.maxUpBps)
+    put("done", b.doneTotal())
+    put("doneHttp", b.doneHttp)
+    put("doneVideo", b.doneVideo)
+    put("doneTorrent", b.doneTorrent)
+    put("failCount", b.failCount)
 }

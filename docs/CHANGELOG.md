@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.38.0] - 2026-09-22 (미배포)
+
+### Fixed [web] — 통계 3열 깨짐 + 메뉴 클릭 불능
+- `#statsCards` flex→grid 3열(모바일도 3열 유지), `.card` 간섭 분리용 `.stats-card` 신설, breakdown 줄바꿈
+- 차트 X라벨 `09-` 잘림 수정(`i%7`+중앙정렬+viewBox), `#statsBreakdown` wrap
+- `hlItem` 중복 정의로 전체 `<script>` 파싱 실패 → 탭 전환 포함 전부 클릭 불능이던 버그 수정, `node --check` 통과
+
+### Added [android+web] — 통계 하이라이트 6종 (T-1040, PLAN_v0.38)
+- `TrafficHighlights` 순수 연산: 최다 다운로드일·Top3·주간평균/월예측·업다운비율·streak·타입비중 (traffic.json 변경 없음, `daily(400)` 스캔)
+- 웹 ✨ 하이라이트 2열 그리드 + 앱 `HighlightCard`, 5초 갱신
+- 검증: TrafficHighlightsTest 6건 GREEN
+
+### Added [android+web] — 원장 v2 + 스냅샷 (T-1041, PLAN_v0.39)
+- `TrafficDay/Bucket` 확장: 일별 최고속도(maxDown/UpBps)+완료건수 3종+실패건수, v1→v2 자동 마이그레이션(신규 0), `.bak` 규칙 유지
+- 계측 훅: HTTP/비디오/토렌트 완료·실패 카운터 + 3곳 속도 tick/폴링 `recordSpeed`
+- `StatsSnapshots` 5종(peers 5분 스냅샷+피크·uptime 부트·storage 일별+쿼터·net/throttle 최근 200 이벤트, 90일 prune)
+- API: summary/daily v2 필드 추가(기존 키 유지) + `GET /api/stats/extended` 신설
+- 웹 📈 기록 섹션 8칸 + 앱 `RecordCard` 7행
+- 검증: TrafficLedgerTest +4, StatsSnapshotsTest 5건 GREEN
+
+### Fixed [android] — 다운로드 알림에 토렌트 표시
+- `updateProgressNotification`이 HTTP만 보던 문제: 진행 중 토렌트(🌊)·시딩 중(🌱) 표시, 진행률 높은 쪽 대표 노출
+- 토렌트 상태 플로우에서도 2초 스로틀 갱신 (토렌트 단독 진행 시 실시간 반영)
+- T-937 마무리: 앱 토렌트 삭제 확인에 파일 동반삭제 안내 (완료분은 보관함 유지 문구)
+- T-938 마무리: 앱 보관함 폴더행에 ZIP 공유 버튼 (서버 /dl-folder와 동일 level 0 패스스루, cache+FileProvider 공유)
+- 검증: unit GREEN + assembleDebug+실기기 설치 성공(0.38.0/30)
+
 ## [0.37.0] - 2026-09-21 (미배포)
 
 ### Added [android+web] — 트래픽 통계 (T-1030~T-1037)

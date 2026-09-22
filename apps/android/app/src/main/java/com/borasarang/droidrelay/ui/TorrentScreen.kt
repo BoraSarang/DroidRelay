@@ -256,10 +256,16 @@ fun TorrentScreen(onShowSnack: (String) -> Unit = {}) {
     }
 
     showDeleteDialog?.let { job ->
+        val complete = job.state == TorrentState.DONE || job.state == TorrentState.SEEDING
         AlertDialog(
             onDismissRequest = { showDeleteDialog = null },
             title = { Text("torrent 삭제") },
-            text = { Text("'${job.name}' torrent를 삭제할까요?") },
+            text = {
+                Text(
+                    "'${job.name}' torrent를 목록에서 삭제할까요?" +
+                        if (complete) "\n받은 파일은 보관함에 유지됩니다." else "\n다운로드 중이던 파일도 함께 삭제됩니다.",
+                )
+            },
             confirmButton = {
                 TextButton(onClick = {
                     engine.cancel(job.id)

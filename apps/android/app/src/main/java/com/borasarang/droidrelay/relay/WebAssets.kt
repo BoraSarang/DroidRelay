@@ -206,6 +206,15 @@ object WebAssets {
   .settings-nav-item.active{background:var(--accent);color:var(--on-accent);font-weight:600}
   .settings-content{flex:1;min-width:0;display:none}
   .settings-content.active{display:block}
+  /* ── 통계 탭 전용 (v0.37.1: 3열 grid, .card 간섭 분리) ── */
+  #statsCards{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px}
+  .stats-card{min-width:0;background:var(--surface2);border:1px solid var(--line);border-radius:10px;padding:10px 12px;overflow:hidden}
+  .stats-card .s-title{font-weight:700;font-size:13px;color:var(--accent2);margin-bottom:4px}
+  .stats-card .s-total{font-weight:700;font-size:13px;line-height:1.6;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .stats-card .s-sub{font-size:11px;color:var(--muted);line-height:1.55;word-break:keep-all;overflow-wrap:anywhere;white-space:normal}
+  #statsChart{overflow-x:auto}
+  #statsChart svg{display:block;min-width:520px;max-width:100%}
+  #statsBreakdown{word-break:keep-all;overflow-wrap:anywhere;white-space:normal;line-height:1.6}
   /* ── 모바일 대응 (640px 이하) ── */
   @media (max-width:640px){
     .wrap{min-width:0;padding:12px}
@@ -246,6 +255,11 @@ object WebAssets {
     .sv input[type=range]{min-width:0}
     .ck{flex-wrap:wrap}
     .modal-stat{grid-template-columns:repeat(2,1fr)}
+    #statsCards{grid-template-columns:repeat(3,1fr);gap:6px}
+    .stats-card{padding:8px}
+    .stats-card .s-title{font-size:12px}
+    .stats-card .s-total{font-size:12px}
+    .stats-card .s-sub{font-size:10px}
     select{max-width:100%}
   }
 </style></head><body>
@@ -809,11 +823,21 @@ object WebAssets {
     <div class="sg" style="margin-bottom:12px">
       <div class="sh">📊 트래픽 통계</div>
       <div class="sb">일별 · 이번달 · 누적 업/다운로드 (서빙+토렌트 업로드 포함)</div>
-      <div id="statsCards" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px"></div>
+      <div id="statsCards"></div>
+    </div>
+    <div class="sg" style="margin-bottom:12px">
+      <div class="sh">✨ 하이라이트</div>
+      <div class="sb">최고 기록 · 평균 · 예측 · 비율 (400일 기준 연산)</div>
+      <div id="statsHighlights" style="display:grid;grid-template-columns:repeat(2,1fr);gap:6px;margin-top:10px"></div>
+    </div>
+    <div class="sg" style="margin-bottom:12px">
+      <div class="sh">📈 최고속도 · 완료 · 기기</div>
+      <div class="sb">일별 peak · 완료/실패 건수 · 피어 · 가동 · 저장공간 · 단절/스로틀</div>
+      <div id="statsRecords" style="display:grid;grid-template-columns:repeat(2,1fr);gap:6px;margin-top:10px"></div>
     </div>
     <div class="sg">
       <div class="sh">최근 30일 일별 그래프 <span class="sb" style="display:inline">■다운 ■업</span></div>
-      <div id="statsChart" style="overflow-x:auto"></div>
+      <div id="statsChart"></div>
       <div class="sb" id="statsBreakdown" style="margin-top:8px"></div>
     </div>
   </div>
@@ -2452,35 +2476,102 @@ function saveServerSettings(){
     .catch(function(e){alert('저장 실패: '+e);});
 }
 
-// ── 트래픽 통계 (v0.37, 외부 CDN 없이 자체 SVG) ──
+// ── 트래픽 통계 (v0.37.1, 3열 grid + 자체 SVG) ──
 function statsCard(title,b){
-  return '<div class="card" style="flex:1;min-width:150px"><div style="min-width:0;flex:1">'
-    +'<div class="name">'+title+'</div>'
-    +'<div class="file-meta">⬇ '+fmt(b.down)+' · ⬆ '+fmt(b.up)+'</div>'
-    +'<div class="file-meta" style="font-size:11px">받기 HTTP '+fmt(b.downHttp)+' · 비디오 '+fmt(b.downVideo)+' · 토렌트 '+fmt(b.downTorrent)+'</div>'
-    +'<div class="file-meta" style="font-size:11px">보내기 서빙 '+fmt(b.upServe)+' · 토렌트 '+fmt(b.upTorrent)+'</div>'
-    +'</div></div>';
+  return '<div class="stats-card">'
+    +'<div class="s-title">'+title+'</div>'
+    +'<div class="s-total">⬇ '+fmt(b.down)+'</div>'
+    +'<div class="s-total">⬆ '+fmt(b.up)+'</div>'
+    +'<div class="s-sub">받기 HTTP '+fmt(b.downHttp)+'<br>비디오 '+fmt(b.downVideo)+'<br>토렌트 '+fmt(b.downTorrent)+'</div>'
+    +'<div class="s-sub">보내기 서빙 '+fmt(b.upServe)+'<br>토렌트 '+fmt(b.upTorrent)+'</div>'
+    +'</div>';
 }
 function refreshStats(){
+  var summary=null;
   fetch('/api/stats/summary').then(function(r){return r.json();}).then(function(s){
+    summary=s;
     document.getElementById('statsCards').innerHTML=statsCard('오늘',s.today)+statsCard('이번달',s.month)+statsCard('누적',s.total);
+    if(window._statsDays)renderStatsHighlights(window._statsDays,s);
   }).catch(function(){});
-  fetch('/api/stats/daily?days=30').then(function(r){return r.json();}).then(function(d){renderStatsChart(d.days||[]);}).catch(function(){});
+  fetch('/api/stats/daily?days=400').then(function(r){return r.json();}).then(function(d){
+    var days=d.days||[];
+    window._statsDays=days;
+    renderStatsChart(days.slice(-30));
+    if(summary)renderStatsHighlights(days,summary);
+    renderStatsRecords(days,summary);
+  }).catch(function(){});
+  fetch('/api/stats/extended').then(function(r){return r.json();}).then(function(e){
+    window._statsExt=e;renderStatsRecords(window._statsDays||[],summary);
+  }).catch(function(){});
+}
+function spd(b){return fmt(b)+'/s';}
+function hlItem(label,value){
+  return '<div class="stats-card"><div class="s-title">'+esc(label)+'</div><div class="s-total">'+value+'</div></div>';
+}
+function renderStatsRecords(days,s){
+  var el=document.getElementById('statsRecords');
+  if(!el)return;
+  var peakD=0,peakU=0,peakDay='—';(days||[]).forEach(function(d){
+    if((d.maxDownBps||0)>peakD){peakD=d.maxDownBps;peakDay=d.date;}
+    if((d.maxUpBps||0)>peakU)peakU=d.maxUpBps;
+  });
+  var done=s&&s.total?((s.total.done||0)+'건(H '+(s.total.doneHttp||0)+' · V '+(s.total.doneVideo||0)+' · T '+(s.total.doneTorrent||0)+')'):'—';
+  var fail=s&&s.total?((s.total.failCount||0)+'건'):'—';
+  var e=window._statsExt||{};
+  var peers=e.peers?('현재 '+e.peers.seeds+'시드/'+e.peers.peers+'피어<br>피크 '+e.peers.peakSeeds+'/'+e.peers.peakPeers):'—';
+  var up=e.uptime?('부팅 '+e.uptime.bootCount+'회'):('가동 —');
+  var stor=e.storage?('보관함 '+fmt(e.storage.dirSize)+'<br>쿼터정리 누적 '+e.storage.quotaMovedTotal+'개'):'—';
+  var net=e.net?('단절 '+e.net.lossCount+'회'):'—';
+  var thr=e.throttle?('스로틀 '+e.throttle.throttleCount+'회'):'—';
+  el.innerHTML=
+    hlItem('최고 다운로드 속도',peakD>0?spd(peakD)+' ('+esc(peakDay)+')':'—')
+    +hlItem('최고 업로드 속도',peakU>0?spd(peakU):'—')
+    +hlItem('완료 건수',done)
+    +hlItem('실패 건수',fail)
+    +hlItem('피어',peers)
+    +hlItem('가동',up)
+    +hlItem('저장공간',stor)
+    +hlItem('네트워크/가드',net+' · '+thr);
+}
+function renderStatsHighlights(days,s){
+  var el=document.getElementById('statsHighlights');
+  if(!el)return;
+  var best=null;(days||[]).forEach(function(d){if(d.down>0&&(!best||d.down>best.down))best=d;});
+  var top3=(days||[]).filter(function(d){return d.down>0;}).sort(function(a,b){return b.down-a.down;}).slice(0,3);
+  var last7=(days||[]).slice(-7);
+  var avg7=last7.length?Math.round(last7.reduce(function(a,d){return a+d.down;},0)/last7.length):0;
+  var now=new Date(),elapsed=now.getDate(),dim=new Date(now.getFullYear(),now.getMonth()+1,0).getDate();
+  var forecast=s&&s.month?Math.round(s.month.down/elapsed*dim):0;
+  var share=(s&&s.total&&s.total.down>0)?(s.total.up/s.total.down*100).toFixed(1)+'%':'—';
+  var tratio=(s&&s.total&&s.total.downTorrent>0)?(s.total.upTorrent/s.total.downTorrent*100).toFixed(1)+'%':'—';
+  var cur=0;for(var i=days.length-1;i>=0;i--){if(days[i].down>0)cur++;else break;}
+  var longest=0,run=0;days.forEach(function(d){if(d.down>0){run++;if(run>longest)longest=run;}else run=0;});
+  var active30=days.slice(-30).filter(function(d){return d.down+d.up>0;}).length;
+  var td=s&&s.total?s.total.down:0;
+  var mix='—';
+  if(td>0){mix='H '+Math.round(s.total.downHttp/td*100)+'% · V '+Math.round(s.total.downVideo/td*100)+'% · T '+Math.round(s.total.downTorrent/td*100)+'%';}
+  el.innerHTML=
+    hlItem('최다 다운로드일',best?esc(best.date)+' · '+fmt(best.down):'—')
+    +hlItem('Top3',top3.length?top3.map(function(d){return esc(d.date.slice(5))+' '+fmt(d.down);}).join('<br>'):'—')
+    +hlItem('주간평균 / 월예측',fmt(avg7)+' / 약 '+fmt(forecast))
+    +hlItem('공유비율 전체/토렌트',share+' / '+tratio)
+    +hlItem('연속 / 최장 / 활성30일',cur+'일 / '+longest+'일 / '+active30+'일')
+    +hlItem('타입 비중',mix);
 }
 function renderStatsChart(days){
   var el=document.getElementById('statsChart');
   if(!days.length){el.innerHTML='<div class="empty">기록 없음</div>';return;}
   var max=1;days.forEach(function(d){max=Math.max(max,d.down,d.up);});
-  var W=days.length*24+44,H=170,base=H-22,bw=8;
-  var h='<svg width="'+W+'" height="'+H+'" style="display:block">';
+  var W=days.length*24+56,H=170,base=H-22,bw=8;
+  var h='<svg viewBox="0 0 '+W+' '+H+'" width="'+W+'" height="'+H+'">';
   days.forEach(function(d,i){
-    var x=40+i*24;
+    var x=52+i*24;
     var dh=Math.round((d.down/max)*(base-8)),uh=Math.round((d.up/max)*(base-8));
     h+='<rect x="'+x+'" y="'+(base-dh)+'" width="'+bw+'" height="'+dh+'" fill="var(--accent)"><title>'+esc(d.date)+' 받기 '+fmt(d.down)+'</title></rect>';
     h+='<rect x="'+(x+bw+1)+'" y="'+(base-uh)+'" width="'+bw+'" height="'+uh+'" fill="#f96"><title>'+esc(d.date)+' 보내기 '+fmt(d.up)+'</title></rect>';
-    if(i%5===0||i===days.length-1)h+='<text x="'+x+'" y="'+(H-6)+'" font-size="9" fill="var(--dim)">'+esc(d.date.slice(5))+'</text>';
+    if(i%7===0||i===days.length-1)h+='<text x="'+(x+bw)+'" y="'+(H-6)+'" font-size="9" fill="var(--dim)" text-anchor="middle">'+esc(d.date.slice(5))+'</text>';
   });
-  h+='<line x1="36" y1="8" x2="36" y2="'+base+'" stroke="var(--line)"/><line x1="36" y1="'+base+'" x2="'+W+'" y2="'+base+'" stroke="var(--line)"/>';
+  h+='<line x1="48" y1="8" x2="48" y2="'+base+'" stroke="var(--line)"/><line x1="48" y1="'+base+'" x2="'+W+'" y2="'+base+'" stroke="var(--line)"/>';
   h+='<text x="2" y="16" font-size="9" fill="var(--dim)">'+fmt(max)+'</text></svg>';
   el.innerHTML=h;
   var t=days[days.length-1];
