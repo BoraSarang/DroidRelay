@@ -9,7 +9,6 @@ import io.ktor.server.request.receiveChannel
 import io.ktor.server.request.receiveMultipart
 import io.ktor.server.request.receiveText
 import io.ktor.server.response.header
-import io.ktor.server.response.respondBytesWriter
 import io.ktor.server.response.respondOutputStream
 import io.ktor.server.response.respondText
 import io.ktor.server.routing.Route
@@ -17,7 +16,8 @@ import io.ktor.server.routing.get
 import io.ktor.server.routing.post
 import io.ktor.utils.io.readAvailable
 import io.ktor.utils.io.toByteArray
-import io.ktor.utils.io.writeFully
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
 /** 보관함 경로 가드 — dlRoot 하위로 한정 (T-936 D1, routing 지역함수에서 승격) */
@@ -406,51 +406,56 @@ internal fun Route.storageRoutes(context: Context, serverRef: RelayServer) {
         call.response.header(HttpHeaders.CacheControl, "no-store, must-revalidate")
         // 실시간 ZIP 스트리밍 — 임시 파일 없이 대용량 대응 (T-938)
         // T-939: 영상 등 기압축 파일 재압축 방지 — DEFLATED+level 0 패스스루(사전 스캔 불필요) + 256KB 버퍼
+        // 전송 중 watchdog 재시작 방지용 추적 + 블로킹 ZIP I/O는 Dispatchers.IO (이벤트루프 기아 방지)
         val startedAt = System.currentTimeMillis()
         var fileCount = 0
         var totalBytes = 0L
         var sentBytes = 0L
-        call.respondOutputStream(contentType = ContentType.Application.Zip) {
-            val raw = this
-            // 트래픽 통계 (v0.37) — 실제 전송 바이트 계수
-            val counting = object : java.io.OutputStream() {
-                override fun write(b: Int) {
-                    raw.write(b); sentBytes++
-                }
-                override fun write(b: ByteArray, off: Int, len: Int) {
-                    raw.write(b, off, len); sentBytes += len
-                }
-                override fun flush() = raw.flush()
-                override fun close() = raw.close()
-            }
-            val root = dir.canonicalFile
-            java.io.BufferedOutputStream(counting, 256 * 1024).use { buffered ->
-                java.util.zip.ZipOutputStream(buffered).use { zip ->
-                    zip.setLevel(0)
-                    fun addDir(d: java.io.File, prefix: String) {
-                        d.listFiles()?.sortedBy { it.name }?.forEach { f ->
-                            // canonical 재검증 — 심볼릭링크 탈출 차단
-                            val c = runCatching { f.canonicalFile }.getOrNull() ?: return@forEach
-                            if (!c.path.startsWith(root.path)) return@forEach
-                            val entryName = prefix + f.name
-                            if (f.isDirectory) {
-                                zip.putNextEntry(java.util.zip.ZipEntry("$entryName/"))
-                                zip.closeEntry()
-                                addDir(f, "$entryName/")
-                            } else if (f.isFile) {
-                                zip.putNextEntry(java.util.zip.ZipEntry(entryName))
-                                f.inputStream().use { input ->
-                                    val buf = ByteArray(256 * 1024)
-                                    var n: Int
-                                    while (input.read(buf).also { n = it } != -1) zip.write(buf, 0, n)
+        TransferTracker.track {
+            call.respondOutputStream(contentType = ContentType.Application.Zip) {
+                val raw = this
+                withContext(Dispatchers.IO) {
+                    // 트래픽 통계 (v0.37) — 실제 전송 바이트 계수
+                    val counting = object : java.io.OutputStream() {
+                        override fun write(b: Int) {
+                            raw.write(b); sentBytes++
+                        }
+                        override fun write(b: ByteArray, off: Int, len: Int) {
+                            raw.write(b, off, len); sentBytes += len
+                        }
+                        override fun flush() = raw.flush()
+                        override fun close() = raw.close()
+                    }
+                    val root = dir.canonicalFile
+                    java.io.BufferedOutputStream(counting, 256 * 1024).use { buffered ->
+                        java.util.zip.ZipOutputStream(buffered).use { zip ->
+                            zip.setLevel(0)
+                            fun addDir(d: java.io.File, prefix: String) {
+                                d.listFiles()?.sortedBy { it.name }?.forEach { f ->
+                                    // canonical 재검증 — 심볼릭링크 탈출 차단
+                                    val c = runCatching { f.canonicalFile }.getOrNull() ?: return@forEach
+                                    if (!c.path.startsWith(root.path)) return@forEach
+                                    val entryName = prefix + f.name
+                                    if (f.isDirectory) {
+                                        zip.putNextEntry(java.util.zip.ZipEntry("$entryName/"))
+                                        zip.closeEntry()
+                                        addDir(f, "$entryName/")
+                                    } else if (f.isFile) {
+                                        zip.putNextEntry(java.util.zip.ZipEntry(entryName))
+                                        f.inputStream().use { input ->
+                                            val buf = ByteArray(256 * 1024)
+                                            var n: Int
+                                            while (input.read(buf).also { n = it } != -1) zip.write(buf, 0, n)
+                                        }
+                                        zip.closeEntry()
+                                        fileCount++
+                                        totalBytes += f.length()
+                                    }
                                 }
-                                zip.closeEntry()
-                                fileCount++
-                                totalBytes += f.length()
                             }
+                            addDir(root, "")
                         }
                     }
-                    addDir(root, "")
                 }
             }
         }
@@ -469,20 +474,11 @@ internal fun Route.storageRoutes(context: Context, serverRef: RelayServer) {
             call.respondText("404 없음", ContentType.Text.Plain, HttpStatusCode.NotFound)
         } else {
             DebugLogger.i("Http", "파일 다운로드 요청 name=$name")
-            call.response.header(HttpHeaders.ContentDisposition, DispositionHeader.make(file.name))
             call.response.header("X-Content-Type-Options", "nosniff")
             call.response.header(HttpHeaders.CacheControl, "no-store, must-revalidate")
-            call.respondBytesWriter(contentType = ContentType.Application.OctetStream, contentLength = file.length()) {
-                file.inputStream().use { input ->
-                    val buf = ByteArray(64 * 1024)
-                    var read: Int
-                    while (input.read(buf).also { read = it } != -1) {
-                        writeFully(buf, 0, read)
-                    }
-                }
-            }
-            // 트래픽 통계 (v0.37)
-            TrafficLedger.addUpServe(file.length())
+            // Range(이어받기) + Dispatchers.IO — 대용량 전송 중 이벤트루프 기아·절단 방지
+            // (Content-Disposition: attachment는 serveFile이 설정)
+            call.serveFile(file, "dl-file", inline = false)
         }
     }
 
