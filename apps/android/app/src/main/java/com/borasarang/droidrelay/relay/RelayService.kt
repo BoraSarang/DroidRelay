@@ -61,6 +61,11 @@ class RelayService : Service() {
         // 트래픽 통계 원장 로드 (v0.37)
         runCatching { TrafficLedger.init(applicationContext) }
             .onFailure { DebugLogger.e(TAG, "트래픽 원장 로드 실패(무시하고 계속)", it) }
+        // 통계 스냅샷 저장소 + 부트 기록 (v0.39 P2)
+        runCatching {
+            StatsSnapshots.init(applicationContext)
+            StatsSnapshots.recordBoot()
+        }.onFailure { DebugLogger.e(TAG, "스냅샷 저장소 로드 실패(무시하고 계속)", it) }
 
         // TorrentEngine 시작
         torrentEng.start()
@@ -277,9 +282,10 @@ class RelayService : Service() {
         networkMonitor = NetworkMonitor(applicationContext) { engine.retryFailed() }
         networkMonitor?.register()
 
-        // ⑤ torrent 완료/실패 알림
+        // ⑤ torrent 완료/실패 알림 + 진행바 갱신 (토렌트 단독 진행 시 HTTP 플로우가 안 돌므로 여기서도 갱신)
         scope.launch {
             var lastTorrentStates: Map<String, TorrentState> = emptyMap()
+            var lastTorrentNotifUpdate = 0L
             TorrentRepository.torrents.collectLatest { torrents ->
                 if (notificationsOn) {
                     torrents.forEach { t ->
@@ -303,6 +309,12 @@ class RelayService : Service() {
                     }
                 }
                 lastTorrentStates = torrents.associate { it.id to it.state }
+                // 진행바 실시간 갱신 (2초 스로틀) — HTTP 작업 없어도 토렌트 속도/진행 반영
+                val nowT = System.currentTimeMillis()
+                if (nowT - lastTorrentNotifUpdate >= NOTIF_THROTTLE_MS) {
+                    lastTorrentNotifUpdate = nowT
+                    runCatching { updateProgressNotification(JobsRepository.all()) }
+                }
             }
         }
     }
@@ -415,25 +427,67 @@ class RelayService : Service() {
     private fun updateProgressNotification(jobs: List<Job>) {
         val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         val running = jobs.filter { it.state == JobState.RUNNING }
+        val torrents = runCatching { TorrentRepository.all() }.getOrDefault(emptyList())
+        val tActive = torrents.filter {
+            it.state == TorrentState.DOWNLOADING || it.state == TorrentState.FETCHING_METADATA
+        }
+        val seeding = torrents.filter { it.state == TorrentState.SEEDING }
         val ip = lanAddress()
-        val totalSpeed = running.sumOf { it.speedBps }
+        val httpSpeed = running.sumOf { it.speedBps }
+        val tDownSpeed = tActive.sumOf { it.downloadSpeed }
+        val tUpSpeed = (tActive + seeding).sumOf { it.uploadSpeed }
 
-        val notif = if (running.isEmpty()) {
-            baseNotif()
-                .setContentTitle(getString(R.string.notif_running_title))
-                .setContentText("http://$ip:${activePort()} · 대기 중인 다운로드 없음")
-                .setOngoing(true)
-                .build()
+        val notif = if (running.isEmpty() && tActive.isEmpty()) {
+            if (seeding.isNotEmpty()) {
+                val first = seeding.maxByOrNull { it.uploadSpeed }!!
+                baseNotif()
+                    .setContentTitle("🌱 시딩 중 ${seeding.size}건 · ↑ ${tUpSpeed / 1024} KB/s")
+                    .setContentText("${first.name} (${first.seeds}시드/${first.peers}피어)")
+                    .setOngoing(true)
+                    .setOnlyAlertOnce(true)
+                    .build()
+            } else {
+                baseNotif()
+                    .setContentTitle(getString(R.string.notif_running_title))
+                    .setContentText("http://$ip:${activePort()} · 대기 중인 다운로드 없음")
+                    .setOngoing(true)
+                    .build()
+            }
         } else {
-            val first = running.maxByOrNull { it.progress }!!
-            val pct = (first.progress * 100).toInt().coerceIn(0, 100)
-            baseNotif()
-                .setContentTitle("${running.size}건 다운로드 중 · ⚡ ${totalSpeed / 1024} KB/s")
-                .setContentText("${first.filename} $pct% (${fmtBytes(first.downloadedBytes)}${if (first.totalBytes > 0) "/" + fmtBytes(first.totalBytes) else ""})")
-                .setProgress(100, pct, first.totalBytes <= 0)
-                .setOngoing(true)
-                .setOnlyAlertOnce(true)
-                .build()
+            val total = running.size + tActive.size
+            val totalSpeed = httpSpeed + tDownSpeed
+            val topHttp = running.maxByOrNull { it.progress }
+            val topTorrent = tActive.maxByOrNull { it.progress }
+            // 진행률 높은 쪽을 대표 표시 (동률이면 HTTP 우선)
+            val useTorrent = topTorrent != null &&
+                (topHttp == null || topTorrent.progress >= topHttp.progress)
+            if (useTorrent) {
+                val t = topTorrent!!
+                val pct = (t.progress * 100).toInt().coerceIn(0, 100)
+                val sizeText = if (t.totalSize > 0) {
+                    " (${fmtBytes(t.downloadedSize)}/${fmtBytes(t.totalSize)})"
+                } else {
+                    ""
+                }
+                val stateText = if (t.state == TorrentState.FETCHING_METADATA) "메타데이터 받는 중" else "$pct%$sizeText"
+                baseNotif()
+                    .setContentTitle("🌊 ${total}건 다운로드 중 · ⚡ ${totalSpeed / 1024} KB/s")
+                    .setContentText("${t.name} $stateText")
+                    .setProgress(100, pct, t.totalSize <= 0)
+                    .setOngoing(true)
+                    .setOnlyAlertOnce(true)
+                    .build()
+            } else {
+                val first = topHttp!!
+                val pct = (first.progress * 100).toInt().coerceIn(0, 100)
+                baseNotif()
+                    .setContentTitle("${total}건 다운로드 중 · ⚡ ${totalSpeed / 1024} KB/s")
+                    .setContentText("${first.filename} $pct% (${fmtBytes(first.downloadedBytes)}${if (first.totalBytes > 0) "/" + fmtBytes(first.totalBytes) else ""})")
+                    .setProgress(100, pct, first.totalBytes <= 0)
+                    .setOngoing(true)
+                    .setOnlyAlertOnce(true)
+                    .build()
+            }
         }
         nm.notify(NOTIF_ID, notif)
     }

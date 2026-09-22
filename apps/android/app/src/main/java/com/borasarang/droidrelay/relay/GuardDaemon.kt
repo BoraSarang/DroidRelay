@@ -135,10 +135,12 @@ class GuardDaemon(
             isThrottled = true
             val reasonStr = reasons.joinToString(", ")
             onThrottleChange?.invoke(true, reasonStr)
+            runCatching { StatsSnapshots.recordThrottle(true, reasonStr) }
             DebugLogger.w(TAG, "가드 스로틀링 발동: $reasonStr")
         } else if (!shouldThrottle && isThrottled) {
             isThrottled = false
             onThrottleChange?.invoke(false, "정상 복귀")
+            runCatching { StatsSnapshots.recordThrottle(false, "정상 복귀") }
             DebugLogger.i(TAG, "가드 스로틀링 해제 — 정상 복귀")
         }
     }

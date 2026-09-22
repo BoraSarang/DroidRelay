@@ -731,6 +731,7 @@ val th = withGate { session?.find(Sha1Hash.parseHex(expectedHash)) }
                         finishedAt = System.currentTimeMillis(),
                     )
                 }
+                TrafficLedger.addDoneTorrent()
                 DebugLogger.i(TAG, "torrent 완료 id=$id → 보관함 이동")
                 finishedMove = id to torrentName
             }
@@ -741,6 +742,7 @@ val th = withGate { session?.find(Sha1Hash.parseHex(expectedHash)) }
                 TorrentRepository.update(id) {
                     it.copy(state = TorrentState.FAILED, errorMessage = "토렌트 에러")
                 }
+                TrafficLedger.addFail()
                 persistNow()
                 DebugLogger.e(TAG, "torrent 에러 id=$id")
             }
@@ -859,6 +861,9 @@ val th = withGate { session?.find(Sha1Hash.parseHex(expectedHash)) }
                         val (countDown, countUp) = TorrentCounters.diff(id, status.totalDone(), status.totalUpload())
                         if (countDown > 0) TrafficLedger.addDownTorrent(countDown)
                         if (countUp > 0) TrafficLedger.addUpTorrent(countUp)
+                        val dlRate = status.downloadRate().toLong().coerceAtLeast(0)
+                        val ulRate = status.uploadRate().toLong().coerceAtLeast(0)
+                        if (dlRate > 0 || ulRate > 0) TrafficLedger.recordSpeed(dlRate, ulRate)
 
                         // 시더 부재 자동 중단 (이슈 4) — 설정 토글 시에만 동작
                         val seedLimit = torrentMinSeedWaitSec
@@ -879,6 +884,14 @@ val th = withGate { session?.find(Sha1Hash.parseHex(expectedHash)) }
                         }
                     }
                     invalidIds.forEach { unregisterMapping(it) }
+                    // 피어 스냅샷 (v0.39 P2, 5분 디바운스)
+                    runCatching {
+                        val all = TorrentRepository.all()
+                        StatsSnapshots.recordPeers(
+                            all.sumOf { it.seeds.toLong() },
+                            all.sumOf { it.peers.toLong() },
+                        )
+                    }
                 } catch (_: Exception) {}
                 persistDebounced()
             }

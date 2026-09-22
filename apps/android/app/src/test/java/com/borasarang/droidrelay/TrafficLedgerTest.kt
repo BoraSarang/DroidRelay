@@ -157,4 +157,58 @@ class TrafficLedgerTest {
         TrafficLedger.addDownHttp(-50, t)
         assertEquals(0L, TrafficLedger.summary(t).today.downTotal())
     }
+
+    @Test
+    fun `v2 속도 max는 최대값 유지`() {
+        TrafficLedger.configure(ledgerFile())
+        val t = ms(2026, 9, 21)
+        TrafficLedger.recordSpeed(1000, 200, t)
+        TrafficLedger.recordSpeed(500, 800, t)
+        val s = TrafficLedger.summary(t)
+        assertEquals(1000L, s.today.maxDownBps)
+        assertEquals(800L, s.today.maxUpBps)
+    }
+
+    @Test
+    fun `v2 완료실패 건수 누적`() {
+        TrafficLedger.configure(ledgerFile())
+        val t = ms(2026, 9, 21)
+        TrafficLedger.addDoneHttp(t)
+        TrafficLedger.addDoneVideo(t)
+        TrafficLedger.addDoneTorrent(t)
+        TrafficLedger.addFail(t)
+        val s = TrafficLedger.summary(t)
+        assertEquals(3L, s.today.doneTotal())
+        assertEquals(1L, s.today.failCount)
+    }
+
+    @Test
+    fun `v1 원장은 v2 기본값 0으로 마이그레이션`() {
+        val f = ledgerFile()
+        f.writeText("""{"days":[{"date":"2026-09-21","downHttp":10,"downVideo":20,"downTorrent":30,"upServe":40,"upTorrent":50}]}""")
+        TrafficLedger.configure(f)
+        val s = TrafficLedger.summary(ms(2026, 9, 21))
+        assertEquals(60L, s.today.downTotal())
+        assertEquals(0L, s.today.maxDownBps)
+        assertEquals(0L, s.today.doneTotal())
+        assertEquals(0L, s.today.failCount)
+    }
+
+    @Test
+    fun `v2 저장 후 로드 round-trip`() {
+        TrafficLedger.configure(ledgerFile())
+        val t = ms(2026, 9, 21)
+        TrafficLedger.addDownHttp(10, t)
+        TrafficLedger.recordSpeed(9000, 100, t)
+        TrafficLedger.addDoneTorrent(t)
+        TrafficLedger.addFail(t)
+        TrafficLedger.flush()
+        TrafficLedger.configure(ledgerFile())
+        val s = TrafficLedger.summary(t)
+        assertEquals(10L, s.today.downHttp)
+        assertEquals(9000L, s.today.maxDownBps)
+        assertEquals(100L, s.today.maxUpBps)
+        assertEquals(1L, s.today.doneTorrent)
+        assertEquals(1L, s.today.failCount)
+    }
 }
