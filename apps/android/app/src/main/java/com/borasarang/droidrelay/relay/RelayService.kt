@@ -163,6 +163,7 @@ class RelayService : Service() {
         scope.launch {
             var lastInterval = -1
             var healthyCount = 0
+            var failStreak = 0
             settingsRepo.settings.collectLatest { s ->
                 val intervalMs = s.watchdogIntervalSec * 1000L
                 while (true) {
@@ -188,10 +189,24 @@ class RelayService : Service() {
                     }
                     if (current.isHealthy()) {
                         healthyCount++
+                        failStreak = 0
                         if (healthyCount == 1) DebugLogger.d(TAG, "watchdog: 서버 정상")
                     } else {
                         healthyCount = 0
-                        DebugLogger.w(TAG, "watchdog: 서버 무응답 → 재시작")
+                        failStreak++
+                        // 대용량 전송 중에는 헬스체크가 밀릴 수 있음 — 재시작하면 전송이 끊기므로 연기
+                        val active = TransferTracker.count
+                        if (active > 0) {
+                            DebugLogger.w(TAG, "watchdog: 서버 무응답이나 전송 중(${active}건) → 재시작 연기")
+                            continue
+                        }
+                        // 1회성 지터에 재시작하지 않음 — 연속 실패 시에만
+                        if (failStreak < WATCHDOG_FAIL_STREAK) {
+                            DebugLogger.w(TAG, "watchdog: 서버 무응답 ${failStreak}회째 → ${WATCHDOG_FAIL_STREAK}회 연속 시 재시작")
+                            continue
+                        }
+                        failStreak = 0
+                        DebugLogger.w(TAG, "watchdog: 서버 무응답 ${WATCHDOG_FAIL_STREAK}회 연속 → 재시작")
                         current.restart()
                     }
                 }
@@ -342,11 +357,21 @@ class RelayService : Service() {
             ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
             isForeground = false
         }
-        server?.stop()
-        server = null
+        // 무거운 정지(Netty graceful + libtorrent 세션)는 백그라운드로 — onDestroy가 메인스레드에서
+        // 6초 FGS 정지 타임아웃을 넘기면 ForegroundServiceDidNotStopInTimeException 크래시
+        val serverToStop = server.also { server = null }
+        val torrentToStop = torrentEngine.also { torrentEngine = null }
+        if (serverToStop != null || torrentToStop != null) {
+            kotlin.concurrent.thread(isDaemon = true, name = "RelayService-stop") {
+                runCatching { serverToStop?.stop() }
+                    .onFailure { DebugLogger.e(TAG, "서버 백그라운드 정지 실패(무시)", it) }
+                runCatching { torrentToStop?.stop() }
+                    .onFailure { DebugLogger.e(TAG, "토렌트 백그라운드 정지 실패(무시)", it) }
+                DebugLogger.i(TAG, "백그라운드 정지 완료")
+            }
+        }
         networkMonitor?.unregister()
-        torrentEngine?.stop()
-        torrentEngine = null
+        networkMonitor = null
         rssManager?.stop()
         rssManager = null
         guardDaemon?.stop()
@@ -362,9 +387,9 @@ class RelayService : Service() {
         runCatching { TrafficLedger.flush() }
         // 강제종료/서비스 종료 시 즉시 영구 저장 (T-111)
         val jobs = com.borasarang.droidrelay.relay.JobsRepository.all()
-        JobsPersistence(applicationContext).save(jobs)
+        runCatching { JobsPersistence(applicationContext).save(jobs) }
         // Torrent 상태 저장
-        TorrentRepository.all().let { TorrentPersistence(applicationContext).save(it) }
+        runCatching { TorrentRepository.all().let { TorrentPersistence(applicationContext).save(it) } }
         scope.cancel()
         super.onDestroy()
     }
@@ -598,6 +623,7 @@ class RelayService : Service() {
         private const val GATE_NOTIF_PREFIX = 20000
         private const val SAVE_DEBOUNCE_MS = 10_000L
         private const val NOTIF_THROTTLE_MS = 2_000L
+        private const val WATCHDOG_FAIL_STREAK = 3
         const val ACTION_ALLOW = "com.borasarang.droidrelay.ALLOW"
         const val ACTION_DENY = "com.borasarang.droidrelay.DENY"
         const val EXTRA_IP = "ip"

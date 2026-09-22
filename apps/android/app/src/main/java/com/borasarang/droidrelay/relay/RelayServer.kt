@@ -531,6 +531,21 @@ internal suspend fun ApplicationCall.serveFavicon(context: Context, path: String
     respondBytes(bytes, asset.contentType)
 }
 
+/** 활성 파일 전송 추적 — watchdog이 전송 중 서버 재시작으로 연결을 끊지 않게 연기용 */
+internal object TransferTracker {
+    private val active = java.util.concurrent.atomic.AtomicInteger(0)
+    val count: Int get() = active.get()
+
+    suspend fun <T> track(block: suspend () -> T): T {
+        active.incrementAndGet()
+        return try {
+            block()
+        } finally {
+            active.decrementAndGet()
+        }
+    }
+}
+
 /** Range(이어받기) 지원 파일 스트리밍 */
 internal suspend fun ApplicationCall.serveFile(
     file: File,
@@ -561,18 +576,20 @@ internal suspend fun ApplicationCall.serveFile(
     }
 
     val t0 = System.currentTimeMillis()
-    respondBytesWriter(contentType = contentType ?: ContentType.Application.OctetStream, contentLength = length) {
-        withContext(Dispatchers.IO) {
-            RandomAccessFile(file, "r").use { raf ->
-                raf.seek(range.from)
-                val buf = ByteArray(SERVE_BUFFER_SIZE)
-                var remaining = length
-                while (remaining > 0) {
-                    val want = minOf(buf.size.toLong(), remaining).toInt()
-                    val n = raf.read(buf, 0, want)
-                    if (n <= 0) break
-                    writeFully(buf, 0, n)
-                    remaining -= n
+    TransferTracker.track {
+        respondBytesWriter(contentType = contentType ?: ContentType.Application.OctetStream, contentLength = length) {
+            withContext(Dispatchers.IO) {
+                RandomAccessFile(file, "r").use { raf ->
+                    raf.seek(range.from)
+                    val buf = ByteArray(SERVE_BUFFER_SIZE)
+                    var remaining = length
+                    while (remaining > 0) {
+                        val want = minOf(buf.size.toLong(), remaining).toInt()
+                        val n = raf.read(buf, 0, want)
+                        if (n <= 0) break
+                        writeFully(buf, 0, n)
+                        remaining -= n
+                    }
                 }
             }
         }
