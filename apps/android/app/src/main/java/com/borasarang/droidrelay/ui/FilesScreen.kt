@@ -23,6 +23,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.InsertDriveFile
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -66,6 +67,54 @@ private fun fmtBytesS(n: Long): String = when {
     n < 1_048_576 -> "${n / 1024} KB"
     n < 1_073_741_824 -> String.format("%.1f MB", n / 1_048_576.0)
     else -> String.format("%.2f GB", n / 1_073_741_824.0)
+}
+
+/** 폴더를 cache ZIP으로 묶음 — level 0 패스스루 + 심볼릭링크 탈출 차단 (서버 /dl-folder와 동일 규칙) */
+private fun zipFolder(context: android.content.Context, dir: File): File {
+    val root = dir.canonicalFile
+    require(root.isDirectory) { "폴더 없음" }
+    val safeName = dir.name.replace(Regex("[^a-zA-Z0-9가-힣._-]"), "_").ifBlank { "download" }
+    val out = File(context.cacheDir, "share-$safeName.zip")
+    if (out.exists()) out.delete()
+    java.io.BufferedOutputStream(out.outputStream(), 256 * 1024).use { buffered ->
+        java.util.zip.ZipOutputStream(buffered).use { zip ->
+            zip.setLevel(0)
+            fun addDir(d: File, prefix: String) {
+                d.listFiles()?.sortedBy { it.name }?.forEach { f ->
+                    val c = runCatching { f.canonicalFile }.getOrNull() ?: return@forEach
+                    if (!c.path.startsWith(root.path)) return@forEach
+                    val entryName = prefix + f.name
+                    if (f.isDirectory) {
+                        zip.putNextEntry(java.util.zip.ZipEntry("$entryName/"))
+                        zip.closeEntry()
+                        addDir(f, "$entryName/")
+                    } else if (f.isFile) {
+                        zip.putNextEntry(java.util.zip.ZipEntry(entryName))
+                        f.inputStream().use { input ->
+                            val buf = ByteArray(256 * 1024)
+                            var n: Int
+                            while (input.read(buf).also { n = it } != -1) zip.write(buf, 0, n)
+                        }
+                        zip.closeEntry()
+                    }
+                }
+            }
+            addDir(root, "")
+        }
+    }
+    return out
+}
+
+private fun shareZip(context: android.content.Context, zip: File) {
+    val uri = androidx.core.content.FileProvider.getUriForFile(
+        context, "${context.packageName}.fileprovider", zip,
+    )
+    val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+        type = "application/zip"
+        putExtra(android.content.Intent.EXTRA_STREAM, uri)
+        addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    }
+    context.startActivity(android.content.Intent.createChooser(send, "폴더 ZIP 공유"))
 }
 
 private val DL_ROOT = File("/sdcard/Download/DroidRelay")
@@ -212,6 +261,24 @@ fun FilesScreen(onShowSnack: (String) -> Unit = {}) {
                         // 이름 변경
                         IconButton(onClick = { renameTarget.value = item; renameText.value = item.name }) {
                             Icon(Icons.Filled.Edit, "이름변경", tint = cs.onSurfaceVariant, modifier = Modifier.size(20.dp))
+                        }
+                        // 폴더 ZIP 공유 (T-938 — 서버 /dl-folder와 동일 level 0 패스스루)
+                        if (item.isDir) {
+                            IconButton(onClick = {
+                                toast("ZIP 만드는 중…")
+                                scope.launch(Dispatchers.IO) {
+                                    runCatching { zipFolder(context, File(DL_ROOT, fullPath(item.name))) }
+                                        .onSuccess { zip ->
+                                            withContext(Dispatchers.Main) { shareZip(context, zip) }
+                                        }
+                                        .onFailure { e ->
+                                            DebugLogger.e("Storage", "폴더 ZIP 실패", e)
+                                            toast("ZIP 실패: ${e.message}")
+                                        }
+                                }
+                            }) {
+                                Icon(Icons.Filled.Share, "폴더 ZIP 공유", tint = cs.onSurfaceVariant, modifier = Modifier.size(20.dp))
+                            }
                         }
                         // 잘라내기 (파일만)
                         if (!item.isDir) {

@@ -308,8 +308,8 @@ T-001~T-008 전부 완료 (커밋 7574486).
 | T-934 | **Phase2 T-931 후속 안정화** — 3종 alert transient 명시·FINISHED IO 게이트 밖·register/unregisterMapping·session 체크 게이트 안·seedWait 정리 | ✅ |
 | T-935 | **Phase3 설정 단일화** — SettingsConstraints 단일 진실·앱 슬라이더 통일·Repo 기본값 512/2·reset 상수화·웹 kblabel | ✅ |
 | T-936 | **Phase4 구조 분리** — RelayServer 1897→519 (Torrent/Job/Settings/Storage/DebugRoutes+StorageGuard)·WebAssets 중복삭제·apiGet/apiPost·num/kblabel·에러코드 8종 등록 | ✅ |
-| T-937 | **웹 토렌트 삭제 UX + 잔존 정리** — 삭제 컨펌('목록에서 삭제+파일 동반안내')·버튼 앱 통일(추출중 일시정지·실패 재개·시딩 삭제만)·cancel() infohash 잔존 디렉토리 정리 | 🔄 |
-| T-938 | **보관함 폴더 다운로드** — `GET /dl-folder/` ZIP 실시간 스트리밍 + 웹 폴더행 📦 버튼 | 🔄 |
+| T-937 | **웹 토렌트 삭제 UX + 잔존 정리** — 삭제 컨펌('목록에서 삭제+파일 동반안내')·버튼 앱 통일(추출중 일시정지·실패 재개·시딩 삭제만)·cancel() infohash 잔존 디렉토리 정리 | ✅ |
+| T-938 | **보관함 폴더 다운로드** — `GET /dl-folder/` ZIP 실시간 스트리밍 + 웹 폴더행 📦 버튼 | ✅ |
 | T-939 | **폴더 다운로드 속도 개선** — `setLevel(0)` 패스스루 + 256KB 버퍼 + 계측 로그 (PLAN_v0.17_dl-folder-speed) | ✅ |
 
 ## v0.18 (2026-09-07) — 담기↔소비 완성 (PLAN_v0.18_media-share_android.md)
