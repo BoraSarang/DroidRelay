@@ -526,4 +526,4 @@ T-001~T-008 전부 완료 (커밋 7574486).
 | T-1046 | Phase B — tryStart TOCTOU·add 중복 가드·start():Boolean·ScheduleJobService scope·메인 I/O 제거 (#4~#8) | ✅ |
 | T-1047 | Phase C — onTaskRemoved 유휴 종료·429/5xx 재시도·DeviceGate TTL·moveToStorage 회피이름·Thumb Semaphore·Janitor 캐시·UUID/reorder·respondErr 이스케이프·RSS close·OkHttp 공유 (#9~#18) | ✅ |
 | T-1048 | Phase D — mockk/coroutines-test/turbine + 회귀 테스트 + test 169 GREEN + ktlint GREEN + assembleDebug + 실기기 설치 | ✅ |
-| T-1049 | Phase E (다음 세션) — WebAssets.kt 분할·SettingsScreen 분할·권한 축소 | ⬜ |
+| T-1049 | Phase E — WebAssets 파사드 분할(2859→8+2715+146) + SettingsScreen 섹션 분할(1236→68+5파일) + READ/WRITE maxSdkVersion 축소 | ✅ |

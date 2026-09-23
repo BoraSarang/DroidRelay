@@ -1,6 +1,11 @@
 # Changelog
 
-## [Unreleased] — 안정성 19건 (Phase A~D) + 종합 정리
+## [Unreleased] — 안정성 19건 (Phase A~D) + Phase E 분할·권한 + 종합 정리
+
+### Changed [android] — Phase E (WebAssets·SettingsScreen 분할 + 권한 축소)
+- `WebAssets.kt` 2859행 → 파사드 8행 + `WebDashboardHtml.kt`(2715) + `WebDebugHtml.kt`(146) — 공개 API `WebAssets.dashboardHtml`/`debugHtml` 불변, JS `node --check` OK
+- `SettingsScreen.kt` 1236행 → 엔트리 68행 + `SettingsComponents`/`SettingsServerSection`/`SettingsGeneralSections`/`SettingsTorrentSection`/`SettingsServiceSections` (섹션 12종 `internal fun` 추출, UI 동작·문구·순서 무변경)
+- `AndroidManifest`: `READ_EXTERNAL_STORAGE` `maxSdkVersion=32`, `WRITE_EXTERNAL_STORAGE` `maxSdkVersion=29` (API 30+는 `MANAGE_EXTERNAL_STORAGE`, legacy 29는 `requestLegacyExternalStorage` 유지)
 
 ### Fixed [android] — 안정성 Phase A~D (19건)
 - **#1** `publishToDownloads(): Boolean` — MediaStore 게시 성공 시에만 앱 전용 원본 삭제 (실패 시 URI·원본 보존)
