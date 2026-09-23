@@ -11,8 +11,8 @@
 - Gradle 9.5.0 wrapper · AGP 9.3.1(**kotlin.android 플러그인 금지 — AGP 9 내장 Kotlin**) · Compose 플러그인만 별도 적용
 
 ## 배포·디버깅
-- 설치는 **USB adb만** 사용 (`adb install -r`)
-- 무선 디버깅: 핫스팟 동시 불가(One UI 정책) → 사용 금지, USB adb로 통일
+- 설치는 **무선 adb 우선**, 무선 불가 시 USB adb 폴백 (`adb install -r`)
+- One UI 정책: 핫스팟과 무선 디버깅은 동시 불가 → 핫스팟 사용 중에는 USB adb로 전환
 - 로그 확인: `adb logcat -s DroidRelay` (DebugLogger 태그)
 
 ## 릴리즈 서명·배포 (v0.13.3+)

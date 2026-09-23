@@ -20,7 +20,7 @@ object StorageJanitor {
         val s = SettingsRepository.get(context).firstBlocking()
         var target = file
         if (s.autoClassify) {
-            classifyFile(file)?.let { target = it }
+            classifyFile(file, context)?.let { target = it }
         }
         if (s.storageQuotaGb > 0) {
             enforceQuota(s.storageQuotaGb)
@@ -35,7 +35,7 @@ object StorageJanitor {
     }
 
     /** 단일 파일을 분류 폴더로 이동 — 이동된 파일 반환, 대상 없으면 null */
-    fun classifyFile(file: java.io.File): java.io.File? {
+    fun classifyFile(file: java.io.File, context: Context? = null): java.io.File? {
         val category = categoryFor(file.name) ?: return null
         if (!file.exists() || !file.isFile) return null
         if (file.parentFile?.name == category) return file
@@ -51,12 +51,46 @@ object StorageJanitor {
                 true
             }
         }.getOrDefault(false)
-        if (moved) DebugLogger.i("Janitor", "[FEATURE] 자동 분류 '${file.name}' → $category/")
+        if (moved) {
+            DebugLogger.i("Janitor", "[FEATURE] 자동 분류 '${file.name}' → $category/")
+            // File rename은 MediaStore에 반영 안 됨 — 스캔 유도 (다운로드/파일앱에서 인지)
+            if (context != null) {
+                runCatching {
+                    android.media.MediaScannerConnection.scanFile(
+                        context,
+                        arrayOf(dest.absolutePath, file.absolutePath),
+                        null,
+                        null,
+                    )
+                }
+            }
+            invalidateSizeCache()
+        }
         return if (moved) dest else null
     }
 
-    /** 보관함 전체 크기 (휴지통 제외) */
+    /** 보관함 전체 크기 (휴지통 제외) — 30초 TTL 캐시 (반복 walk 절감) */
+    private const val DIR_SIZE_TTL_MS = 30_000L
+    @Volatile private var dirSizeCache = -1L
+    @Volatile private var dirSizeCacheAt = 0L
+
     fun dirSize(root: java.io.File = StorageGuard.dlRoot): Long {
+        if (root != StorageGuard.dlRoot) return dirSizeUncached(root)
+        val now = System.currentTimeMillis()
+        val cached = dirSizeCache
+        if (cached >= 0 && now - dirSizeCacheAt < DIR_SIZE_TTL_MS) return cached
+        val size = dirSizeUncached(root)
+        dirSizeCache = size
+        dirSizeCacheAt = now
+        return size
+    }
+
+    fun invalidateSizeCache() {
+        dirSizeCache = -1L
+        dirSizeCacheAt = 0L
+    }
+
+    private fun dirSizeUncached(root: java.io.File): Long {
         if (!root.exists()) return 0L
         var total = 0L
         root.walkTopDown()
@@ -107,6 +141,7 @@ object StorageJanitor {
             ?.filter { it.isDirectory && it.name != ".trash" && (it.listFiles()?.isEmpty() == true) }
             ?.forEach { it.delete() }
         DebugLogger.i("Janitor", "[FEATURE] 쿼터 정리 ${quotaGb}GB 초과 → ${moved}개 휴지통 이동")
+        invalidateSizeCache()
         // 저장공간 스냅샷 (v0.39 P2) — 정리 건수 누적
         runCatching { StatsSnapshots.recordStorage(dirSize(root), root.usableSpace, moved.toLong()) }
         return moved

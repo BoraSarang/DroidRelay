@@ -173,7 +173,8 @@ fun lanAddress(): String? {
 object DeviceGate {
     private const val TAG = "Gate"
     private val pending = ConcurrentHashMap<String, CompletableFuture<Boolean>>()
-    private val deniedSession = ConcurrentHashMap.newKeySet<String>()
+    private val deniedAt = ConcurrentHashMap<String, Long>()
+    private const val DENY_TTL_MS = 10 * 60_000L
 
     /** 서비스가 연결 — 팝업/알림으로 사용자 결정 유도 */
     @Volatile var onRequest: ((ip: String, resolve: (Boolean) -> Unit) -> Unit)? = null
@@ -183,7 +184,7 @@ object DeviceGate {
             DebugLogger.i(TAG, "신규 기기 접속 감지 → 승인 요청 $ip")
             onRequest?.invoke(ip) { allowed ->
                 DebugLogger.i(TAG, "기기 결정 $ip allowed=$allowed")
-                if (!allowed) deniedSession.add(ip)
+                if (!allowed) deniedAt[ip] = System.currentTimeMillis()
                 pending.remove(ip)?.complete(allowed)
             }
             CompletableFuture<Boolean>()
@@ -201,11 +202,26 @@ object DeviceGate {
     /** 서비스 알림 액션 등 외부에서 결정 주입 */
     fun resolve(ip: String, allowed: Boolean) {
         DebugLogger.i(TAG, "기기 결정 $ip allowed=$allowed")
-        if (!allowed) deniedSession.add(ip)
+        if (!allowed) deniedAt[ip] = System.currentTimeMillis()
+        else deniedAt.remove(ip)
         pending.remove(ip)?.complete(allowed)
     }
 
-    fun isDenied(ip: String) = ip in deniedSession
+    fun isDenied(ip: String): Boolean {
+        val at = deniedAt[ip] ?: return false
+        if (System.currentTimeMillis() - at > DENY_TTL_MS) {
+            deniedAt.remove(ip)
+            return false
+        }
+        return true
+    }
+
+    /** 서비스 종료 시 세션 상태 해제 — 영구 거부/미결 대기 정리 */
+    fun clearSession() {
+        deniedAt.clear()
+        pending.values.forEach { runCatching { it.complete(false) } }
+        pending.clear()
+    }
 }
 
 class RelayServer(
@@ -233,20 +249,25 @@ class RelayServer(
         DebugLogger.d("Server", "설정 스냅샷 갱신 port=${s.port} https=${s.httpsPort} auth=${s.webAuthEnabled} limit=${s.speedLimitKbps}KB/s")
     }
 
-    fun start() {
-        if (server != null) return
+    fun start(): Boolean {
+        if (server != null) return true
         RelayApp.getVideo(context) // FFmpeg 스모크 + 재시작 스테일 비디오 잡 정리
-        server = runCatching { createServer() }
-            .onSuccess { s ->
-                s.start(wait = false)
-                val httpsPart = if (settings.httpsEnabled) " + https://0.0.0.0:$effectiveHttpsPort" else " (HTTPS 끔)"
-                DebugLogger.i("Server", "[FEATURE] HTTPS 포트 기동 완료 http://0.0.0.0:$port$httpsPart (LAN=${lanAddress() ?: "?"})")
-            }
+        val s = runCatching { createServer() }
             .onFailure { e ->
                 DebugLogger.e("Server", "서버 기동 실패 E-SRV-NET-1421 ${e.message}")
-                server = null
             }
-            .getOrNull()
+            .getOrNull() ?: return false
+        return runCatching {
+            s.start(wait = false)
+            server = s
+            val httpsPart = if (settings.httpsEnabled) " + https://0.0.0.0:$effectiveHttpsPort" else " (HTTPS 끔)"
+            DebugLogger.i("Server", "[FEATURE] HTTPS 포트 기동 완료 http://0.0.0.0:$port$httpsPart (LAN=${lanAddress() ?: "?"})")
+            true
+        }.onFailure { e ->
+            DebugLogger.e("Server", "서버 시작 실패 E-SRV-NET-1421 ${e.message}")
+            server = null
+            runCatching { s.stop(gracePeriodMillis = 0, timeoutMillis = 500) }
+        }.getOrDefault(false)
     }
 
     fun stop() {
@@ -716,4 +737,4 @@ internal suspend fun ApplicationCall.respondOk() =
     respondText("""{"ok":true}""", ContentType.Application.Json)
 
 internal suspend fun ApplicationCall.respondErr(msg: String) =
-    respondText("""{"error":"$msg"}""", ContentType.Application.Json)
+    respondText(JSONObject().put("error", msg).toString(), ContentType.Application.Json)

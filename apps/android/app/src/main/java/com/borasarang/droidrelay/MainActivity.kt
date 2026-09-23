@@ -46,6 +46,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.core.app.ActivityCompat
+import androidx.lifecycle.lifecycleScope
 import com.borasarang.droidrelay.relay.DebugLogger
 import com.borasarang.droidrelay.relay.RelayService
 import com.borasarang.droidrelay.relay.SettingsRepository
@@ -56,6 +57,7 @@ import com.borasarang.droidrelay.ui.SettingsScreen
 import com.borasarang.droidrelay.ui.StatsScreen
 import com.borasarang.droidrelay.ui.TorrentScreen
 import com.borasarang.droidrelay.ui.theme.DroidRelayTheme
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -70,18 +72,21 @@ class MainActivity : ComponentActivity() {
         handleOpenTab(intent)
 
         val settingsRepo = SettingsRepository.get(this)
-        val initial = settingsRepo.firstBlocking()
-        // v0.36: 앱 실행 자동시작 토글 존중 (OFF면 서버 미기동)
-        if (initial.launchAutoStart) {
-            RelayService.start(this)
-        } else {
-            DebugLogger.i("UI", "앱 실행 자동시작 꺼짐 — 서버 미기동")
+        // 블로킹 I/O 제거 — DataStore 첫 로드는 코루틴에서 비동기 처리
+        lifecycleScope.launch {
+            val initial = settingsRepo.settings.first()
+            // v0.36: 앱 실행 자동시작 토글 존중 (OFF면 서버 미기동)
+            if (initial.launchAutoStart) {
+                RelayService.start(this@MainActivity)
+            } else {
+                DebugLogger.i("UI", "앱 실행 자동시작 꺼짐 — 서버 미기동")
+            }
         }
         requestNotificationPermission()
         requestStoragePermission()
 
         setContent {
-            val settings by settingsRepo.settings.collectAsState(initial = initial)
+            val settings by settingsRepo.settings.collectAsState(initial = com.borasarang.droidrelay.relay.AppSettings())
             DroidRelayTheme(
                 themeMode = settings.themeMode,
                 dynamicColor = settings.dynamicColor,

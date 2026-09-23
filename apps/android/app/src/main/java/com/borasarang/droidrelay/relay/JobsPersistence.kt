@@ -43,8 +43,11 @@ class JobsPersistence(
             }
             val tmp = File(file.parentFile, file.name + ".tmp")
             tmp.writeText(arr.toString())
-            if (file.exists()) file.delete()
-            tmp.renameTo(file) || tmp.copyTo(file, overwrite = true).let { tmp.delete() }
+            // rename은 Linux에서 원자적 교체 — delete 선행 금지(사이 크래시 시 전체 이력 소실)
+            if (!tmp.renameTo(file)) {
+                tmp.copyTo(file, overwrite = true)
+                tmp.delete()
+            }
             DebugLogger.d(TAG, "이력 저장 ${jobs.size}건")
         } catch (e: Exception) {
             DebugLogger.e(TAG, "이력 저장 실패(무시 가능, E-AND-DOWN-2003)", e)
@@ -53,9 +56,11 @@ class JobsPersistence(
 
     @Synchronized
     fun load(): List<Job> {
-        if (!file.exists()) return emptyList()
+        val primary = file.takeIf { it.exists() }
+            ?: File(file.parentFile, file.name + ".tmp").takeIf { it.exists() }
+            ?: return emptyList()
         return runCatching {
-            val arr = JSONArray(file.readText())
+            val arr = JSONArray(primary.readText())
             (0 until arr.length()).mapNotNull { i ->
                 val o = arr.getJSONObject(i)
                 val state = runCatching { JobState.valueOf(o.getString("state")) }
@@ -82,7 +87,7 @@ class JobsPersistence(
                 }
             }
         }.getOrElse {
-            val bak = PersistenceGuard.backupCorrupt(file)
+            val bak = PersistenceGuard.backupCorrupt(primary)
             DebugLogger.e(TAG, "이력 복원 실패 — 백업 ${bak?.name ?: "없음"} 후 초기화 (E-AND-DOWN-2003)", it)
             emptyList()
         }.also {

@@ -61,6 +61,12 @@ class TorrentEngine(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val handleMap = ConcurrentHashMap<String, TorrentHandle>()
     private val hashToId = ConcurrentHashMap<String, String>()
+    private val http by lazy {
+        OkHttpClient.Builder()
+            .connectTimeout(15, TimeUnit.SECONDS)
+            .readTimeout(30, TimeUnit.SECONDS)
+            .build()
+    }
 
     /** id↔hash 양방향 매핑 원자 등록 — 교차 매핑 덮어쓰기 정리 (T-934 S3) */
     private fun registerMapping(id: String, hash: String, th: TorrentHandle) {
@@ -208,14 +214,23 @@ class TorrentEngine(
             DebugLogger.w(TAG, "보관함 이동 스킵(소스 없음) id=$id name=$torrentName")
             return
         }
-        val dst = File(storageDir, torrentName)
+        var dst = File(storageDir, torrentName)
+        if (dst.exists()) {
+            // 기존 보존 — 삭제 대신 고유 이름 회피 (데이터 손실 방지)
+            val dot = torrentName.lastIndexOf('.')
+            val base = if (dot > 0) torrentName.substring(0, dot) else torrentName
+            val ext = if (dot > 0) torrentName.substring(dot) else ""
+            var i = 2
+            while (File(storageDir, "$base-$i$ext").exists()) i++
+            dst = File(storageDir, "$base-$i$ext")
+            DebugLogger.w(TAG, "보관함 이름 충돌 → 회피 경로 id=$id → ${dst.name}")
+        }
         try {
-            if (dst.exists()) dst.deleteRecursively()
             if (src.isDirectory) {
                 src.renameTo(dst).also { ok ->
                     if (!ok) {
                         DebugLogger.w(TAG, "보관함 이동 실패(rename) id=$id → 복사 시도")
-                        src.copyRecursively(dst, overwrite = true)
+                        src.copyRecursively(dst, overwrite = false)
                         src.deleteRecursively()
                     }
                 }
@@ -224,7 +239,7 @@ class TorrentEngine(
                 src.renameTo(dst).also { ok ->
                     if (!ok) {
                         DebugLogger.w(TAG, "보관함 이동 실패(rename) id=$id → 복사 시도")
-                        src.copyTo(dst, overwrite = true)
+                        src.copyTo(dst, overwrite = false)
                         src.delete()
                     }
                 }
@@ -349,14 +364,10 @@ class TorrentEngine(
 
     /** .torrent URL 다운로드 → 파일 추가 (검색 결과 바로 받기, T-950) */
     fun addTorrentUrl(url: String): TorrentJob {
-        val client = OkHttpClient.Builder()
-            .connectTimeout(15, TimeUnit.SECONDS)
-            .readTimeout(30, TimeUnit.SECONDS)
-            .build()
         val req = Request.Builder().url(url)
             .header("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/125.0 Mobile Safari/537.36")
             .build()
-        val bytes = client.newCall(req).execute().use { resp ->
+        val bytes = http.newCall(req).execute().use { resp ->
             if (resp.code !in 200..299) throw IllegalStateException("HTTP ${resp.code}")
             resp.body?.bytes() ?: throw IllegalStateException("빈 응답")
         }

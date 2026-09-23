@@ -94,6 +94,7 @@ object TorrentRepository {
         DebugLogger.d(TAG, "복원 등록 id=${job.id} '${job.name}' state=${job.state}")
     }
 
+    @Synchronized
     fun reorder(id: String, newOrder: Int) {
         val job = map[id] ?: return
         val others = map.values.filter { it.id != id }.sortedBy { it.order }.toMutableList()
@@ -109,5 +110,5 @@ object TorrentRepository {
         _torrents.value = map.values.sortedBy { it.order }
     }
 
-    fun newId(): String = System.currentTimeMillis().toString(36) + (0..999).random()
+    fun newId(): String = java.util.UUID.randomUUID().toString()
 }

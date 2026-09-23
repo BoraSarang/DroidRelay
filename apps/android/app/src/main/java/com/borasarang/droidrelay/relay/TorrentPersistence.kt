@@ -42,7 +42,12 @@ class TorrentPersistence(private val context: Context) {
                     })
                 })
             }
-            file.writeText(arr.toString())
+            val tmp = File(file.parentFile, file.name + ".tmp")
+            tmp.writeText(arr.toString())
+            if (!tmp.renameTo(file)) {
+                tmp.copyTo(file, overwrite = true)
+                tmp.delete()
+            }
             DebugLogger.d("TorrentPersist", "저장 완료 ${torrents.size}건")
         } catch (e: Exception) {
             DebugLogger.e("TorrentPersist", "저장 실패", e)
@@ -50,9 +55,11 @@ class TorrentPersistence(private val context: Context) {
     }
 
     fun load(): List<TorrentJob> {
-        if (!file.exists()) return emptyList()
+        val primary = file.takeIf { it.exists() }
+            ?: File(file.parentFile, file.name + ".tmp").takeIf { it.exists() }
+            ?: return emptyList()
         return try {
-            val arr = JSONArray(file.readText())
+            val arr = JSONArray(primary.readText())
             val list = mutableListOf<TorrentJob>()
             for (i in 0 until arr.length()) {
                 val o = arr.getJSONObject(i)
@@ -90,7 +97,7 @@ class TorrentPersistence(private val context: Context) {
             DebugLogger.d("TorrentPersist", "로드 완료 ${list.size}건")
             list
         } catch (e: Exception) {
-            val bak = PersistenceGuard.backupCorrupt(file)
+            val bak = PersistenceGuard.backupCorrupt(primary)
             DebugLogger.e("TorrentPersist", "로드 실패 — 백업 ${bak?.name ?: "없음"} 후 초기화 (E-AND-DOWN-2003)", e)
             emptyList()
         }

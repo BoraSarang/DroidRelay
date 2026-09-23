@@ -517,3 +517,13 @@ T-001~T-008 전부 완료 (커밋 7574486).
 | T-1042 | 통계 3열 깨짐 수정 (웹 grid+앱 줄바꿈) + 메뉴 클릭 불능 JS fix | ✅ |
 | T-1043 | 다운로드 알림 토렌트/시딩 표시 + 토렌트 플로우 갱신 | ✅ |
 | T-1044 | 검증(0.38.0/30 test GREEN+assembleDebug+실기기 설치) | ✅ |
+
+## v0.39 안정성 Phase A~D (2026-09-23) — 안정성 조사 19건 전수 수정
+
+| T-번호 | 내용 | 상태 |
+|--------|------|------|
+| T-1045 | Phase A — publishToDownloads 가드 + Jobs/Torrent Persistence 원자 쓰기 (#1~#3) | ✅ |
+| T-1046 | Phase B — tryStart TOCTOU·add 중복 가드·start():Boolean·ScheduleJobService scope·메인 I/O 제거 (#4~#8) | ✅ |
+| T-1047 | Phase C — onTaskRemoved 유휴 종료·429/5xx 재시도·DeviceGate TTL·moveToStorage 회피이름·Thumb Semaphore·Janitor 캐시·UUID/reorder·respondErr 이스케이프·RSS close·OkHttp 공유 (#9~#18) | ✅ |
+| T-1048 | Phase D — mockk/coroutines-test/turbine + 회귀 테스트 + test 169 GREEN + ktlint GREEN + assembleDebug + 실기기 설치 | ✅ |
+| T-1049 | Phase E (다음 세션) — WebAssets.kt 분할·SettingsScreen 분할·권한 축소 | ⬜ |

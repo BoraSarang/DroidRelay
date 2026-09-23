@@ -139,10 +139,9 @@ class RssFeedManager(
             .header("Accept", "application/rss+xml,application/atom+xml,application/xml;q=0.9,*/*;q=0.8")
             .header("Accept-Language", "ko-KR,ko;q=0.9,en;q=0.8")
             .build()
-        val response = client.newCall(request).execute()
-        val code = response.code
-        val body = response.body?.string() ?: ""
-        response.close()
+        val (code, body) = client.newCall(request).execute().use { response ->
+            response.code to (response.body?.string() ?: "")
+        }
 
         if (code !in 200..299) {
             val hint = if (code == 403) " (Cloudflare/보안 챌린지 차단 가능)" else ""

@@ -42,10 +42,10 @@ object JobsRepository {
     fun get(id: String): Job? = map[id]
 
     fun add(url: String, filename: String, type: String = "http"): Job {
-        map.values.none { it.url == url && it.state == JobState.RUNNING }
-            .also { dup ->
-                if (!dup) DebugLogger.w(TAG, "중복 URL 재추가 감지: $url")
-            }
+        map.values.firstOrNull { it.url == url && (it.state == JobState.RUNNING || it.state == JobState.QUEUED) }?.let { existing ->
+            DebugLogger.w(TAG, "중복 URL 재추가 감지 → 기존 작업 반환 id=${existing.id} url=$url")
+            return existing
+        }
         val nextOrder = (map.values.maxOfOrNull { it.order } ?: 0) + 1
         val job = Job(
             id = newId(), url = url, filename = uniqueName(filename),
@@ -94,12 +94,14 @@ object JobsRepository {
         }
     }
 
-    fun remove(id: String): Boolean {        val removed = map.remove(id)
+    fun remove(id: String): Boolean {
+        val removed = map.remove(id)
         if (removed != null) {
             DebugLogger.i(TAG, "작업 삭제 id=$id '${removed.filename}' state=${removed.state}")
         } else {
             DebugLogger.w(TAG, "삭제 실패(존재하지 않음) id=$id")
         }
+        normalizedCache.remove(id)
         refresh()
         return removed != null
     }
@@ -224,6 +226,7 @@ object JobsRepository {
         DebugLogger.d(TAG, "복원 등록 id=${fixed.id} '${fixed.filename}' state=${fixed.state} progress=${(fixed.progress * 100).toInt()}%")
     }
 
+    @Synchronized
     fun reorder(id: String, newOrder: Int) {
         val job = map[id] ?: return
         val others = map.values.filter { it.id != id }.sortedBy { it.order }.toMutableList()
@@ -271,7 +274,7 @@ object JobsRepository {
         _jobs.value = map.values.sortedBy { it.order }
     }
 
-    private fun newId(): String = System.currentTimeMillis().toString(36) + (0..999).random()
+    private fun newId(): String = java.util.UUID.randomUUID().toString()
 
     private fun uniqueName(name: String): String {
         return uniqueAmong(name, map.values.map { it.filename }.toSet())

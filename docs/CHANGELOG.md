@@ -1,8 +1,29 @@
 # Changelog
 
-## [Unreleased] — 종합 정리 (버그·보안·UI)
+## [Unreleased] — 안정성 19건 (Phase A~D) + 종합 정리
 
-### Fixed
+### Fixed [android] — 안정성 Phase A~D (19건)
+- **#1** `publishToDownloads(): Boolean` — MediaStore 게시 성공 시에만 앱 전용 원본 삭제 (실패 시 URI·원본 보존)
+- **#2** `JobsPersistence` 원자 쓰기 — tmp 쓰기→`renameTo`, 로드 실패 시 `.tmp` 폴백·손상 백업 보관
+- **#3** `TorrentPersistence` 원자 쓰기 — 동일 규칙 (`torrents.json`)
+- **#4** `DownloadEngine.tryStart` TOCTOU — `pending`를 동기화 `LinkedHashSet`으로 교체 + `startLock`으로 dequeue·RUNNING 승격 원자화, 중복 시작 차단
+- **#5** `JobsRepository.add` — RUNNING/QUEUED 동일 URL 재등록 시 기존 job 반환 (중복 작업 방지) + 회귀 테스트
+- **#6** `RelayServer.start(): Boolean` 반환 — 실패 시 `server=null`, `RelayService` 호출부 3곳(initial/restart/watchdog)이 `ServerState(running=false)` 기록
+- **#7** `ScheduleJobService` — `onStartJob`에서 취소된 scope 재생성 (좀비 서비스·미실행 코루틴 수정)
+- **#8** 메인 I/O 제거 — `MainActivity` `runBlocking` → `lifecycleScope.launch`, `BootReceiver` `goAsync()`+IO, `torrentEng.start()` IO 디스패치
+- **#9** `onTaskRemoved` — 진행 중 작업 유지(stopSelf 아님), 유휴 시에만 서비스 종료
+- **#10** HTTP 429/5xx → 재시도(`RETRY`), 4xx 영구실패 시 `throttleInterceptor.forget`
+- **#11** `DeviceGate` — 거부 세션 `deniedAt` + 10분 TTL, `clearSession()`; `RelayService.onDestroy`에서 게이트 해제
+- **#12** `moveToStorage` — 충돌 시 `deleteRecursively` 제거 → `name-2.ext` 회피 이름
+- **#13** `ThumbManager` — FFmpeg `Semaphore(2)` 동시성 제한 + 성공/실패 시 `locks.remove(key)` (메모리 유출 방지)
+- **#14** `StorageJanitor` — `dirSize` 30초 TTL 캐시 + `MediaScannerConnection.scanFile`로 MediaStore 반영, invalidate 훅
+- **#15** `newId()` → `UUID.randomUUID()`, `reorder` `@Synchronized`, `remove()`에서 `normalizedCache` 정리 (+ 회귀 테스트)
+- **#16** `respondErr` — `JSONObject`로 error 메시지 이스케이프
+- **#17** `RssFeedManager` — `execute().use { }`로 Response/body close 보장 (커넥션 누수)
+- **#18** `TorrentEngine` — `OkHttpClient`를 lazy 멤버로 공유 (연결풀 재사용), `addTorrentUrl`에서 재사용
+- **#19** Phase D 테스트 인프라 — mockk 1.14.2 + kotlinx-coroutines-test 1.10.2 + turbine 1.2.0, 회귀 테스트 추가
+
+### Fixed (선행 W1~W4)
 - `StorageGuard.storageFile` 경로 탈출 가드 — `DroidRelayEvil` 같은 접두사 폴더 통과 가능했던 `startsWith` 구분자 미검사 수정
 - `RelayServer` NetCache 인증캐시 3필드 비원자 갱신 → `authFor()` synchronized 원자화 (동시 요청 시 stale Basic 헤더 비교 레이스)
 - `RelayService.onDestroy`에 `tunnelManager?.stop()` 미호출 → cloudflared 좀비 프로세스 누수 수정
@@ -18,15 +39,13 @@
 - `SettingsScreen` `scope` 미참조/충돌 (`resetSettings`, `TrackerProbeRow`, `SpeedScheduleSection` 로컬 scope 추가)
 - `/sdcard/Download/DroidRelay` 하드코드 → `StorageGuard.dlRoot` 상수화 (7개 파일)
 - `network_security_config.xml` 중복 12줄 정리
-
-### Security
 - `network_security_config.xml` 신설 — LAN 사설망만 cleartext 허용 (base는 차단)
 - 미사용 권한 제거: `ACCESS_FINE_LOCATION`, `READ_PHONE_STATE`
 - `/api/debug/*` 7종 릴리즈 빌드에서 403 게이트 (`BuildConfig.DEBUG`)
 - `assets/certs/README.md` 평문 비밀번호 제거 (환경변수 방식)
 
 ### Changed
-- README APK 버전 0.35.0 → 0.38.0
+- README·AGENTS.android.md — 무선 adb 우선, USB 폴백 문서 수정
 - TODO 미구현 체크박스 3건 구현 완료 반영
 - `build.gradle.kts` `import`를 `plugins` 블록 위로 이동 (ktlint 파싱 수정)
 

@@ -7,6 +7,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 /**
@@ -15,11 +16,14 @@ import kotlinx.coroutines.launch
  */
 class ScheduleJobService : JobService() {
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private var scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     override fun onStartJob(params: JobParameters?): Boolean {
         val jobId = params?.jobId ?: -1
         DebugLogger.i("ScheduleJob", "스케줄 작업 시작 jobId=$jobId")
+        if (!scope.isActive) {
+            scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        }
 
         val settingsRepo = SettingsRepository.get(applicationContext)
         val scheduler = SchedulerManager(applicationContext)
@@ -30,7 +34,6 @@ class ScheduleJobService : JobService() {
             DebugLogger.d("ScheduleJob", "제약 조건 결과=$constraints wifi=${settings.scheduleWifiOnly} charging=${settings.scheduleChargingOnly} batteryMin=${settings.scheduleBatteryMin}")
             if (constraints) {
                 DebugLogger.i("ScheduleJob", "조건 충족 — 대기 중인 다운로드 재개")
-                // 대기 중인 다운로드 재개
                 RelayApp.get(applicationContext).retryFailed()
             } else {
                 DebugLogger.i("ScheduleJob", "조건 미충족 — 건너뜀")

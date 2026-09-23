@@ -112,4 +112,42 @@ class JobsRepositoryTest {
         assertEquals(0.5f, JobsRepository.get(job.id)?.progress ?: -1f)
         JobsRepository.remove(job.id)
     }
+
+    @Test
+    fun `중복 URL은 RUNNING_QUEUED일 때 기존 작업을 반환한다`() {
+        val url = "https://t.local/dup-url-${System.currentTimeMillis()}.bin"
+        val first = JobsRepository.add(url, "dup-url.bin")
+        assertEquals(JobState.QUEUED, first.state)
+
+        val second = JobsRepository.add(url, "dup-url.bin")
+        assertEquals(first.id, second.id)
+        assertEquals(1, JobsRepository.all().count { it.url == url })
+
+        JobsRepository.update(first.id) { it.copy(state = JobState.RUNNING) }
+        val third = JobsRepository.add(url, "dup-url.bin")
+        assertEquals(first.id, third.id)
+
+        JobsRepository.update(first.id) { it.copy(state = JobState.DONE) }
+        val fourth = JobsRepository.add(url, "dup-url.bin")
+        assertNotEquals(first.id, fourth.id)
+
+        JobsRepository.remove(first.id)
+        JobsRepository.remove(fourth.id)
+    }
+
+    @Test
+    fun `newId는 중복 없이 유니크하다`() {
+        val ids = (1..1000).map { JobsRepository.add("https://t.local/uid-$it.bin", "u$it.bin").id }
+        assertEquals(ids.size, ids.toSet().size)
+        ids.forEach { JobsRepository.remove(it) }
+    }
+
+    @Test
+    fun `remove 후 normalized 캐시에서 제거된다`() {
+        val url = "https://t.local/cache-${System.currentTimeMillis()}.bin"
+        val job = JobsRepository.add(url, "cache.bin")
+        assertNotNull(JobsRepository.findDuplicateUrl("$url#frag"))
+        JobsRepository.remove(job.id)
+        assertNull(JobsRepository.findDuplicateUrl(url))
+    }
 }

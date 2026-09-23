@@ -8,7 +8,6 @@ import java.io.File
 import java.io.RandomAccessFile
 import java.net.URLDecoder
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CoroutineScope
@@ -35,7 +34,7 @@ class DownloadEngine(
     private val client = OkHttpClient.Builder()
         .connectTimeout(java.time.Duration.ofSeconds(15))
         .readTimeout(java.time.Duration.ofSeconds(60))
-        .callTimeout(java.time.Duration.ofMinutes(10))
+        .callTimeout(java.time.Duration.ZERO)
         .dispatcher(
             okhttp3.Dispatcher().apply {
                 // 동일 호스트 병렬 제한(기본 5) 완화 — concurrencyTarget 반영
@@ -48,9 +47,18 @@ class DownloadEngine(
         .build()
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val pending = ConcurrentLinkedQueue<String>()
+    private val pendingLock = Any()
+    private val pending = LinkedHashSet<String>()
+    private val startLock = Any()
     private val failureReasons = ConcurrentHashMap<String, String>()
     private val active = AtomicInteger(0)
+
+    private fun enqueuePending(id: String) = synchronized(pendingLock) { pending.add(id) }
+    private fun removePending(id: String) = synchronized(pendingLock) { pending.remove(id) }
+    private fun dequeuePending(): String? = synchronized(pendingLock) {
+        val it = pending.iterator()
+        if (!it.hasNext()) null else { val v = it.next(); it.remove(); v }
+    }
 
     @Volatile private var concurrencyTarget = 1
     @Volatile private var limitKbps = 0
@@ -108,12 +116,12 @@ class DownloadEngine(
             }
             if (job.state == JobState.QUEUED) {
                 DebugLogger.i(TAG, "복원 → 재개 큐 진입 id=${job.id} '${job.filename}'")
-                pending.add(job.id)
+                enqueuePending(job.id)
             } else if (job.state == JobState.RUNNING) {
                 // 크래시 이력 RUNNING 좀비 → QUEUED 강등 후 재개
                 DebugLogger.i(TAG, "복원 → RUNNING 좀비 강등 재개 id=${job.id} '${job.filename}'")
                 JobsRepository.update(job.id) { it.copy(state = JobState.QUEUED, speedBps = 0L) }
-                pending.add(job.id)
+                enqueuePending(job.id)
             }
         }
         tryStart()
@@ -128,7 +136,7 @@ class DownloadEngine(
         val name = JobsRepository.filenameFromUrl(url)
         val job = JobsRepository.add(url, URLDecoder.decode(name, "UTF-8"))
         DebugLogger.i(TAG, "큐 진입 id=${job.id} url=$url")
-        pending.add(job.id)
+        enqueuePending(job.id)
         tryStart()
         return job
     }
@@ -139,7 +147,7 @@ class DownloadEngine(
             JobState.QUEUED -> JobsRepository.update(id) { it.copy(state = JobState.PAUSED) }
             else -> return
         }
-        pending.remove(id)
+        removePending(id)
         DebugLogger.i(TAG, "일시정지 id=$id (.part 유지)")
     }
 
@@ -147,7 +155,7 @@ class DownloadEngine(
         val job = JobsRepository.get(id) ?: return
         if (job.state != JobState.PAUSED && job.state != JobState.FAILED) return
         JobsRepository.update(id) { it.copy(state = JobState.QUEUED, errorMessage = null, errorCode = null) }
-        pending.add(id)
+        enqueuePending(id)
         DebugLogger.i(TAG, "재개 요청 id=$id 오프셋=${fmt(partialFile(job).takeIf { it.exists() }?.length() ?: 0L)}")
         tryStart()
     }
@@ -164,7 +172,7 @@ class DownloadEngine(
             DebugLogger.w(TAG, "취소 실패(대상 없음) id=$id"); return
         }
         if (job.state == JobState.DONE) return
-        pending.remove(id)
+        removePending(id)
         // 취소 시점 이후 완료가 레이스로 덮어쓰지 않도록 조건부 전이
         JobsRepository.update(id) { cur ->
             if (cur.state == JobState.DONE || cur.state == JobState.CANCELED) cur
@@ -195,24 +203,26 @@ class DownloadEngine(
             JobsRepository.update(job.id) {
                 it.copy(state = JobState.QUEUED, errorMessage = null, errorCode = null)
             }
-            pending.add(job.id)
+            enqueuePending(job.id)
         }
         tryStart()
     }
 
     private fun tryStart() {
-        while (active.get() < concurrencyTarget) {
-            val id = pending.poll() ?: break
-            val j = JobsRepository.get(id) ?: continue
-            if (j.state != JobState.QUEUED) continue
-            active.incrementAndGet()
-            DebugLogger.d(TAG, "작업 기동 id=$id (활성 ${active.get()}/$concurrencyTarget)")
-            scope.launch {
-                try {
-                    runWithRetry(id)
-                } finally {
-                    active.decrementAndGet()
-                    tryStart()
+        synchronized(startLock) {
+            while (active.get() < concurrencyTarget) {
+                val id = dequeuePending() ?: break
+                val j = JobsRepository.get(id) ?: continue
+                if (j.state != JobState.QUEUED) continue
+                active.incrementAndGet()
+                DebugLogger.d(TAG, "작업 기동 id=$id (활성 ${active.get()}/$concurrencyTarget)")
+                scope.launch {
+                    try {
+                        runWithRetry(id)
+                    } finally {
+                        active.decrementAndGet()
+                        tryStart()
+                    }
                 }
             }
         }
@@ -228,11 +238,11 @@ class DownloadEngine(
                 Outcome.RETRY -> {
                     val st = JobsRepository.get(id)?.state
                     if (st == JobState.CANCELED || st == JobState.PAUSED) return
-                    val wait = 2000L * attempt
+                    val wait = minOf(30_000L, 5000L * (1L shl (attempt - 1)))
                     val reason = failureReasons.remove(id) ?: "네트워크 오류"
                     DebugLogger.w(TAG, "실패 → ${wait}ms 후 재시도 id=$id 사유=$reason (E-AND-DOWN-1001)")
                     JobsRepository.update(id) {
-                        it.copy(state = JobState.RUNNING, errorMessage = "재시도 $attempt/$MAX_RETRY · $reason (E-AND-DOWN-1001)")
+                        it.copy(state = JobState.QUEUED, speedBps = 0L, errorMessage = "재시도 $attempt/$MAX_RETRY · $reason (E-AND-DOWN-1001)")
                     }
                     delay(wait)
                     // 재시도 대기 중 사용자 일시정지/취소 반영
@@ -276,7 +286,14 @@ class DownloadEngine(
                         partial.delete(); start = 0
                         return@withContext Outcome.RETRY
                     }
-                    // 그 외 오류는 .part 유지 (일시 오류 시 재전송 폭증 방지)
+                    // 일시 오류(429/5xx) → 재시도 파이프라인 진입 (일시정지 유지)
+                    if (res.code == 429 || res.code in 500..599) {
+                        failureReasons[id] = "HTTP ${res.code} (일시 오류)"
+                        DebugLogger.w(TAG, "HTTP ${res.code} → 재시도 id=$id")
+                        return@withContext Outcome.RETRY
+                    }
+                    // 그 외(4xx 계열)는 영구 실패 — .part 유지 (일시 오류 시 재전송 폭증 방지)
+                    throttleInterceptor.forget(id)
                     JobsRepository.update(id) {
                         it.copy(state = JobState.FAILED, errorCode = "E-AND-DOWN-1003", errorMessage = "E-AND-DOWN-1003: HTTP ${res.code}", speedBps = 0L)
                     }
@@ -313,7 +330,7 @@ class DownloadEngine(
                 )
 
                 JobsRepository.update(id) { j ->
-                    j.copy(state = JobState.RUNNING, totalBytes = total, downloadedBytes = offset, progress = if (total > 0) offset.toFloat() / total else 0f, startedAt = if (j.startedAt > 0) j.startedAt else System.currentTimeMillis())
+                    j.copy(state = JobState.RUNNING, speedBps = 0L, totalBytes = total, downloadedBytes = offset, progress = if (total > 0) offset.toFloat() / total else 0f, startedAt = if (j.startedAt > 0) j.startedAt else System.currentTimeMillis())
                 }
 
                 RandomAccessFile(partial, "rw").use { raf ->
@@ -376,7 +393,7 @@ class DownloadEngine(
                             val dt = (now - lastTick).coerceAtLeast(1)
                             // filePointer(lseek syscall) 대신 누적 pos 사용
                             val inst = (pos - lastPos) * 1000.0 / dt
-                            emaBps = if (firstTick) inst else emaBps * 0.6 + inst * 0.4
+                            emaBps = if (firstTick) inst else emaBps * 0.4 + inst * 0.6
                             firstTick = false
                             lastTick = now
                             lastPos = pos
@@ -402,13 +419,17 @@ class DownloadEngine(
                     partial.copyTo(done, overwrite = true); partial.delete()
                 }
 
-                publishToDownloads(done, id)
-                // 보관함(MediaStore)에 게시했으므로 앱 전용 원본 삭제
-                // 단, cancel이 먼저 CANCELED로 전이했다면 DONE으로 덮지 않음
-                try {
-                    if (done.exists()) done.delete()
-                    DebugLogger.d(TAG, "앱 전용 원본 삭제 id=$id")
-                } catch (_: Exception) {}
+                val published = publishToDownloads(done, id)
+                if (published) {
+                    // 보관함(MediaStore)에 게시 성공했으므로 앱 전용 원본 삭제
+                    // 단, cancel이 먼저 CANCELED로 전이했다면 DONE으로 덮지 않음
+                    try {
+                        if (done.exists()) done.delete()
+                        DebugLogger.d(TAG, "앱 전용 원본 삭제 id=$id")
+                    } catch (_: Exception) {}
+                } else {
+                    DebugLogger.w(TAG, "보관함 게시 실패 → 앱 전용 원본 유지 id=$id")
+                }
                 JobsRepository.update(id) { j ->
                     if (j.state == JobState.CANCELED) j
                     else j.copy(
@@ -453,8 +474,9 @@ class DownloadEngine(
 
     private fun rafLength(f: File): Long = f.length()
 
-    internal fun publishToDownloads(file: File, jobId: String) {
-        try {
+    internal fun publishToDownloads(file: File, jobId: String): Boolean {
+        var uri: android.net.Uri? = null
+        return try {
             val values = ContentValues().apply {
                 put(MediaStore.Downloads.DISPLAY_NAME, file.name)
                 put(MediaStore.Downloads.MIME_TYPE, "application/octet-stream")
@@ -462,19 +484,27 @@ class DownloadEngine(
                 put(MediaStore.Downloads.IS_PENDING, 1)
             }
             val resolver = context.contentResolver
-            val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+            uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
             if (uri == null) {
-                DebugLogger.w(TAG, "MediaStore insert null → 게시 생략 id=$jobId"); return
+                DebugLogger.w(TAG, "MediaStore insert null → 게시 실패 id=$jobId")
+                return false
             }
-            resolver.openOutputStream(uri)?.use { out ->
-                file.inputStream().use { it.copyTo(out, PUBLISH_BUFFER_SIZE) }
+            val out = resolver.openOutputStream(uri)
+            if (out == null) {
+                DebugLogger.e(TAG, "OutputStream null → 게시 실패 id=$jobId")
+                runCatching { resolver.delete(uri, null, null) }
+                return false
             }
+            out.use { o -> file.inputStream().use { it.copyTo(o, PUBLISH_BUFFER_SIZE) } }
             values.clear()
             values.put(MediaStore.Downloads.IS_PENDING, 0)
             resolver.update(uri, values, null, null)
             DebugLogger.d(TAG, "공용 Downloads 게시 id=$jobId")
+            true
         } catch (e: Exception) {
-            DebugLogger.e(TAG, "게시 실패(원본 유지) id=$jobId", e)
+            DebugLogger.e(TAG, "게시 실패 id=$jobId", e)
+            uri?.let { u -> runCatching { context.contentResolver.delete(u, null, null) } }
+            false
         }
     }
 
@@ -488,8 +518,8 @@ class DownloadEngine(
         // 64KB → 256KB: syscall 횟수 1/4, 대용량 처리량 향상 (모바일 메모리 부담은 미미)
         private const val BUFFER_SIZE = 256 * 1024
         private const val PUBLISH_BUFFER_SIZE = 512 * 1024
-        private const val TICK_MS = 2_000L
-        private const val MAX_RETRY = 3
+        private const val TICK_MS = 1_000L
+        private const val MAX_RETRY = 5
     }
 }
 

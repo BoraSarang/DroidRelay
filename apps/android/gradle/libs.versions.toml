@@ -12,8 +12,11 @@ junit = "4.13.2"
 datastore = "1.1.7"
 libtorrent4j = "2.1.0-39"
 ffmpegKit = "8.1.7"
-smartException = "0.2.1"
-desugar = "2.1.5"
+    smartException = "0.2.1"
+    desugar = "2.1.5"
+    mockk = "1.14.2"
+    kotlinxCoroutinesTest = "1.10.2"
+    turbine = "1.2.0"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -30,8 +33,11 @@ okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhtt
 ktor-server-core = { group = "io.ktor", name = "ktor-server-core", version.ref = "ktor" }
 ktor-server-netty = { group = "io.ktor", name = "ktor-server-netty", version.ref = "ktor" }
 zxing-core = { group = "com.google.zxing", name = "core", version.ref = "zxing" }
-junit = { group = "junit", name = "junit", version.ref = "junit" }
-libtorrent4j = { group = "org.libtorrent4j", name = "libtorrent4j", version.ref = "libtorrent4j" }
+    junit = { group = "junit", name = "junit", version.ref = "junit" }
+    mockk = { group = "io.mockk", name = "mockk", version.ref = "mockk" }
+    kotlinx-coroutines-test = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-test", version.ref = "kotlinxCoroutinesTest" }
+    turbine = { group = "app.cash.turbine", name = "turbine", version.ref = "turbine" }
+    libtorrent4j = { group = "org.libtorrent4j", name = "libtorrent4j", version.ref = "libtorrent4j" }
 libtorrent4j-android-arm64 = { group = "org.libtorrent4j", name = "libtorrent4j-android-arm64", version.ref = "libtorrent4j" }
 ffmpeg-kit-https = { group = "dev.ffmpegkit-maintained", name = "ffmpeg-kit-https", version.ref = "ffmpegKit" }
 smart-exception-java = { group = "com.arthenica", name = "smart-exception-java", version.ref = "smartException" }

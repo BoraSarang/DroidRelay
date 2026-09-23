@@ -10,6 +10,8 @@ import java.util.concurrent.ConcurrentHashMap
 object ThumbManager {
     private const val TAG = "Thumb"
     private val locks = ConcurrentHashMap<String, Any>()
+    // FFmpeg 동시성 제한 — 매니페스트 스펙스톰(코어 과다 점유 방지)
+    private val ffmpegGate = java.util.concurrent.Semaphore(2)
     // 메모리 캐시 — 동일 세션 반복 stat/디코딩 제거 (50개)
     private val memCache = object : android.util.LruCache<String, File>(50) {}
 
@@ -37,21 +39,28 @@ object ThumbManager {
             }
             for (ss in listOf("10", "1")) {
                 val ok = runCatching {
-                    val s = FFmpegKit.execute(
-                        "-hide_banner -loglevel error -ss $ss -i \"${src.absolutePath}\" " +
-                            "-frames:v 1 -vf scale=320:-1 -y \"${out.absolutePath}\"",
-                    )
-                    ReturnCode.isSuccess(s.returnCode) && out.exists() && out.length() > 0
+                    ffmpegGate.acquire()
+                    try {
+                        val s = FFmpegKit.execute(
+                            "-hide_banner -loglevel error -ss $ss -i \"${src.absolutePath}\" " +
+                                "-frames:v 1 -vf scale=320:-1 -y \"${out.absolutePath}\"",
+                        )
+                        ReturnCode.isSuccess(s.returnCode) && out.exists() && out.length() > 0
+                    } finally {
+                        ffmpegGate.release()
+                    }
                 }.getOrDefault(false)
                 if (ok) {
                     DebugLogger.i(TAG, "[FEATURE] 썸네일 생성 '${src.name}'")
                     memCache.put(key, out)
                     // 생성 후에만 prune — 미스마다 listFiles+sort 제거
                     prune(dir)
+                    locks.remove(key)
                     return out
                 }
                 out.delete()
             }
+            locks.remove(key)
             return null
         }
     }

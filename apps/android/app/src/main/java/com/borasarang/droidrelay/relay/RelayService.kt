@@ -69,9 +69,11 @@ class RelayService : Service() {
             StatsSnapshots.recordBoot()
         }.onFailure { DebugLogger.e(TAG, "스냅샷 저장소 로드 실패(무시하고 계속)", it) }
 
-        // TorrentEngine 시작
-        torrentEng.start()
-        DebugLogger.i(TAG, "TorrentEngine 시작 완료")
+        // TorrentEngine 시작 (네이티브 세션 초기화 — 메인스레드 I/O 차단 방지)
+        scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            torrentEng.start()
+            DebugLogger.i(TAG, "TorrentEngine 시작 완료")
+        }
 
         // RSS 피드 매니저 시작
         val rssManager = RssFeedManager(applicationContext)
@@ -140,9 +142,15 @@ class RelayService : Service() {
                     synchronized(serverLock) {
                         if (server == null) {
                             try {
-                                server = RelayServer(applicationContext, s.port, s.httpsPort).also { it.updateSettings(s); it.start() }
-                                val url = lanAddress()?.let { "http://$it:${s.port}" }
-                                settingsRepo.updateServerState(ServerState(running = true, port = s.port, httpsPort = s.httpsPort, httpsEnabled = s.httpsEnabled, url = url))
+                                val rs = RelayServer(applicationContext, s.port, s.httpsPort)
+                                rs.updateSettings(s)
+                                if (rs.start()) {
+                                    server = rs
+                                    val url = lanAddress()?.let { "http://$it:${s.port}" }
+                                    settingsRepo.updateServerState(ServerState(running = true, port = s.port, httpsPort = s.httpsPort, httpsEnabled = s.httpsEnabled, url = url))
+                                } else {
+                                    settingsRepo.updateServerState(ServerState(running = false, port = s.port, httpsPort = s.httpsPort, httpsEnabled = s.httpsEnabled, error = "서버 기동 실패"))
+                                }
                             } catch (e: Exception) {
                                 DebugLogger.e(TAG, "서버 기동 실패: ${e.message}", e)
                                 settingsRepo.updateServerState(ServerState(running = false, port = s.port, httpsPort = s.httpsPort, httpsEnabled = s.httpsEnabled, error = "서버 기동 실패: ${e.message}"))
@@ -157,9 +165,16 @@ class RelayService : Service() {
                         synchronized(serverLock) {
                             server?.stop()
                             try {
-                                server = RelayServer(applicationContext, s.port, s.httpsPort).also { it.updateSettings(s); it.start() }
-                                val url = lanAddress()?.let { "http://$it:${s.port}" }
-                                settingsRepo.updateServerState(ServerState(running = true, port = s.port, httpsPort = s.httpsPort, httpsEnabled = s.httpsEnabled, url = url))
+                                val rs = RelayServer(applicationContext, s.port, s.httpsPort)
+                                rs.updateSettings(s)
+                                if (rs.start()) {
+                                    server = rs
+                                    val url = lanAddress()?.let { "http://$it:${s.port}" }
+                                    settingsRepo.updateServerState(ServerState(running = true, port = s.port, httpsPort = s.httpsPort, httpsEnabled = s.httpsEnabled, url = url))
+                                } else {
+                                    server = null
+                                    settingsRepo.updateServerState(ServerState(running = false, port = s.port, httpsPort = s.httpsPort, httpsEnabled = s.httpsEnabled, error = "서버 재시작 실패"))
+                                }
                             } catch (e: Exception) {
                                 DebugLogger.e(TAG, "서버 재시작 실패: ${e.message}", e)
                                 settingsRepo.updateServerState(ServerState(running = false, port = s.port, httpsPort = s.httpsPort, httpsEnabled = s.httpsEnabled, error = "서버 재시작 실패: ${e.message}"))
@@ -194,9 +209,15 @@ class RelayService : Service() {
                             synchronized(serverLock) {
                                 if (server == null) {
                                     val s2 = settingsRepo.firstBlocking()
-                                    server = RelayServer(applicationContext, s2.port, s2.httpsPort).also { it.updateSettings(s2); it.start() }
-                                    val url = lanAddress()?.let { "http://$it:${s2.port}" }
-                                    settingsRepo.updateServerState(ServerState(running = true, port = s2.port, httpsPort = s2.httpsPort, httpsEnabled = s2.httpsEnabled, url = url))
+                                    val rs = RelayServer(applicationContext, s2.port, s2.httpsPort)
+                                    rs.updateSettings(s2)
+                                    if (rs.start()) {
+                                        server = rs
+                                        val url = lanAddress()?.let { "http://$it:${s2.port}" }
+                                        settingsRepo.updateServerState(ServerState(running = true, port = s2.port, httpsPort = s2.httpsPort, httpsEnabled = s2.httpsEnabled, url = url))
+                                    } else {
+                                        settingsRepo.updateServerState(ServerState(running = false, port = s2.port, httpsPort = s2.httpsPort, httpsEnabled = s2.httpsEnabled, error = "서버 기동 실패"))
+                                    }
                                 }
                             }
                         }.onFailure { e ->
@@ -369,6 +390,8 @@ class RelayService : Service() {
 
     override fun onDestroy() {
         DebugLogger.i(TAG, "서비스 종료 시작 — 컴포넌트 정리")
+        DeviceGate.onRequest = null
+        DeviceGate.clearSession()
         // FGS로 승격된 경우 반드시 제거 — 누락 시 ForegroundServiceDidNotStopInTimeException(E-AND-SRV-0110)
         if (isForeground) {
             ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
@@ -423,6 +446,18 @@ class RelayService : Service() {
         if (isForeground) {
             ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
             isForeground = false
+        }
+        val active = jobs.any { it.state == JobState.RUNNING || it.state == JobState.QUEUED } ||
+            runCatching {
+                TorrentRepository.all().any {
+                    it.state == TorrentState.DOWNLOADING || it.state == TorrentState.FETCHING_METADATA || it.state == TorrentState.QUEUED
+                }
+            }.getOrDefault(false)
+        if (!active) {
+            DebugLogger.i(TAG, "onTaskRemoved → 유휴 상태 stopSelf")
+            stopSelf()
+        } else {
+            DebugLogger.i(TAG, "onTaskRemoved → 진행 중 작업 존재, 서비스 유지")
         }
         super.onTaskRemoved(rootIntent)
     }

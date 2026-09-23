@@ -3,6 +3,9 @@ package com.borasarang.droidrelay.relay
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 /**
  * 디바이스 재부팅 시 서버를 자동으로 다시 띄운다. (이슈 1 — 24시간 연속 동작)
@@ -11,12 +14,19 @@ import android.content.Intent
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent?) {
         if (intent?.action != Intent.ACTION_BOOT_COMPLETED) return
-        val settings = runCatching { SettingsRepository.get(context).firstBlocking() }.getOrNull()
-        if (settings?.bootAutoStart == true) {
-            DebugLogger.i("Boot", "부팅 완료 감지 — RelayService 자동 시작")
-            RelayService.start(context)
-        } else {
-            DebugLogger.i("Boot", "부팅 완료 감지 — 부팅 자동시작 꺼짐, 시작 안 함")
+        val pendingResult = goAsync()
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val settings = runCatching { SettingsRepository.get(context).firstBlocking() }.getOrNull()
+                if (settings?.bootAutoStart == true) {
+                    DebugLogger.i("Boot", "부팅 완료 감지 — RelayService 자동 시작")
+                    RelayService.start(context)
+                } else {
+                    DebugLogger.i("Boot", "부팅 완료 감지 — 부팅 자동시작 꺼짐, 시작 안 함")
+                }
+            } finally {
+                pendingResult.finish()
+            }
         }
     }
 }
