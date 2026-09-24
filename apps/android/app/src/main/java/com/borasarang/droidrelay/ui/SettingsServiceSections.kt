@@ -376,3 +376,58 @@ internal fun AboutSection(
     
 }
 
+/** 크래시 감지 도구 검증용 — 의도적 강제 크래시 3종 (확인 다이얼로그 필수) */
+@Composable
+internal fun CrashTestSection() {
+    val cs = MaterialTheme.colorScheme
+    var pendingCrash by remember { mutableStateOf<(() -> Unit)?>(null) }
+
+    SettingSection("크래시 테스트") {
+        Text(
+            "크래시 감지 도구 검증용 — 확인 후 앱이 즉시 강제 종료됩니다.",
+            color = cs.onSurfaceVariant,
+            style = MaterialTheme.typography.labelSmall,
+        )
+        Spacer(Modifier.height(8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = {
+                pendingCrash = {
+                    DebugLogger.w("CrashTest", "의도적 Java 예외 크래시")
+                    throw IllegalStateException("크래시 테스트: Java 메인스레드 예외 (의도적)")
+                }
+            }) { Text("Java 예외") }
+            OutlinedButton(onClick = {
+                pendingCrash = {
+                    DebugLogger.w("CrashTest", "의도적 SIGSEGV 크래시")
+                    android.os.Process.sendSignal(android.os.Process.myPid(), 11)
+                }
+            }) { Text("SIGSEGV") }
+            OutlinedButton(onClick = {
+                pendingCrash = {
+                    DebugLogger.w("CrashTest", "의도적 SIGABRT 크래시")
+                    android.os.Process.sendSignal(android.os.Process.myPid(), 6)
+                }
+            }) { Text("SIGABRT") }
+        }
+    }
+
+    pendingCrash?.let { action ->
+        AlertDialog(
+            onDismissRequest = { pendingCrash = null },
+            title = { Text("크래시 실행?") },
+            text = {
+                Text("앱이 강제 종료됩니다. 크래시 감지 테스트용입니다. 계속할까요?")
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    pendingCrash = null
+                    action()
+                }) { Text("실행", color = cs.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingCrash = null }) { Text("취소") }
+            },
+        )
+    }
+}
+

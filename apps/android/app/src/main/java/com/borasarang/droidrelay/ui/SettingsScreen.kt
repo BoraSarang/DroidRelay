@@ -63,6 +63,8 @@ fun SettingsScreen(onPortChanged: (Int) -> Unit) {
         HorizontalDivider(color = cs.outlineVariant)
         ResetSection(repo)
         HorizontalDivider(color = cs.outlineVariant)
+        CrashTestSection()
+        HorizontalDivider(color = cs.outlineVariant)
         AboutSection(ctx)
     }
 }
