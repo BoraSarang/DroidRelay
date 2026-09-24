@@ -397,42 +397,51 @@ class RelayService : Service() {
             ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
             isForeground = false
         }
-        // 무거운 정지(Netty graceful + libtorrent 세션)는 백그라운드로 — onDestroy가 메인스레드에서
-        // 6초 FGS 정지 타임아웃을 넘기면 ForegroundServiceDidNotStopInTimeException 크래시
+        // 무거운 정지·영구 저장 전부 백그라운드로 — onDestroy가 메인스레드에서
+        // 시스템 FGS 정지 타임아웃(약 10초)을 넘기면 ForegroundServiceDidNotStopInTimeException 크래시
         val serverToStop = server.also { server = null }
         val torrentToStop = torrentEngine.also { torrentEngine = null }
-        if (serverToStop != null || torrentToStop != null) {
-            kotlin.concurrent.thread(isDaemon = true, name = "RelayService-stop") {
-                runCatching { serverToStop?.stop() }
-                    .onFailure { DebugLogger.e(TAG, "서버 백그라운드 정지 실패(무시)", it) }
-                runCatching { torrentToStop?.stop() }
-                    .onFailure { DebugLogger.e(TAG, "토렌트 백그라운드 정지 실패(무시)", it) }
-                DebugLogger.i(TAG, "백그라운드 정지 완료")
+        val networkToUnregister = networkMonitor.also { networkMonitor = null }
+        val tunnelToStop = tunnelManager.also { tunnelManager = null }
+        val rssToStop = rssManager.also { rssManager = null }
+        val guardToStop = guardDaemon.also { guardDaemon = null }
+        val schedulerToStop = schedulerManager.also { schedulerManager = null }
+        val speedScheduleToStop = speedScheduleManager.also { speedScheduleManager = null }
+        val appContext = applicationContext
+        val port = currentPort
+        val httpsPort = currentHttpsPort
+        val httpsOn = currentHttpsEnabled
+        kotlin.concurrent.thread(isDaemon = true, name = "RelayService-stop") {
+            runCatching { serverToStop?.stop() }
+                .onFailure { DebugLogger.e(TAG, "서버 백그라운드 정지 실패(무시)", it) }
+            runCatching { torrentToStop?.stop() }
+                .onFailure { DebugLogger.e(TAG, "토렌트 백그라운드 정지 실패(무시)", it) }
+            runCatching { networkToUnregister?.unregister() }
+                .onFailure { DebugLogger.e(TAG, "네트워크 모니터 해제 실패(무시)", it) }
+            runCatching { tunnelToStop?.stop() }
+            runCatching { rssToStop?.stop() }
+            runCatching { guardToStop?.stop() }
+            runCatching { schedulerToStop?.stop() }
+            runCatching { speedScheduleToStop?.stop() }
+            // 서버 상태 갱신
+            runCatching {
+                SettingsRepository.get(appContext).updateServerState(
+                    ServerState(running = false, port = port, httpsPort = httpsPort, httpsEnabled = httpsOn)
+                )
             }
+            // 트래픽 통계 원장 저장 (v0.37)
+            runCatching { TrafficLedger.flush() }
+            // 강제종료/서비스 종료 시 즉시 영구 저장 (T-111)
+            runCatching {
+                val jobs = com.borasarang.droidrelay.relay.JobsRepository.all()
+                JobsPersistence(appContext).save(jobs)
+            }
+            // Torrent 상태 저장
+            runCatching { TorrentRepository.all().let { TorrentPersistence(appContext).save(it) } }
+            DebugLogger.i(TAG, "백그라운드 정지·영구 저장 완료")
         }
-        networkMonitor?.unregister()
-        networkMonitor = null
-        tunnelManager?.stop()
-        tunnelManager = null
-        rssManager?.stop()
-        rssManager = null
-        guardDaemon?.stop()
-        guardDaemon = null
-        schedulerManager?.stop()
-        schedulerManager = null
-        speedScheduleManager?.stop()
-        speedScheduleManager = null
-        DebugLogger.i(TAG, "서비스 종료 완료 — 영구 저장 실행")
-        // 서버 상태 갱신
-        SettingsRepository.get(applicationContext).updateServerState(ServerState(running = false, port = currentPort, httpsPort = currentHttpsPort, httpsEnabled = currentHttpsEnabled))
-        // 트래픽 통계 원장 저장 (v0.37)
-        runCatching { TrafficLedger.flush() }
-        // 강제종료/서비스 종료 시 즉시 영구 저장 (T-111)
-        val jobs = com.borasarang.droidrelay.relay.JobsRepository.all()
-        runCatching { JobsPersistence(applicationContext).save(jobs) }
-        // Torrent 상태 저장
-        runCatching { TorrentRepository.all().let { TorrentPersistence(applicationContext).save(it) } }
         scope.cancel()
+        DebugLogger.i(TAG, "서비스 종료 완료 — 즉시 반환")
         super.onDestroy()
     }
 
@@ -468,7 +477,11 @@ class RelayService : Service() {
         if (isForeground) return
         val notif = runningNotification(lanAddress(), activePort())
         try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                // Android 15+ dataSync 6시간 제한으로 ForegroundServiceDidNotStopInTimeException 크래시
+                // → API 34+는 specialUse로 승격 (LAN 릴레이 서버, 무제한)
+                startForeground(NOTIF_ID, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 startForeground(NOTIF_ID, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
             } else {
                 startForeground(NOTIF_ID, notif)

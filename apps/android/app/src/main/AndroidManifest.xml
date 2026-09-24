@@ -6,7 +6,9 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <!-- API 29~33 경로 유지. Android 15+(targetSdk 35+)는 dataSync 6시간 제한으로 specialUse로 승격 -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
@@ -46,7 +48,11 @@
         <service
             android:name=".relay.RelayService"
             android:exported="false"
-            android:foregroundServiceType="dataSync" />
+            android:foregroundServiceType="specialUse|dataSync">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="LAN relay HTTP/torrent server kept alive for local device-to-device file transfer" />
+        </service>
 
         <service
             android:name=".relay.ScheduleJobService"
@@ -56,7 +62,11 @@
         <service
             android:name=".relay.DebugOverlayService"
             android:exported="false"
-            android:foregroundServiceType="dataSync" />
+            android:foregroundServiceType="specialUse|dataSync">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="On-device debug log overlay for LAN relay diagnostics" />
+        </service>
 
         <receiver
             android:name=".relay.BootReceiver"
