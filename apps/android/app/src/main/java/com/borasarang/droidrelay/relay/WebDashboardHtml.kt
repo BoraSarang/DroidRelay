@@ -27,7 +27,7 @@ internal object WebDashboardHtml {
     --accent2:#E879F9;--accentbg:#2A1245;--ok:#4ADE80;--okbg:#0B2E1D;--err:#FB7185;--danger:#3A0F16;
     --warn:#FBBF24;--sel:#1D1030;--glow:rgba(181,55,242,.22)}
   body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 -apple-system,'Malgun Gothic',sans-serif}
-  .wrap{max-width:760px;margin:0 auto;padding:20px;min-width:480px}
+  .wrap{max-width:1080px;margin:0 auto;padding:20px;min-width:480px}
   h1{font-size:20px;margin:0}
   .hd{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:14px}
   .hd-acts{display:flex;align-items:center;gap:8px}
