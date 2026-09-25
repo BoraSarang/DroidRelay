@@ -84,6 +84,9 @@
 - 웹 대시보드 3곳 range→`<select>` + 정체 설정 블록 + `.STALLED` 배지 + `renderTorrents` `uiBusy` 가드
 - `TorrentEngine.reorder` → `reorderTo` + `syncQueueOrder()` — 표시 order를 libtorrent `queue_position`으로 동기화
 
+### Fixed [web] — 카드 내 제한 select 폭 (T-1050 후속)
+- 토렌트 카드 select 인라인 `width:104px`(카드 내부 84px 초과 → 버튼보다 넓게 삐져나옴)·작업 카드 인라인 `width:100%`(모바일 row의 `flex:1`과 경합) 제거 → `.card-acts .ghost` 규칙으로 버튼과 동일 폭·패딩 통일 (실측 모바일 118px 3개 일치, 데스크톱 112px 3개 일치)
+
 ### Added [android] — 테스트 (T-1054)
 - `TorrentStallTest` 9건 — 정체 판정·지속시간·프리셋 라벨/Bps 변환·폴백·기본값 (test GREEN + ktlint GREEN + 실기기 설치·API/웹 실측)
 

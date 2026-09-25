@@ -67,6 +67,7 @@ internal object WebDashboardHtml {
   .btn-dl{background:var(--okbg);border:1px solid #1A5C3A;color:var(--ok);padding:5px 10px;font-size:12px;border-radius:8px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;text-decoration:none}
   .card-acts{display:flex;flex-direction:column;gap:6px;width:112px;flex-shrink:0;padding:14px}
   .card-acts .ghost,.card-acts .btn-dl{box-sizing:border-box;width:100%;font-size:12px;padding:7px 0;justify-content:center}
+  .card-acts select.ghost{text-align:center;appearance:auto}
   .file-row .acts a.btn-dl,.file-row .acts .ghost{box-sizing:border-box;width:34px;padding:5px 0;justify-content:center;text-align:center}
   .card{background:var(--surface);border:1px solid var(--line);border-radius:14px;margin-top:14px;display:flex;align-items:stretch}
   .name{font-weight:600;word-break:break-all}
@@ -1100,7 +1101,7 @@ function render(jobs){
     var limit='';
     if(j.type!=='video'&&j.state!=='DONE'&&j.state!=='CANCELED'){
       var cur=j.maxDownBps||0;
-      limit='<select class="ghost" style="width:100%;box-sizing:border-box" onchange="setJobLimit(\''+j.id+'\',this.value)">'
+      limit='<select class="ghost" onchange="setJobLimit(\''+j.id+'\',this.value)">'
         +presetOptionsHtml(cur)+'</select>';
     }
     h+='<div class="card" draggable="true" data-id="'+j.id+'">'
@@ -1186,7 +1187,7 @@ function renderTorrents(ts){
     if(st==='DOWNLOADING'||st==='FETCHING_METADATA')pause='<button class="ghost" onclick="torrentAct(\''+t.id+'\',\'pause\')">일시정지</button>';
     if(st==='PAUSED'||st==='FAILED'||st==='STALLED'||st==='QUEUED')pause='<button class="ghost" onclick="torrentAct(\''+t.id+'\',\'resume\')">재개</button>';
     var del='<button class="ghost" onclick="torrentDelConfirm(\''+t.id+'\')">삭제</button>';
-    var tlimit='<select class="ghost" style="width:104px" onchange="setTorrentLimit(\''+t.id+'\',this.value)" title="torrent 다운로드 제한">'
+    var tlimit='<select class="ghost" onchange="setTorrentLimit(\''+t.id+'\',this.value)" title="torrent 다운로드 제한">'
       +presetOptionsHtml(t.maxDownBps||0)+'</select>';
     h+='<div class="card" draggable="true" data-id="'+t.id+'">'
       +'<div style="flex:1;min-width:0;padding:14px">'
