@@ -59,8 +59,9 @@ object SettingsConstraints {
     // 내장 웹 서버 포트 (v0.34) — HTTP·HTTPS는 서로 달라야 한다
     const val PORT_MIN = 1024
     const val PORT_MAX = 65535
-    const val DEFAULT_HTTP_PORT = 8080
+    const val DEFAULT_HTTP_PORT = 3000
     const val DEFAULT_HTTPS_PORT = 8443
+    const val DEFAULT_HTTPS_ENABLED = false
 
     /** HTTP·HTTPS 포트 쌍 유효성 — 범위 내 + 서로 다름 */
     fun validPorts(http: Int, https: Int): Boolean =

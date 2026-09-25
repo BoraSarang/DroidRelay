@@ -330,7 +330,12 @@ class DownloadEngine(
                 )
 
                 JobsRepository.update(id) { j ->
-                    j.copy(state = JobState.RUNNING, speedBps = 0L, totalBytes = total, downloadedBytes = offset, progress = if (total > 0) offset.toFloat() / total else 0f, startedAt = if (j.startedAt > 0) j.startedAt else System.currentTimeMillis())
+                    j.copy(
+                        state = JobState.RUNNING, speedBps = 0L, totalBytes = total, downloadedBytes = offset,
+                        progress = if (total > 0) offset.toFloat() / total else 0f,
+                        errorMessage = null, errorCode = null,
+                        startedAt = if (j.startedAt > 0) j.startedAt else System.currentTimeMillis(),
+                    )
                 }
 
                 RandomAccessFile(partial, "rw").use { raf ->
@@ -435,6 +440,7 @@ class DownloadEngine(
                     else j.copy(
                         state = JobState.DONE, progress = 1f, downloadedBytes = finalSize,
                         totalBytes = finalSize, speedBps = 0L, finishedAt = System.currentTimeMillis(),
+                        errorMessage = null, errorCode = null,
                     )
                 }
                 throttleInterceptor.forget(id)
@@ -459,14 +465,17 @@ class DownloadEngine(
     /** 예외 → 사용자 친화적 사유 (errorMessage 표시용) */
     private fun friendlyReason(e: Exception): String {
         val msg = (e.message ?: "").lowercase()
+        val causeMsg = (e.cause?.message ?: "").lowercase()
         val cls = e.javaClass.simpleName
+        val hay = "$msg $causeMsg"
         return when {
-            msg.contains("timeout") || cls.contains("Timeout") -> "연결 시간 초과"
-            msg.contains("reset") -> "연결이 끊김 (서버/네트워크)"
-            msg.contains("unknownhost") || msg.contains("unable to resolve") -> "서버 주소 확인 실패 (DNS)"
-            msg.contains("refused") -> "연결 거부됨"
-            msg.contains("space") -> "저장 공간 부족"
-            msg.contains("broken pipe") || msg.contains("eof") -> "전송 중단됨 (연결 끊김)"
+            hay.contains("timeout") || cls.contains("Timeout") -> "연결 시간 초과"
+            hay.contains("reset") -> "연결이 끊김 (서버/네트워크)"
+            hay.contains("unknownhost") || hay.contains("unable to resolve") || hay.contains("unable to resolve host") -> "서버 주소 확인 실패 (DNS)"
+            hay.contains("refused") -> "연결 거부됨"
+            hay.contains("space") || hay.contains("no space") -> "저장 공간 부족"
+            hay.contains("broken pipe") || hay.contains("eof") || hay.contains("unexpected end of stream") -> "전송 중단됨 (연결 끊김)"
+            hay.contains("abort") || hay.contains("connection reset") || cls.contains("SocketException") -> "네트워크 연결이 끊겼습니다"
             msg.isNotBlank() -> "${cls}: ${e.message!!.take(60)}"
             else -> cls.ifBlank { "알 수 없는 오류" }
         }

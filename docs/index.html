@@ -119,7 +119,7 @@
       <a class="btn" href="https://github.com/BoraSarang/DroidRelay">GitHub 보기</a>
     </div>
     <div class="hero-meta">
-      네이티브 <code>Kotlin + Compose</code> · 내장 서버 <code>HTTP 8080 / HTTPS 8443</code>
+      네이티브 <code>Kotlin + Compose</code> · 내장 서버 <code>HTTP 3000 / HTTPS 8443(기본 꺼짐)</code>
     </div>
   </div>
 </header>
@@ -148,18 +148,18 @@
     <p class="sec-sub">별도 서버 없이, 폰 하나로 끝납니다.</p>
     <div class="steps">
       <div class="step"><div class="n">1</div><h3>APK 설치</h3><p>Releases에서 릴리즈 APK를 받아 폰에 설치합니다.</p></div>
-      <div class="step"><div class="n">2</div><h3>서버 시작</h3><p>앱에서 내장 서버를 켭니다 (기본 <code>HTTP 8080</code> · <code>HTTPS 8443</code>).</p></div>
-      <div class="step"><div class="n">3</div><h3>웹 UI 접속</h3><p>같은 네트워크의 브라우저에서 <code>http://폰-IP:8080</code> 또는 <code>https://폰-IP:8443</code> 로 접속해 URL을 등록합니다.</p></div>
+      <div class="step"><div class="n">2</div><h3>서버 시작</h3><p>앱에서 내장 서버를 켭니다 (기본 <code>HTTP 3000</code> · HTTPS는 기본 꺼짐).</p></div>
+      <div class="step"><div class="n">3</div><h3>웹 UI 접속</h3><p>같은 네트워크의 브라우저에서 <code>http://폰-IP:3000</code> 로 접속해 URL을 등록합니다.</p></div>
     </div>
 
     <div class="term" style="margin-top:40px">
       <div class="term-head"><span class="c r"></span><span class="c y"></span><span class="c g"></span></div>
       <div class="term-body"><span class="cmt"># USB 연결한 맥/PC에서 폰의 웹 UI 열기</span>
-$ adb reverse tcp:8080 tcp:8080
-$ open http://localhost:8080
+$ adb reverse tcp:3000 tcp:3000
+$ open http://localhost:3000
 
 <span class="cmt"># 폰 핫스팟 IP는 swlan0 인터페이스</span>
-<span class="dim">http://192.168.x.x:8080   ← 브라우저에서 접속</span></div>
+      <span class="dim">http://192.168.x.x:3000   ← 브라우저에서 접속</span></div>
     </div>
   </div>
 </section>

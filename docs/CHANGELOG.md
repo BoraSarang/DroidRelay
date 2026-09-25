@@ -2,10 +2,19 @@
 
 ## [Unreleased] — 안정성 19건 (Phase A~D) + Phase E 분할·권한 + 종합 정리
 
+### Changed [android] — 서버 기본값
+- 기본 HTTP 포트 `8080` → **`3000`** (`SettingsConstraints.DEFAULT_HTTP_PORT`, `AppSettings`/`ServerState`/`RelayServer`/`clampPort`/터널 URL)
+- HTTPS 기본 **사용안함** (`DEFAULT_HTTPS_ENABLED=false`, DataStore 키 없으면 false)
+- 문서·오류메시지(`E-AND-DOWN-1004`)·README·터널 가이드 반영
+
 ### Changed [android] — Phase E (WebAssets·SettingsScreen 분할 + 권한 축소)
 - `WebAssets.kt` 2859행 → 파사드 8행 + `WebDashboardHtml.kt`(2715) + `WebDebugHtml.kt`(146) — 공개 API `WebAssets.dashboardHtml`/`debugHtml` 불변, JS `node --check` OK
 - `SettingsScreen.kt` 1236행 → 엔트리 68행 + `SettingsComponents`/`SettingsServerSection`/`SettingsGeneralSections`/`SettingsTorrentSection`/`SettingsServiceSections` (섹션 12종 `internal fun` 추출, UI 동작·문구·순서 무변경)
 - `AndroidManifest`: `READ_EXTERNAL_STORAGE` `maxSdkVersion=32`, `WRITE_EXTERNAL_STORAGE` `maxSdkVersion=29` (API 30+는 `MANAGE_EXTERNAL_STORAGE`, legacy 29는 `requestLegacyExternalStorage` 유지)
+
+### Fixed [android] — 재시도 메시지
+- `friendlyReason`: `Software caused connection abort` 등 SocketException 원문 노출 → `연결이 중간에 끊겼습니다` 매핑 (+cause 메시지·`unexpected end of stream`)
+- 재시도 성공 후 RUNNING/DONE 복귀 시 `errorMessage`/`errorCode` 미삭제 → 진행 중에도 `재시도 1/5…` 잔존하던 문제 수정
 
 ### Fixed [android] — 안정성 Phase A~D (19건)
 - **#1** `publishToDownloads(): Boolean` — MediaStore 게시 성공 시에만 앱 전용 원본 삭제 (실패 시 URI·원본 보존)

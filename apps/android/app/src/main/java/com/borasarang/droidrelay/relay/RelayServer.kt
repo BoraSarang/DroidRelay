@@ -226,7 +226,7 @@ object DeviceGate {
 
 class RelayServer(
     private val context: Context,
-    val port: Int = 8080,
+    val port: Int = SettingsConstraints.DEFAULT_HTTP_PORT,
     val httpsPort: Int = HTTPS_PORT,
 ) {
     companion object {

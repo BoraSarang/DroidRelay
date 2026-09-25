@@ -5,7 +5,7 @@
 ## 1. 터널이란?
 
 DroidRelay의 웹 대시보드는 기본적으로 **같은 네트워크(랜)** 안에서
-`http://{폰 IP}:8080`으로 접속한다. 터널 기능은 이 대시보드를 **집 밖/외부
+`http://{폰 IP}:3000`으로 접속한다. 터널 기능은 이 대시보드를 **집 밖/외부
 네트워크에서도** 안전하게 접속할 수 있게 해 주는 경로를 만드는 기능이다.
 
 현재 구현 범위는 "터널 상태 관리 + 연결 테스트"이며, 실제 터널 바이너리
@@ -38,7 +38,7 @@ DroidRelay의 웹 대시보드는 기본적으로 **같은 네트워크(랜)** �
 ### 3-1. 같은 네트워크 (기본, 터널 불필요)
 
 1. 폰에서 RelayService 실행
-2. PC/노트북 브라우저로 `http://{폰 IP}:8080` 접속
+2. PC/노트북 브라우저로 `http://{폰 IP}:3000` 접속
    (IP는 대시보드 하단 또는 `GET /api/info`에서 확인)
 
 ### 3-2. Tailscale — 추천 (Tailscale 앱 설치 시)
@@ -47,9 +47,9 @@ DroidRelay의 웹 대시보드는 기본적으로 **같은 네트워크(랜)** �
 - **동작 방식**: TunnelManager가 Tailscale 앱 존재를 감지하고
   네트워크 인터페이스에서 `100.x.x.x` (Tailscale 가상 IP)를 탐지한다.
   탐지되면 `GET /api/tunnel/status`가
-  `{"connected": true, "url": "http://100.x.x.x:8080"}`을 반환한다.
+  `{"connected": true, "url": "http://100.x.x.x:3000"}`을 반환한다.
 - **접속**: 같은 Tailscale 계정을 사용하는 모든 기기(PC 등)에서
-  `http://100.x.x.x:8080` 접속 — 폰이 어느 네트워크에 있든 동일한 IP로 접근 가능
+  `http://100.x.x.x:3000` 접속 — 폰이 어느 네트워크에 있든 동일한 IP로 접근 가능
 - **기대 시나리오**: 폰이 집 밖 LTE/5G에 있을 때 PC에서 폰의 대시보드 원격 접속
 
 ### 3-3. Cloudflare Tunnel
@@ -57,7 +57,7 @@ DroidRelay의 웹 대시보드는 기본적으로 **같은 네트워크(랜)** �
 - **사전 준비**: 앱 내장 `cloudflared` 바이너리 필요
   (`context.filesDir/cloudflared`, ARM64)
 - **동작 방식**: 바이너리 실행 시
-  `cloudflared tunnel --url http://localhost:8080 --no-autoupdate` 프로세스가
+  `cloudflared tunnel --url http://localhost:3000 --no-autoupdate` 프로세스가
   `trycloudflare.com` 임시 URL을 생성, 출력에서 URL을 추출해
   `currentUrl`로 저장한다.
 - **기대 시나리오**: Tailscale 미사용 시 외부 접속용 공개 URL 확보.
@@ -66,12 +66,12 @@ DroidRelay의 웹 대시보드는 기본적으로 **같은 네트워크(랜)** �
 
 ```bash
 # 1) 터널 활성화 + 프로바이더 지정
-curl -X POST http://{폰 IP}:8080/api/settings/tunnel \
+curl -X POST http://{폰 IP}:3000/api/settings/tunnel \
   -H "Content-Type: application/json" \
   -d '{"tunnelEnabled": true, "tunnelProvider": "TAILSCALE"}'
 
 # 2) 상태 확인
-curl http://{폰 IP}:8080/api/tunnel/status
+curl http://{폰 IP}:3000/api/tunnel/status
 ```
 
 - `tunnelProvider` 값: `TAILSCALE` 또는 `CLOUDFLARE`
