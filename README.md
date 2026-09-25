@@ -20,7 +20,7 @@ DroidRelay는 Android 기기 안에서 동작하는 네이티브(Kotlin + Jetpac
 | 📹 직접 영상 | `.mp4/.webm/.mov` 직접 URL → 그대로 다운로드 |
 | 🧲 토렌트 | magnet / `.torrent` 업로드, 시드·피어·속도 모니터링, 보관함 이동 |
 | 📦 보관함 | 완료 파일을 MediaStore 보관함에 게시, 폴더 관리 |
-| 🕸 내장 웹 서버 | HTTP 8080 + HTTPS 8443 듀얼 포트, 브라우저용 대시보드 UI (HTTP 잡·토렌트·보관함·설정), QR/주소 바로가기 |
+| 🕸 내장 웹 서버 | HTTP 3000 + HTTPS 8443(기본 꺼짐) 듀얼 포트, 브라우저용 대시보드 UI (HTTP 잡·토렌트·보관함·설정), QR/주소 바로가기 |
 | 🔄 이어받기 | 네트워크 단절 시 Range 기반 이어받기 재시도 |
 | 🔐 보안 | WebAuth(HTTP Basic), 허용 IP 화이트리스트, HTTPS 옵션(포트 설정 가능) |
 | 🧠 스마트 가드 | 발열/배터리/저장공간 임계에 따른 다운로드 스로틀링 자동 대응 |
@@ -43,21 +43,21 @@ adb install -r droidrelay-v0.38.0.apk
 ```
 
 ### 2. 실행
-- 앱을 열어 **내장 서버 시작** (기본 HTTP 포트 `8080`, HTTPS `8443`)
+- 앱을 열어 **내장 서버 시작** (기본 HTTP 포트 `3000`, HTTPS `8443`·기본 꺼짐)
 - 폰은 같은 네트워크(핫스팟 포함)에 연결되어 있어야 합니다.
 
 ### 3. 웹 UI 접속 (같은 네트워크)
-폰 IP로 접속합니다. 홈 화면 QR 카드에 HTTP·HTTPS 두 주소가 표시됩니다.
+폰 IP로 접속합니다. 홈 화면 QR 카드에 HTTP 주소가 표시됩니다. (HTTPS는 설정에서 켤 때만)
 
 ```
-http://<폰-IP>:8080      # 일반
-https://<폰-IP>:8443     # HTTPS (자체서명 경고 후 진행)
+http://<폰-IP>:3000      # 일반 (기본)
+https://<폰-IP>:8443     # HTTPS (설정에서 사용 켠 경우, 자체서명 경고 후 진행)
 ```
 
 **USB 연결(머신에서) — adb reverse:**
 ```bash
-adb reverse tcp:8080 tcp:8080
-# 그 다음 브라우저에서 http://localhost:8080
+adb reverse tcp:3000 tcp:3000
+# 그 다음 브라우저에서 http://localhost:3000
 ```
 
 > 핫스팟 IP는 `swlan0` 인터페이스입니다. (One UI에서 핫스팟과 무선 디버깅은 동시 불가 — 평시엔 무선 adb, 핫스팟 사용 중엔 USB adb)

@@ -43,7 +43,7 @@ class SettingsMigrationTest {
 
     @Test
     fun `포트와 열 임계 수리`() {
-        assertEquals(8080, SettingsMigration.clampPort(null))
+        assertEquals(3000, SettingsMigration.clampPort(null))
         assertEquals(1024, SettingsMigration.clampPort(80))
         assertEquals(65535, SettingsMigration.clampPort(99999))
         assertEquals(50, SettingsMigration.clampThermal(null))

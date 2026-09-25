@@ -10,6 +10,8 @@ enum class TorrentState {
     DOWNLOADING,
     SEEDING,
     PAUSED,
+    /** 정체(스톨) 감지 → 자동 일시정지 + 큐 맨뒤 (T-1050) */
+    STALLED,
     FAILED,
     DONE,
 }

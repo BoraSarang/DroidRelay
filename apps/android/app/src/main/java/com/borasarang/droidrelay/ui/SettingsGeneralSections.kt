@@ -104,17 +104,10 @@ internal fun DownloadSection(
             valueRange = 1f..4f,
             steps = 2,
         )
-        Text(
-            "속도 제한: ${if (s.speedLimitKbps == 0) "무제한" else "${s.speedLimitKbps} KB/s"}",
-            color = cs.onSurface,
-        )
-        Slider(
-            value = s.speedLimitKbps.toFloat(),
-            onValueChange = { v ->
-                val kb = (v / 128).toInt() * 128  // 128KB/s 스텝
-                scope.launch { repo.setSpeedLimit(kb) }
-            },
-            valueRange = 0f..2048f,
+        SpeedSelectRow(
+            label = "속도 제한 (파일 다운로드·업로드 공통)",
+            value = s.speedLimitKbps,
+            onSelect = { kb -> scope.launch { repo.setSpeedLimit(kb) } },
         )
         SwitchRow("다운로드 알림 표시", s.notifications) { v -> scope.launch { repo.setNotifications(v) } }
 
@@ -135,18 +128,15 @@ internal fun DownloadSection(
 
         Spacer(Modifier.height(12.dp))
         Text("전역 속도 제한 (다운로드·토렌트 공통)", color = cs.onSurfaceVariant, style = MaterialTheme.typography.labelMedium)
-        val dlMbps = if (s.maxDownloadBps > 0) (s.maxDownloadBps / 1_048_576).toInt().coerceIn(1, 10) else 0
         SwitchRow(
             "전역 다운로드 속도 제한",
             s.maxDownloadBps > 0,
         ) { on -> scope.launch { repo.setMaxDownloadBps(if (on) 3L * 1_048_576 else 0L) } }
-        if (dlMbps > 0) {
-            Text("${dlMbps} Mbps", color = cs.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
-            Slider(
-                value = dlMbps.toFloat(),
-                onValueChange = { v -> scope.launch { repo.setMaxDownloadBps(v.roundToInt().toLong() * 1_048_576) } },
-                valueRange = 1f..10f,
-                steps = 8,
+        if (s.maxDownloadBps > 0) {
+            SpeedSelectBpsRow(
+                label = "다운로드 상한",
+                value = s.maxDownloadBps,
+                onSelect = { bps -> scope.launch { repo.setMaxDownloadBps(bps) } },
             )
         }
         val ulMbps = if (s.maxUploadBps > 0) (s.maxUploadBps / 1_048_576).toInt().coerceIn(1, 10) else 0

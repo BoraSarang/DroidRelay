@@ -32,6 +32,20 @@ internal fun shouldPauseAtRatio(isSeeding: Boolean, uploaded: Long, downloaded: 
     return uploaded.toDouble() / downloaded >= limit
 }
 
+/** 정체(스톨) 판정 — 순수 함수 (T-1050).
+ *  - 끄기이면 항상 false
+ *  - 기준 KB/s > 0 이면서 속도가 그 미만
+ *  - 또는 연결된 시더가 0 (파실 물건이 아직 안 잡힘) */
+internal fun isStalledTorrent(enabled: Boolean, rateBps: Long, thresholdKbps: Int, numSeeds: Int): Boolean {
+    if (!enabled) return false
+    val thresholdBps = thresholdKbps.toLong() * 1024
+    return (thresholdBps > 0 && rateBps < thresholdBps) || numSeeds == 0
+}
+
+/** 정체 조건이 임계 시간만큼 유지됐는지 판정 — 순수 함수 (T-1050) */
+internal fun stallTimedOut(sinceMs: Long, nowMs: Long, timeoutSec: Int): Boolean =
+    timeoutSec > 0 && nowMs - sinceMs >= timeoutSec * 1000L
+
 /** magnet URI의 SHA-1 infohash(hex 40자) 그룹 캡처 */
 private val magnetHexRegex = Regex("urn:btih:([0-9a-fA-F]{40})")
 
@@ -76,6 +90,10 @@ class TorrentEngine(
         hashToId[hash] = id
         // 재매핑(재시작·복원) 시 영속된 파일 선택 복원 (T-942)
         applyPersistedSelection(id)
+        // 영속된 torrent 개별 다운로드 제한 복원 (T-1050)
+        applyPersistedLimit(id)
+        // 표시 순서 ↔ libtorrent 큐 순서 동기 (T-1050)
+        syncQueueOrder()
         // 동기된 커뮤니티 트래커 주입 (T-971, 실패해도 계속)
         applyExtraTrackers(id)
     }
@@ -148,6 +166,57 @@ class TorrentEngine(
         return true
     }
 
+    /** 영속된 torrent 개별 다운로드 제한을 libtorrent에 적용 (0 이하 = 무제한) */
+    private fun applyPersistedLimit(id: String) {
+        val th = handleMap[id] ?: return
+        val bps = TorrentRepository.get(id)?.downloadLimit ?: 0L
+        try {
+            withGate {
+                th.setDownloadLimit(if (bps <= 0) 0 else bps.coerceIn(1L, Int.MAX_VALUE.toLong()).toInt())
+            }
+        } catch (e: Exception) {
+            DebugLogger.w(TAG, "개별 다운로드 제한 적용 실패 id=$id: ${e.message}")
+        }
+    }
+
+    /** torrent 개별 다운로드 제한 변경 — 즉시 적용 + 영속 (T-1050) */
+    fun setDownloadLimit(id: String, bps: Long) {
+        if (TorrentRepository.get(id) == null) return
+        val v = bps.coerceAtLeast(0L)
+        TorrentRepository.update(id) { it.copy(downloadLimit = v) }
+        persistNow()
+        applyPersistedLimit(id)
+        DebugLogger.i(TAG, "torrent 개별 다운로드 제한 id=$id ${SpeedLimits.labelBps(v)}")
+    }
+
+    /** 표시 순서(order) → libtorrent queue_position 전체 동기 (T-1050) */
+    fun syncQueueOrder() {
+        withGate {
+            TorrentRepository.all().forEachIndexed { i, job ->
+                val th = handleMap[job.id] ?: return@forEachIndexed
+                try {
+                    if (th.queuePosition() != i) th.queuePositionSet(i)
+                } catch (e: Exception) {
+                    DebugLogger.d(TAG, "큐 순서 동기 실패 id=${job.id}: ${e.message}")
+                }
+            }
+        }
+    }
+
+    /** 매개변수 없는 swig settings_pack 정수 키 조회 — Kotlin 식별자에 `$` 쓸 수 없어 리플렉션 + 캐시 */
+    private fun swigSetting(kind: String, name: String): Int? {
+        val key = "$kind.$name"
+        swigSettingCache[key]?.let { return it }
+        return try {
+            val cls = Class.forName("org.libtorrent4j.swig.settings_pack\$$kind")
+            val v = cls.getField(name).get(null)
+            (v.javaClass.getMethod("swigValue").invoke(v) as Int).also { swigSettingCache[key] = it }
+        } catch (e: Exception) {
+            DebugLogger.w(TAG, "swig 세팅 조회 실패 $key: ${e.message}")
+            null
+        }
+    }
+
     /** 매핑 해제 — job.infoHash 폴백으로 좀비 hashToId 방지 (T-934 S3) */
     private fun unregisterMapping(id: String) {
         handleMap.remove(id)
@@ -166,6 +235,13 @@ class TorrentEngine(
     @Volatile private var latestSavePath: String = StorageGuard.dlRoot.path
     /** id → 시더 부재 대기 시작 시각(ms). 0이면 미측정 */
     private val seedWaitSince = ConcurrentHashMap<String, Long>()
+    /** id → 정체(스톨) 조건 첫 충족 시각(ms) — 키가 지워지면 조건이 해소된 것 */
+    private val stallSince = ConcurrentHashMap<String, Long>()
+    @Volatile private var latestStallEnabled: Boolean = SettingsConstraints.DEFAULT_TORRENT_STALL_ENABLED
+    @Volatile private var latestStallThresholdKbps: Int = SettingsConstraints.DEFAULT_TORRENT_STALL_THRESHOLD_KBPS
+    @Volatile private var latestStallTimeoutSec: Int = SettingsConstraints.DEFAULT_TORRENT_STALL_TIMEOUT_SEC
+    @Volatile private var latestMaxActive: Int = SettingsConstraints.DEFAULT_TORRENT_MAX_ACTIVE
+    private val swigSettingCache = ConcurrentHashMap<String, Int>()
     private var lastPersistAt = 0L
     private var lastSavedSnapshot: List<TorrentJob>? = null
     private fun persistNow() {
@@ -192,10 +268,15 @@ class TorrentEngine(
                 latestSeedRatio = s.torrentSeedRatio
                 latestDhtEnabled = s.torrentDhtEnabled
                 latestSavePath = s.torrentSavePath.ifBlank { StorageGuard.dlRoot.path }
-                DebugLogger.d(TAG, "설정 반영 업로드=${s.torrentUploadLimit}KB/s 다운로드=${s.torrentDownloadLimit}KB/s 시퀀셜=${s.torrentSequentialDownload} 비율=${s.torrentSeedRatio} DHT=${s.torrentDhtEnabled}")
+                latestStallEnabled = s.torrentStallEnabled
+                latestStallThresholdKbps = s.torrentStallThresholdKbps
+                latestStallTimeoutSec = s.torrentStallTimeoutSec
+                latestMaxActive = s.torrentMaxActive
+                DebugLogger.d(TAG, "설정 반영 업로드=${s.torrentUploadLimit}KB/s 다운로드=${s.torrentDownloadLimit}KB/s 시퀀셜=${s.torrentSequentialDownload} 비율=${s.torrentSeedRatio} DHT=${s.torrentDhtEnabled} 정체=${s.torrentStallEnabled}(${s.torrentStallThresholdKbps}KB/s·${s.torrentStallTimeoutSec}초)")
                 applyRateLimits()
                 applySequentialToAll(s.torrentSequentialDownload)
                 applyDhtEnabled(s.torrentDhtEnabled)
+                applyStallSessionSettings(s)
             }
         }
     }
@@ -289,6 +370,8 @@ class TorrentEngine(
                 }
                 DebugLogger.i(TAG, "세션 시작 완료")
                 applyRateLimits()
+                // 세션 세팅(정체 감지·활성 한도) 즉시 반영 (T-1050)
+                applySettings(settings.firstBlocking())
                 startStatusPolling()
                 restoreTorrents()
                 // 트래커 목록 백그라운드 동기 (T-971, 실패해도 번들 목록 사용)
@@ -312,6 +395,7 @@ class TorrentEngine(
             handleMap.clear()
             hashToId.clear()
             seedWaitSince.clear()
+            stallSince.clear()
             DebugLogger.i(TAG, "세션 정지")
         }
     }
@@ -472,6 +556,8 @@ val th = withGate { session?.find(Sha1Hash.parseHex(expectedHash)) }
             val currentProgress = currentStatus?.progress() ?: 0f
             val currentDownloaded = currentStatus?.totalDone() ?: 0L
             val currentTotal = currentStatus?.total() ?: 0L
+            // AUTO_MANAGED를 끄지 않으면 libtorrent auto-manage가 다시 살려 일시정지가 무력화된다 (T-1050)
+            try { th.unsetFlags(TorrentFlags.AUTO_MANAGED) } catch (_: Exception) {}
             th.pause()
             TorrentRepository.update(id) {
                 it.copy(
@@ -484,6 +570,7 @@ val th = withGate { session?.find(Sha1Hash.parseHex(expectedHash)) }
                 )
             }
         }
+        stallSince.remove(id)
         persistNow()
         DebugLogger.i(TAG, "torrent 일시정지 id=$id")
     }
@@ -491,8 +578,14 @@ val th = withGate { session?.find(Sha1Hash.parseHex(expectedHash)) }
     fun resume(id: String) {
         val th = handleMap[id] ?: return
         val job = TorrentRepository.get(id) ?: return
-        if (job.state == TorrentState.PAUSED || job.state == TorrentState.FAILED) {
-            withGate { th.resume() }
+        val resumable = job.state == TorrentState.PAUSED || job.state == TorrentState.FAILED ||
+            job.state == TorrentState.STALLED || job.state == TorrentState.QUEUED
+        if (resumable) {
+            withGate {
+                try { th.setFlags(TorrentFlags.AUTO_MANAGED) } catch (_: Exception) {}
+                th.resume()
+            }
+            stallSince.remove(id)
             TorrentRepository.update(id) {
                 it.copy(state = TorrentState.DOWNLOADING, errorMessage = null)
             }
@@ -512,6 +605,7 @@ val th = withGate { session?.find(Sha1Hash.parseHex(expectedHash)) }
         TorrentRepository.remove(id)
         unregisterMapping(id)
         seedWaitSince.remove(id)
+        stallSince.remove(id)
         withGate {
             th?.let {
                 try { torrentName = it.torrentFile().name() } catch (_: Exception) {}
@@ -565,7 +659,14 @@ val th = withGate { session?.find(Sha1Hash.parseHex(expectedHash)) }
         val idx = torrents.indexOfFirst { it.id == id }
         if (idx < 0) return
         val target = (idx + direction).coerceIn(0, torrents.size - 1)
-        TorrentRepository.reorder(id, target)
+        reorderTo(id, target)
+    }
+
+    /** 표시 순서 + libtorrent 큐 순서 동시 변경 (T-1050) — 웹 reorder 라우트도 경유 */
+    fun reorderTo(id: String, newOrder: Int) {
+        TorrentRepository.reorder(id, newOrder)
+        syncQueueOrder()
+        persistNow()
     }
 
     /**
@@ -672,6 +773,7 @@ val th = withGate { session?.find(Sha1Hash.parseHex(expectedHash)) }
                 .connectionsLimit(200)
                 .maxPeerlistSize(5000)
             session.applySettings(sp)
+            applyStallSessionSettings(s)
 
             // 리슨 포트 변경은 재시작 필요 — 로그만 남김
             if (s.torrentListenPort != 6881) {
@@ -692,7 +794,36 @@ val th = withGate { session?.find(Sha1Hash.parseHex(expectedHash)) }
             latestSeedRatio = s.torrentSeedRatio
             latestDhtEnabled = s.torrentDhtEnabled
             latestSavePath = s.torrentSavePath.ifBlank { StorageGuard.dlRoot.path }
+            latestStallEnabled = s.torrentStallEnabled
+            latestStallThresholdKbps = s.torrentStallThresholdKbps
+            latestStallTimeoutSec = s.torrentStallTimeoutSec
+            latestMaxActive = s.torrentMaxActive
             applyDhtEnabled(s.torrentDhtEnabled)
+        }
+    }
+
+    /** 정체(스톨) 감지·회전에 필요한 libtorrent 세션 세팅 (T-1050)
+     *  - incoming_starts_queued_torrents=false: 새 토렌트가 대기열을 추월하지 않도록
+     *  - dont_count_slow_torrents=false (정체 ON): 느린 torrent도 활성 한도에 포함 → maxActive 실제 강제
+     *  - inactive_down_rate / inactive_up_rate: 임계값 이하는 libtorrent가 "비활성"으로 간주
+     */
+    private fun applyStallSessionSettings(s: AppSettings) {
+        try {
+            withGate {
+                val session = session ?: return@withGate
+                val sp = session.settings()
+                swigSetting("bool_types", "incoming_starts_queued_torrents")?.let { sp.setBoolean(it, false) }
+                swigSetting("bool_types", "dont_count_slow_torrents")?.let { sp.setBoolean(it, !s.torrentStallEnabled) }
+                val threshold = (s.torrentStallThresholdKbps * 1024).coerceIn(0, Int.MAX_VALUE)
+                swigSetting("int_types", "inactive_down_rate")?.let { sp.setInteger(it, threshold) }
+                swigSetting("int_types", "inactive_up_rate")?.let { sp.setInteger(it, threshold) }
+                session.applySettings(sp)
+                if (s.torrentStallEnabled) {
+                    DebugLogger.i(TAG, "정체 감지 세션 세팅 임계=${s.torrentStallThresholdKbps}KB/s timeout=${s.torrentStallTimeoutSec}초 maxActive=${s.torrentMaxActive}")
+                }
+            }
+        } catch (e: Exception) {
+            DebugLogger.e(TAG, "정체 세션 세팅 적용 실패", e)
         }
     }
 
@@ -845,14 +976,23 @@ val th = withGate { session?.find(Sha1Hash.parseHex(expectedHash)) }
                         }
                         if (job.state == TorrentState.PAUSED || job.state == TorrentState.DONE || job.state == TorrentState.FAILED) return@forEach
 
-                        val state = when (status.state()) {
-                            TorrentStatus.State.DOWNLOADING -> TorrentState.DOWNLOADING
-                            TorrentStatus.State.SEEDING -> TorrentState.SEEDING
-                            TorrentStatus.State.CHECKING_FILES -> TorrentState.FETCHING_METADATA
-                            TorrentStatus.State.DOWNLOADING_METADATA -> TorrentState.FETCHING_METADATA
-                            TorrentStatus.State.CHECKING_RESUME_DATA -> TorrentState.FETCHING_METADATA
-                            TorrentStatus.State.FINISHED -> TorrentState.DONE
-                            TorrentStatus.State.UNKNOWN -> job.state
+                        // libtorrent 2.x에는 QUEUED 상태가 없어 status.state()만 보면 전부 DOWNLOADING으로 보인다.
+                        // paused/auto-managed 플래그로 대기(QUEUED)·정체 정지(STALLED)를 가른다 (T-1050)
+                        val flags = try { status.flags() } catch (_: Exception) { null }
+                        val libPaused = flags?.and_(TorrentFlags.PAUSED)?.non_zero() ?: false
+                        val state = if (libPaused) {
+                            // 사용자 정지는 위에서 걸러졌음 → auto-manage 대기 또는 정체 정지
+                            if (job.state == TorrentState.STALLED) TorrentState.STALLED else TorrentState.QUEUED
+                        } else {
+                            when (status.state()) {
+                                TorrentStatus.State.DOWNLOADING -> TorrentState.DOWNLOADING
+                                TorrentStatus.State.SEEDING -> TorrentState.SEEDING
+                                TorrentStatus.State.CHECKING_FILES -> TorrentState.FETCHING_METADATA
+                                TorrentStatus.State.DOWNLOADING_METADATA -> TorrentState.FETCHING_METADATA
+                                TorrentStatus.State.CHECKING_RESUME_DATA -> TorrentState.FETCHING_METADATA
+                                TorrentStatus.State.FINISHED -> TorrentState.DONE
+                                TorrentStatus.State.UNKNOWN -> job.state
+                            }
                         }
 
                         TorrentRepository.update(id) {
@@ -876,6 +1016,23 @@ val th = withGate { session?.find(Sha1Hash.parseHex(expectedHash)) }
                         val ulRate = status.uploadRate().toLong().coerceAtLeast(0)
                         if (dlRate > 0 || ulRate > 0) TrafficLedger.recordSpeed(dlRate, ulRate)
 
+                        // 정체(스톨) 감지 → 임계 시간이 지나면 일시정지 + 큐 맨뒤 회전 (T-1050)
+                        // 메타데이터 미수신(DOWNLOADING_METADATA)도 포함 — 죽은 마그넷이 슬롯을 영구 점유하지 않도록
+                        // (파일 검사(CHECKING_*)는 제외 — 검사 중 재귀 동작 방지)
+                        val stuckMeta = status.state() == TorrentStatus.State.DOWNLOADING_METADATA
+                        val running = !libPaused && status.progress() < 1f &&
+                            (state == TorrentState.DOWNLOADING || (stuckMeta && state == TorrentState.FETCHING_METADATA))
+                        val stalled = running &&
+                            isStalledTorrent(latestStallEnabled, dlRate, latestStallThresholdKbps, status.numSeeds())
+                        if (stalled) {
+                            val since = stallSince[id] ?: System.currentTimeMillis().also { stallSince[id] = it }
+                            if (stallTimedOut(since, System.currentTimeMillis(), latestStallTimeoutSec)) {
+                                if (rotateStalled(id, dlRate, status.numSeeds())) return@forEach
+                            }
+                        } else {
+                            stallSince.remove(id)
+                        }
+
                         // 시더 부재 자동 중단 (이슈 4) — 설정 토글 시에만 동작
                         val seedLimit = torrentMinSeedWaitSec
                         if (seedLimit > 0 && state == TorrentState.DOWNLOADING && status.progress() < 1f) {
@@ -895,6 +1052,8 @@ val th = withGate { session?.find(Sha1Hash.parseHex(expectedHash)) }
                         }
                     }
                     invalidIds.forEach { unregisterMapping(it) }
+                    // 슬롯 유지 — 정체 회전/자연 완료로 빈 슬롯이 생기면 다음 torrent 즉시 기동 (T-1050)
+                    maintainSlots()
                     // 피어 스냅샷 (v0.39 P2, 5분 디바운스)
                     runCatching {
                         val all = TorrentRepository.all()
@@ -907,6 +1066,51 @@ val th = withGate { session?.find(Sha1Hash.parseHex(expectedHash)) }
                 persistDebounced()
             }
         }
+    }
+
+    /** 정체 torrent를 일시정지 + 큐 맨뒤로 보내 슬롯을 넘긴다 (T-1050).
+     *  대체 torrent가 없으면 회전하지 않는다 (상태 요동 방지) — 측정 시계는 유지된다.
+     *  @return 회전했으면 true */
+    private fun rotateStalled(id: String, rateBps: Long, numSeeds: Int): Boolean {
+        val alternative = TorrentRepository.all().any {
+            it.id != id && handleMap.containsKey(it.id) &&
+                (it.state == TorrentState.QUEUED || it.state == TorrentState.STALLED)
+        }
+        if (!alternative) {
+            DebugLogger.d(TAG, "정체 감지 → 대체 torrent 없어 회전 보류 id=$id rate=${rateBps}B/s seeds=$numSeeds")
+            return false
+        }
+        val th = handleMap[id] ?: return false
+        withGate {
+            try { th.queuePositionBottom() } catch (_: Exception) {}
+            th.pause()
+        }
+        stallSince.remove(id)
+        TorrentRepository.update(id) {
+            it.copy(state = TorrentState.STALLED, downloadSpeed = 0L, uploadSpeed = 0L)
+        }
+        DebugLogger.i(
+            TAG,
+            "[FEATURE] 정체 torrent 회전 id=$id rate=${rateBps}B/s 임계=${latestStallThresholdKbps}KB/s seeds=$numSeeds → 큐 맨뒤",
+        )
+        return true
+    }
+
+    /** 슬롯이 남으면 다음 torrent를 즉시 기동한다 (T-1050).
+     *  우선순위: 대기(QUEUED) → 모두 정체한 경우에만 정체(STALLED) 재기동(하트비트) */
+    private fun maintainSlots() {
+        val all = TorrentRepository.all()
+        val active = all.count {
+            it.state == TorrentState.DOWNLOADING || it.state == TorrentState.FETCHING_METADATA
+        }
+        if (active >= latestMaxActive) return
+        val next = all.firstOrNull { it.state == TorrentState.QUEUED && handleMap.containsKey(it.id) }
+            ?: (if (active == 0) all.firstOrNull { it.state == TorrentState.STALLED && handleMap.containsKey(it.id) } else null)
+            ?: return
+        withGate { handleMap[next.id]?.resume() }
+        stallSince.remove(next.id)
+        TorrentRepository.update(next.id) { it.copy(state = TorrentState.DOWNLOADING) }
+        DebugLogger.i(TAG, "[FEATURE] 슬롯 승격 id=${next.id} '${next.name}' 활성=${active + 1}/${latestMaxActive}")
     }
 
     /** 트래커 재발표 + DHT 발표 강제 (추가 직후 시드·피어 0 지연 해소) */

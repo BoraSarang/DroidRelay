@@ -30,8 +30,9 @@ object SettingsMigration {
         runCatching { AccessScope.valueOf(raw ?: AccessScope.SUBNET_ONLY.name) }
             .getOrDefault(AccessScope.SUBNET_ONLY)
 
-    /** 포트 범위 수리 — 1024~65535 (기본값 지정 가능, HTTPS=8443) */
-    fun clampPort(v: Int?, default: Int = 8080): Int = (v ?: default).coerceIn(1024, 65535)
+    /** 포트 범위 수리 — 1024~65535 (기본값 지정 가능, HTTP=3000 / HTTPS=8443) */
+    fun clampPort(v: Int?, default: Int = SettingsConstraints.DEFAULT_HTTP_PORT): Int =
+        (v ?: default).coerceIn(SettingsConstraints.PORT_MIN, SettingsConstraints.PORT_MAX)
 
     /** 가드 열 임계 수리 — 50~70 */
     fun clampThermal(v: Int?): Int = (v ?: 50).coerceIn(50, 70)

@@ -32,17 +32,20 @@ class ServerControlTest {
     }
 
     @Test
-    fun `신규 필드 기본값은 모두 true`() {
+    fun `신규 필드 기본값 — HTTPS만 끄기, 자동시작은 true`() {
         val s = AppSettings()
         assertTrue(s.bootAutoStart)
         assertTrue(s.launchAutoStart)
-        assertTrue(s.httpsEnabled)
+        assertFalse(s.httpsEnabled)
         assertTrue(s.autoStart)
+        assertEquals(3000, s.port)
     }
 
     @Test
-    fun `ServerState 기본 httpsEnabled true`() {
-        assertTrue(ServerState().httpsEnabled)
+    fun `ServerState 기본 httpsEnabled false·port 3000`() {
+        val s = ServerState()
+        assertFalse(s.httpsEnabled)
+        assertEquals(3000, s.port)
     }
 
     @Test

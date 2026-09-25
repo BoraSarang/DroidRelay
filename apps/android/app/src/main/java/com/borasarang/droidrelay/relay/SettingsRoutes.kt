@@ -245,6 +245,10 @@ internal fun Route.settingsRoutes(context: Context, serverRef: RelayServer) {
                 put("torrentSequentialDownload", s.torrentSequentialDownload)
                 put("torrentMinSeedWaitSec", s.torrentMinSeedWaitSec)
                 put("torrentTrackerSync", s.torrentTrackerSync)
+                put("torrentStallEnabled", s.torrentStallEnabled)
+                put("torrentStallThresholdKbps", s.torrentStallThresholdKbps)
+                put("torrentStallTimeoutSec", s.torrentStallTimeoutSec)
+                put("speedPresets", org.json.JSONArray(SpeedLimits.KBPS))
             }.toString(),
             ContentType.Application.Json
         )
@@ -265,6 +269,9 @@ internal fun Route.settingsRoutes(context: Context, serverRef: RelayServer) {
         if (json?.has("torrentSequentialDownload") == true) json?.optBoolean("torrentSequentialDownload")?.let { repo.setTorrentSequentialDownload(it) }
         json?.optInt("torrentMinSeedWaitSec", -1)?.let { if (it >= 0) repo.setTorrentMinSeedWaitSec(it) }
         if (json?.has("torrentTrackerSync") == true) json?.optBoolean("torrentTrackerSync")?.let { repo.setTorrentTrackerSync(it) }
+        if (json?.has("torrentStallEnabled") == true) json?.optBoolean("torrentStallEnabled")?.let { repo.setTorrentStallEnabled(it) }
+        json?.optInt("torrentStallThresholdKbps", -1)?.let { if (it >= 0) repo.setTorrentStallThresholdKbps(it) }
+        json?.optInt("torrentStallTimeoutSec", -1)?.let { if (it >= 1) repo.setTorrentStallTimeoutSec(it) }
         // 엔진에 즉시 반영
         RelayApp.getTorrent(context).applySettings(repo.firstBlocking())
         serverRef.settings = repo.firstBlocking()
@@ -323,6 +330,9 @@ internal fun Route.settingsRoutes(context: Context, serverRef: RelayServer) {
                 repo.setTorrentListenPort(SettingsConstraints.randomEphemeralPort())
                 repo.setTorrentSavePath(StorageGuard.dlRoot.path)
                 repo.setTorrentTrackerSync(true)
+                repo.setTorrentStallEnabled(SettingsConstraints.DEFAULT_TORRENT_STALL_ENABLED)
+                repo.setTorrentStallThresholdKbps(SettingsConstraints.DEFAULT_TORRENT_STALL_THRESHOLD_KBPS)
+                repo.setTorrentStallTimeoutSec(SettingsConstraints.DEFAULT_TORRENT_STALL_TIMEOUT_SEC)
                 repo.setSearchEnabled(false)
                 repo.setSearchUrl("")
                 repo.setSearchApiKey("")
@@ -343,6 +353,9 @@ internal fun Route.settingsRoutes(context: Context, serverRef: RelayServer) {
                 repo.setTorrentDhtEnabled(true)
                 repo.setTorrentPexEnabled(true)
                 repo.setTorrentTrackerSync(true)
+                repo.setTorrentStallEnabled(SettingsConstraints.DEFAULT_TORRENT_STALL_ENABLED)
+                repo.setTorrentStallThresholdKbps(SettingsConstraints.DEFAULT_TORRENT_STALL_THRESHOLD_KBPS)
+                repo.setTorrentStallTimeoutSec(SettingsConstraints.DEFAULT_TORRENT_STALL_TIMEOUT_SEC)
                 repo.setTorrentListenPort(SettingsConstraints.randomEphemeralPort())
                 repo.setTorrentSavePath(StorageGuard.dlRoot.path)
                 repo.setSearchEnabled(false)

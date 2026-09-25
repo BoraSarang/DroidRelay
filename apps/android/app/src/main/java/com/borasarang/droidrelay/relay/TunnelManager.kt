@@ -25,11 +25,13 @@ class TunnelManager(private val context: Context) {
         private set
     @Volatile var currentUrl: String? = null
         private set
+    @Volatile private var localPort: Int = SettingsConstraints.DEFAULT_HTTP_PORT
 
     /**
      * 터널 시작 (설정된 프로바이더에 따라).
      */
     suspend fun start(settings: AppSettings): TunnelResult = withContext(Dispatchers.IO) {
+        localPort = settings.port
         if (!settings.tunnelEnabled) {
             return@withContext TunnelResult(false, "터널 비활성화")
         }
@@ -78,7 +80,7 @@ class TunnelManager(private val context: Context) {
 
         return TunnelStatus(
             running = isRunning || tailscaleIp != null,
-            url = currentUrl ?: tailscaleIp?.let { "http://$it:8080" },
+            url = currentUrl ?: tailscaleIp?.let { "http://$it:$localPort" },
             tailscaleInstalled = tailscaleInstalled,
             tailscaleConnected = tailscaleIp != null,
             cloudflaredAvailable = cloudflaredBinary,
@@ -146,7 +148,7 @@ class TunnelManager(private val context: Context) {
                 isRunning = true
                 // Tailscale IP 추출 시도
                 val ip = extractTailscaleIp(output)
-                currentUrl = ip?.let { "http://$it:8080" }
+                currentUrl = ip?.let { "http://$it:$localPort" }
                 TunnelResult(true, currentUrl ?: "연결됨")
             } else {
                 TunnelResult(false, "Tailscale 연결 안됨")
@@ -171,7 +173,7 @@ class TunnelManager(private val context: Context) {
             val process = runtime.exec(arrayOf(
                 binary.toString(),
                 "tunnel",
-                "--url", "http://localhost:8080",
+                "--url", "http://localhost:$localPort",
                 "--no-autoupdate",
             ))
             tunnelProcess = process

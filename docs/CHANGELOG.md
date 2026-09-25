@@ -2,10 +2,19 @@
 
 ## [Unreleased] — 안정성 19건 (Phase A~D) + Phase E 분할·권한 + 종합 정리
 
+### Changed [android] — 서버 기본값
+- 기본 HTTP 포트 `8080` → **`3000`** (`SettingsConstraints.DEFAULT_HTTP_PORT`, `AppSettings`/`ServerState`/`RelayServer`/`clampPort`/터널 URL)
+- HTTPS 기본 **사용안함** (`DEFAULT_HTTPS_ENABLED=false`, DataStore 키 없으면 false)
+- 문서·오류메시지(`E-AND-DOWN-1004`)·README·터널 가이드 반영
+
 ### Changed [android] — Phase E (WebAssets·SettingsScreen 분할 + 권한 축소)
 - `WebAssets.kt` 2859행 → 파사드 8행 + `WebDashboardHtml.kt`(2715) + `WebDebugHtml.kt`(146) — 공개 API `WebAssets.dashboardHtml`/`debugHtml` 불변, JS `node --check` OK
 - `SettingsScreen.kt` 1236행 → 엔트리 68행 + `SettingsComponents`/`SettingsServerSection`/`SettingsGeneralSections`/`SettingsTorrentSection`/`SettingsServiceSections` (섹션 12종 `internal fun` 추출, UI 동작·문구·순서 무변경)
 - `AndroidManifest`: `READ_EXTERNAL_STORAGE` `maxSdkVersion=32`, `WRITE_EXTERNAL_STORAGE` `maxSdkVersion=29` (API 30+는 `MANAGE_EXTERNAL_STORAGE`, legacy 29는 `requestLegacyExternalStorage` 유지)
+
+### Fixed [android] — 재시도 메시지
+- `friendlyReason`: `Software caused connection abort` 등 SocketException 원문 노출 → `연결이 중간에 끊겼습니다` 매핑 (+cause 메시지·`unexpected end of stream`)
+- 재시도 성공 후 RUNNING/DONE 복귀 시 `errorMessage`/`errorCode` 미삭제 → 진행 중에도 `재시도 1/5…` 잔존하던 문제 수정
 
 ### Fixed [android] — 안정성 Phase A~D (19건)
 - **#1** `publishToDownloads(): Boolean` — MediaStore 게시 성공 시에만 앱 전용 원본 삭제 (실패 시 URI·원본 보존)
@@ -53,6 +62,33 @@
 - README·AGENTS.android.md — 무선 adb 우선, USB 폴백 문서 수정
 - TODO 미구현 체크박스 3건 구현 완료 반영
 - `build.gradle.kts` `import`를 `plugins` 블록 위로 이동 (ktlint 파싱 수정)
+
+## [0.39.0] - 2026-09-25 (미배포) — 토렌트 정체 회전 + 속도 프리셋 통일 (PLAN_v0.41, T-1050~T-1054)
+
+### Added [android] — 토렌트 정체 회전 (T-1050)
+- `TorrentState.STALLED` 신규 — 임계 속도 미만/시더 0이 지속시간만큼 지나면 **일시정지 + 큐 맨뒤 회전**(`rotateStalled`), 다음 토렌트가 받도록 함
+- Session 세팅 `applyStallSessionSettings` — `incoming_starts_queued_torrents=false`, `dont_count_slow_torrents=!정체감지`, `inactive_down_rate/up_rate=기준*1024` (리플렉션 `swigSetting()`)
+- `maintainSlots()` — active < max이면 QUEUED 승격, active==0일 때만 STALLED 재기동(하트비트) → 정체 토렌트가 슬롯 점유하던 문제 해소
+- `FETCHING_METADATA`(메타데이터 미수신)도 정체 판정에 포함 — 죽은 마그넷이 슬롯을 영구 점유해 재기동이 막히던 데드락 차단 (파일 검사 `CHECKING_*`는 제외)
+- 설정 3종 `torrentStallEnabled/ThresholdKbps/TimeoutSec` (기본 켜짐/2KB/s/60초) + 설정·웹 API·`resetSettings` 복원·`maskSecrets` 마스킹
+- 앱·웹 "정체 torrent 회전" UI (스위치 + 기준/지속시간 셀렉트), STALLED 라벨·색·재개 버튼
+
+### Added [android] — 토렌트 개별 다운로드 제한 (T-1051)
+- `POST /api/torrents/{id}/limit` + `GET /api/torrents`에 `maxDownBps`, `TorrentEngine.setDownloadLimit/applyPersistedLimit`(등록 시 복원), 0=무제한
+- 토렌트 카드 "다운로드 제한" 선택(앱 라디오 다이얼로그 / 웹 셀렉트)
+
+### Changed [android] — 속도 프리셋 단일화 (T-1052·T-1053)
+- `relay/SpeedLimits.kt` 신규 — 프리셋 `무제한·256·512·1024·2048·5120·10240·20480 KB/s` 단일 진실
+- 앱 레벨 속도 제한·전역 다운로드 제한(슬라이더→`SpeedSelectBpsRow`)·토렌트 기본 다운로드 속도(슬라이더→`SpeedSelectRow`) 셀렉트 통일
+- 작업/토렌트 개별 제한 select도 동일 프리셋으로 통일 (기존 저장값은 폴백 라벨로 표시)
+- 웹 대시보드 3곳 range→`<select>` + 정체 설정 블록 + `.STALLED` 배지 + `renderTorrents` `uiBusy` 가드
+- `TorrentEngine.reorder` → `reorderTo` + `syncQueueOrder()` — 표시 order를 libtorrent `queue_position`으로 동기화
+
+### Fixed [web] — 카드 내 제한 select 폭 (T-1050 후속)
+- 토렌트 카드 select 인라인 `width:104px`(카드 내부 84px 초과 → 버튼보다 넓게 삐져나옴)·작업 카드 인라인 `width:100%`(모바일 row의 `flex:1`과 경합) 제거 → `.card-acts .ghost` 규칙으로 버튼과 동일 폭·패딩 통일 (실측 모바일 118px 3개 일치, 데스크톱 112px 3개 일치)
+
+### Added [android] — 테스트 (T-1054)
+- `TorrentStallTest` 9건 — 정체 판정·지속시간·프리셋 라벨/Bps 변환·폴백·기본값 (test GREEN + ktlint GREEN + 실기기 설치·API/웹 실측)
 
 ## [0.38.0] - 2026-09-22 (미배포)
 
