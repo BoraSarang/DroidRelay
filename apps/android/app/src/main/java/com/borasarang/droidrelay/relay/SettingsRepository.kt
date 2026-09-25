@@ -87,6 +87,10 @@ data class AppSettings(
     val scheduleBatteryMin: Int = 30,
     val watchdogIntervalSec: Int = 60,
     val torrentMinSeedWaitSec: Int = 0,
+    // 정체(스톨) 감지→회전 (T-1050): 0 이하 임계값은 "속도 조건 끔"
+    val torrentStallEnabled: Boolean = SettingsConstraints.DEFAULT_TORRENT_STALL_ENABLED,
+    val torrentStallThresholdKbps: Int = SettingsConstraints.DEFAULT_TORRENT_STALL_THRESHOLD_KBPS,
+    val torrentStallTimeoutSec: Int = SettingsConstraints.DEFAULT_TORRENT_STALL_TIMEOUT_SEC,
     val forceHttpsRedirect: Boolean = false,
     // 보관함 자동 운영 (v0.19)
     val storageQuotaGb: Int = 0, // 0=끔
@@ -175,6 +179,9 @@ class SettingsRepository(private val context: Context) {
         val SCHED_BATTERY_MIN = intPreferencesKey("sched_battery_min")
         val WATCHDOG_INTERVAL_SEC = intPreferencesKey("watchdog_interval_sec")
         val TORRENT_MIN_SEED_WAIT_SEC = intPreferencesKey("torrent_min_seed_wait_sec")
+        val TORRENT_STALL_ENABLED = booleanPreferencesKey("torrent_stall_enabled")
+        val TORRENT_STALL_THRESHOLD_KBPS = intPreferencesKey("torrent_stall_threshold_kbps")
+        val TORRENT_STALL_TIMEOUT_SEC = intPreferencesKey("torrent_stall_timeout_sec")
         val FORCE_HTTPS_REDIRECT = booleanPreferencesKey("force_https_redirect")
         // 보관함 자동 운영 (v0.19)
         val STORAGE_QUOTA_GB = intPreferencesKey("storage_quota_gb")
@@ -244,6 +251,11 @@ class SettingsRepository(private val context: Context) {
             scheduleBatteryMin = (p[Keys.SCHED_BATTERY_MIN] ?: 30).coerceIn(5, 100),
             watchdogIntervalSec = (p[Keys.WATCHDOG_INTERVAL_SEC] ?: 60).coerceIn(15, 3600),
             torrentMinSeedWaitSec = (p[Keys.TORRENT_MIN_SEED_WAIT_SEC] ?: 0).coerceAtLeast(0),
+            torrentStallEnabled = p[Keys.TORRENT_STALL_ENABLED] ?: SettingsConstraints.DEFAULT_TORRENT_STALL_ENABLED,
+            torrentStallThresholdKbps = (p[Keys.TORRENT_STALL_THRESHOLD_KBPS] ?: SettingsConstraints.DEFAULT_TORRENT_STALL_THRESHOLD_KBPS)
+                .coerceIn(SettingsConstraints.TORRENT_STALL_THRESHOLD_MIN, SettingsConstraints.TORRENT_STALL_THRESHOLD_MAX),
+            torrentStallTimeoutSec = (p[Keys.TORRENT_STALL_TIMEOUT_SEC] ?: SettingsConstraints.DEFAULT_TORRENT_STALL_TIMEOUT_SEC)
+                .coerceIn(SettingsConstraints.TORRENT_STALL_TIMEOUT_MIN, SettingsConstraints.TORRENT_STALL_TIMEOUT_MAX),
             forceHttpsRedirect = p[Keys.FORCE_HTTPS_REDIRECT] ?: false,
             storageQuotaGb = (p[Keys.STORAGE_QUOTA_GB] ?: 0).coerceIn(0, 1024),
             autoClassify = p[Keys.AUTO_CLASSIFY] ?: false,
@@ -396,6 +408,26 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun setTorrentMaxActive(n: Int) =
         context.settingsDataStore.edit { it[Keys.TORRENT_MAX_ACTIVE] = n.coerceIn(1, 10) }
+
+    // 정체(스톨) 감지 setters (T-1050)
+    suspend fun setTorrentStallEnabled(enabled: Boolean) =
+        context.settingsDataStore.edit { it[Keys.TORRENT_STALL_ENABLED] = enabled }
+
+    suspend fun setTorrentStallThresholdKbps(kbps: Int) =
+        context.settingsDataStore.edit {
+            it[Keys.TORRENT_STALL_THRESHOLD_KBPS] = kbps.coerceIn(
+                SettingsConstraints.TORRENT_STALL_THRESHOLD_MIN,
+                SettingsConstraints.TORRENT_STALL_THRESHOLD_MAX,
+            )
+        }
+
+    suspend fun setTorrentStallTimeoutSec(sec: Int) =
+        context.settingsDataStore.edit {
+            it[Keys.TORRENT_STALL_TIMEOUT_SEC] = sec.coerceIn(
+                SettingsConstraints.TORRENT_STALL_TIMEOUT_MIN,
+                SettingsConstraints.TORRENT_STALL_TIMEOUT_MAX,
+            )
+        }
 
     suspend fun setTorrentSeedRatio(ratio: Float) =
         context.settingsDataStore.edit { it[Keys.TORRENT_SEED_RATIO] = (ratio * 100).toInt().coerceIn(0, 1000) }

@@ -54,6 +54,30 @@
 - TODO 미구현 체크박스 3건 구현 완료 반영
 - `build.gradle.kts` `import`를 `plugins` 블록 위로 이동 (ktlint 파싱 수정)
 
+## [0.39.0] - 2026-09-25 (미배포) — 토렌트 정체 회전 + 속도 프리셋 통일 (PLAN_v0.41, T-1050~T-1054)
+
+### Added [android] — 토렌트 정체 회전 (T-1050)
+- `TorrentState.STALLED` 신규 — 임계 속도 미만/시더 0이 지속시간만큼 지나면 **일시정지 + 큐 맨뒤 회전**(`rotateStalled`), 다음 토렌트가 받도록 함
+- Session 세팅 `applyStallSessionSettings` — `incoming_starts_queued_torrents=false`, `dont_count_slow_torrents=!정체감지`, `inactive_down_rate/up_rate=기준*1024` (리플렉션 `swigSetting()`)
+- `maintainSlots()` — active < max이면 QUEUED 승격, active==0일 때만 STALLED 재기동(하트비트) → 정체 토렌트가 슬롯 점유하던 문제 해소
+- `FETCHING_METADATA`(메타데이터 미수신)도 정체 판정에 포함 — 죽은 마그넷이 슬롯을 영구 점유해 재기동이 막히던 데드락 차단 (파일 검사 `CHECKING_*`는 제외)
+- 설정 3종 `torrentStallEnabled/ThresholdKbps/TimeoutSec` (기본 켜짐/2KB/s/60초) + 설정·웹 API·`resetSettings` 복원·`maskSecrets` 마스킹
+- 앱·웹 "정체 torrent 회전" UI (스위치 + 기준/지속시간 셀렉트), STALLED 라벨·색·재개 버튼
+
+### Added [android] — 토렌트 개별 다운로드 제한 (T-1051)
+- `POST /api/torrents/{id}/limit` + `GET /api/torrents`에 `maxDownBps`, `TorrentEngine.setDownloadLimit/applyPersistedLimit`(등록 시 복원), 0=무제한
+- 토렌트 카드 "다운로드 제한" 선택(앱 라디오 다이얼로그 / 웹 셀렉트)
+
+### Changed [android] — 속도 프리셋 단일화 (T-1052·T-1053)
+- `relay/SpeedLimits.kt` 신규 — 프리셋 `무제한·256·512·1024·2048·5120·10240·20480 KB/s` 단일 진실
+- 앱 레벨 속도 제한·전역 다운로드 제한(슬라이더→`SpeedSelectBpsRow`)·토렌트 기본 다운로드 속도(슬라이더→`SpeedSelectRow`) 셀렉트 통일
+- 작업/토렌트 개별 제한 select도 동일 프리셋으로 통일 (기존 저장값은 폴백 라벨로 표시)
+- 웹 대시보드 3곳 range→`<select>` + 정체 설정 블록 + `.STALLED` 배지 + `renderTorrents` `uiBusy` 가드
+- `TorrentEngine.reorder` → `reorderTo` + `syncQueueOrder()` — 표시 order를 libtorrent `queue_position`으로 동기화
+
+### Added [android] — 테스트 (T-1054)
+- `TorrentStallTest` 9건 — 정체 판정·지속시간·프리셋 라벨/Bps 변환·폴백·기본값 (test GREEN + ktlint GREEN + 실기기 설치·API/웹 실측)
+
 ## [0.38.0] - 2026-09-22 (미배포)
 
 ### Fixed [web] — 통계 3열 깨짐 + 메뉴 클릭 불능

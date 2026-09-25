@@ -27,6 +27,17 @@ object SettingsConstraints {
     const val TORRENT_MAX_ACTIVE_MAX = 10
     const val DEFAULT_TORRENT_MAX_ACTIVE = 3
 
+    // 정체(스톨) 토렌트 감지 → 자동 일시정지+회전 (T-1050)
+    const val TORRENT_STALL_THRESHOLD_MIN = 0
+    const val TORRENT_STALL_THRESHOLD_MAX = 256
+    const val TORRENT_STALL_TIMEOUT_MIN = 15
+    const val TORRENT_STALL_TIMEOUT_MAX = 3600
+    const val DEFAULT_TORRENT_STALL_ENABLED = true
+    const val DEFAULT_TORRENT_STALL_THRESHOLD_KBPS = 2
+    const val DEFAULT_TORRENT_STALL_TIMEOUT_SEC = 60
+    val TORRENT_STALL_THRESHOLD_PRESETS = listOf(1, 2, 4, 8, 16, 32, 64, 128)
+    val TORRENT_STALL_TIMEOUT_PRESETS = listOf(30, 60, 120, 300, 600, 1800)
+
     /** 업로드 라벨: 0=끔, 그 외 KB/s·MB/s */
     fun uploadLabel(kbps: Long): String = when {
         kbps <= 0 -> "끔"

@@ -80,6 +80,7 @@ import com.borasarang.droidrelay.relay.RelayApp
 import com.borasarang.droidrelay.relay.RelayService
 import com.borasarang.droidrelay.relay.SettingsConstraints
 import com.borasarang.droidrelay.relay.SettingsRepository
+import com.borasarang.droidrelay.relay.SpeedLimits
 import com.borasarang.droidrelay.relay.StreamDetector
 import com.borasarang.droidrelay.relay.VideoApi
 import com.borasarang.droidrelay.relay.VideoException
@@ -719,15 +720,10 @@ private fun TaskLimitRow(job: Job) {
     val engine = RelayApp.get(ctx)
     val cs = MaterialTheme.colorScheme
     var showDialog by remember { mutableStateOf(false) }
-    val options = listOf(
-        0L to "무제한",
-        262144L to "256KB/s",
-        524288L to "512KB/s",
-        1048576L to "1MB/s",
-        5242880L to "5MB/s",
-    )
+    // 프리셋 단일 진실은 SpeedLimits (T-1050)
+    val options = SpeedLimits.bpsOptions()
     val label = options.firstOrNull { it.first == job.maxDownBps }?.second
-        ?: "${job.maxDownBps / 1024}KB/s"
+        ?: SpeedLimits.labelBps(job.maxDownBps)
 
     TextButton(onClick = { showDialog = true }) {
         Text("제한: $label", color = cs.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)

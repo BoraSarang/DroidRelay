@@ -32,6 +32,7 @@ internal fun Route.torrentRoutes(context: Context, serverRef: RelayServer) {
                 put("order", t.order)
                 put("seeds", t.seeds)
                 put("peers", t.peers)
+                put("maxDownBps", t.downloadLimit)
                 put("piecesDone", piecesDone)
                 put("piecesTotal", piecesTotal)
                 put("files", JSONArray().apply {
@@ -129,6 +130,17 @@ internal fun Route.torrentRoutes(context: Context, serverRef: RelayServer) {
                 if (engine.setFileSelection(id, selected)) call.respondText("ok")
                 else call.respondErr("파일 목록 없음 — 메타데이터 수신 후 시도")
             }
+            "limit" -> {
+                if (TorrentRepository.get(id) == null) {
+                    call.respondText("없음", ContentType.Text.Plain, HttpStatusCode.NotFound)
+                    return@post
+                }
+                val json = try { JSONObject(call.receiveText()) } catch (_: Exception) { null }
+                val bps = json?.optLong("maxDownBps", -1L) ?: -1L
+                if (bps < 0) { call.respondErr("maxDownBps 필요 (0=무제한)"); return@post }
+                engine.setDownloadLimit(id, bps)
+                call.respondText("ok")
+            }
             else -> call.respondText("지원 없는 동작", ContentType.Text.Plain, HttpStatusCode.BadRequest)
         }
     }
@@ -195,7 +207,7 @@ internal fun Route.torrentRoutes(context: Context, serverRef: RelayServer) {
             call.respondText("잘못된 요청", ContentType.Text.Plain, HttpStatusCode.BadRequest)
             return@post
         }
-        TorrentRepository.reorder(id, newOrder)
+        RelayApp.getTorrent(context).reorderTo(id, newOrder)
         call.respondText("ok")
     }
 

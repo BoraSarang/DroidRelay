@@ -79,25 +79,12 @@ internal fun TorrentSection(
 
         Spacer(Modifier.height(8.dp))
 
-        // 다운로드 속도 (0 = 무제한)
-        Text(
-            "기본 다운로드 속도: ${SettingsConstraints.downloadLabel(s.torrentDownloadLimit)}",
-            color = cs.onSurface,
+        // 다운로드 속도 (0 = 무제한) — 프리셋은 SpeedLimits 단일 진실 (T-1050)
+        SpeedSelectRow(
+            label = "기본 다운로드 속도",
+            value = s.torrentDownloadLimit.toInt(),
+            onSelect = { kbps -> scope.launch { repo.setTorrentDownloadLimit(kbps) } },
         )
-        Slider(
-            value = s.torrentDownloadLimit.toFloat(),
-            onValueChange = { v ->
-                val kbps = (v.roundToInt() / SettingsConstraints.TORRENT_DOWNLOAD_STEP * SettingsConstraints.TORRENT_DOWNLOAD_STEP)
-                    .coerceIn(SettingsConstraints.TORRENT_DOWNLOAD_MIN, SettingsConstraints.TORRENT_DOWNLOAD_MAX)
-                scope.launch { repo.setTorrentDownloadLimit(kbps) }
-            },
-            valueRange = SettingsConstraints.TORRENT_DOWNLOAD_MIN.toFloat()..SettingsConstraints.TORRENT_DOWNLOAD_MAX.toFloat(),
-            steps = SettingsConstraints.TORRENT_DOWNLOAD_MAX / SettingsConstraints.TORRENT_DOWNLOAD_STEP - 1,
-        )
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text("무제한", style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
-            Text("20M", style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
-        }
 
         // 최대 활성 torrent
         Text("최대 활성 torrent: ${s.torrentMaxActive}개", color = cs.onSurface)
@@ -107,6 +94,32 @@ internal fun TorrentSection(
             valueRange = SettingsConstraints.TORRENT_MAX_ACTIVE_MIN.toFloat()..SettingsConstraints.TORRENT_MAX_ACTIVE_MAX.toFloat(),
             steps = SettingsConstraints.TORRENT_MAX_ACTIVE_MAX - SettingsConstraints.TORRENT_MAX_ACTIVE_MIN - 1,
         )
+
+        // 정체(스톨) 회전 (T-1050)
+        Spacer(Modifier.height(8.dp))
+        Text("정체 torrent 회전", color = cs.onSurfaceVariant, style = MaterialTheme.typography.labelMedium)
+        SwitchRow("정체 감지 → 자동 일시정지 + 순서 맨뒤로", s.torrentStallEnabled) { v ->
+            scope.launch { repo.setTorrentStallEnabled(v) }
+        }
+        Text(
+            "속도·시더가 기준 이하로 버티면 다음 torrent가 받도록 자리를 넘깁니다",
+            color = cs.onSurfaceVariant,
+            style = MaterialTheme.typography.labelSmall,
+        )
+        if (s.torrentStallEnabled) {
+            SpeedSelectRow(
+                label = "정체 기준 (KB/s)",
+                value = s.torrentStallThresholdKbps,
+                onSelect = { v -> scope.launch { repo.setTorrentStallThresholdKbps(v) } },
+                options = SettingsConstraints.TORRENT_STALL_THRESHOLD_PRESETS.map { it to "${it}KB/s" },
+            )
+            SpeedSelectRow(
+                label = "정체 지속 시간 (초)",
+                value = s.torrentStallTimeoutSec,
+                onSelect = { v -> scope.launch { repo.setTorrentStallTimeoutSec(v) } },
+                options = SettingsConstraints.TORRENT_STALL_TIMEOUT_PRESETS.map { it to "${it}초" },
+            )
+        }
 
         // 시드 ratio
         Text("최대 시드 ratio: ${String.format("%.1f", s.torrentSeedRatio)}", color = cs.onSurface)

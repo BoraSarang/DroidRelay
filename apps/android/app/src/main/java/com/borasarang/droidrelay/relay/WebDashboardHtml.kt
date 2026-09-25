@@ -76,6 +76,7 @@ internal object WebDashboardHtml {
   .badge{font-size:11px;padding:2px 8px;border-radius:99px;background:var(--line);display:inline-flex;align-items:center}
   .RUNNING{background:var(--accentbg);color:var(--accent2)}.DONE{background:var(--okbg);color:var(--ok)}.FAILED{background:var(--danger);color:var(--err)}
   .QUEUED{background:var(--line)}.PAUSED{background:#3A3312;color:var(--warn)}.CANCELED{background:#333}
+  .STALLED{background:#1B2C3F;color:#7FB6E8}
   .badge.video{background:#0A3A2F;color:#6FE3C4}
   .badges{display:inline-flex;gap:6px;align-items:center}
   .overlay{position:fixed;inset:0;background:rgba(5,10,20,.62);backdrop-filter:blur(2px);display:flex;align-items:center;justify-content:center;z-index:9998}
@@ -283,7 +284,7 @@ internal object WebDashboardHtml {
 
     <!-- 비디오 분석 섹션 (접이식, 기본 접힘) -->
     <div class="sg" id="videoSection" style="margin:14px 0 10px;padding:14px;background:var(--surface);border:1px solid var(--line);border-radius:12px">
-      <div class="sh coll-h" id="videoHead" onclick="toggleColl('videoBody','videoHead','video')"><span>🎬 비디오 분석 & 다운로드</span><span class="arrow">▶</span></div>
+      <div class="sh coll-h" id="videoHead" onclick="toggleColl('videoBody','videoHead')"><span>🎬 비디오 분석 & 다운로드</span><span class="arrow">▶</span></div>
       <div class="coll-b" id="videoBody">
       <div class="row" style="margin-top:10px">
         <input id="vurl" type="url" placeholder="스트림 페이지 또는 m3u8/mpd 직접 주소" style="flex:1">
@@ -384,8 +385,8 @@ internal object WebDashboardHtml {
               <div class="sl">다운로드 제한</div>
               <div class="sv">
                 <input type="checkbox" id="dlSpeedEnabled" onchange="toggleSpeedLimit('dl')">
-                <input type="range" id="maxDownloadMbps" min="1" max="10" value="3" step="1" disabled>
-                <span id="maxDownloadLabel">3 Mbps</span>
+                <select id="maxDownloadMbps" disabled></select>
+                <span id="maxDownloadLabel">3MB/s</span>
               </div>
             </div>
             <div class="si">
@@ -415,10 +416,10 @@ internal object WebDashboardHtml {
             <div class="si">
               <div class="sl">앱 레벨 속도 제한</div>
               <div class="sv">
-                <input type="range" id="speedLimitKbps" min="0" max="2048" value="0" step="128">
+                <select id="speedLimitKbps"></select>
                 <span id="speedLimitLabel">무제한</span>
               </div>
-              <div class="sb">KB/s 단위 · 0 = 무제한 · 전역 제한과 별도 작동</div>
+              <div class="sb">프리셋 단위 · 0 = 무제한 · 전역 제한과 별도 작동</div>
             </div>
           </div>
           <div class="ck" style="margin-top:12px">
@@ -484,10 +485,10 @@ internal object WebDashboardHtml {
             <div class="si">
               <div class="sl">다운로드 속도</div>
               <div class="sv">
-                <input type="range" id="torrentDownloadLimit" min="0" max="20480" value="0" step="1024">
+                <select id="torrentDownloadLimit"></select>
                 <span id="torrentDownloadLabel">무제한</span>
               </div>
-              <div class="sb">KB/s 단위 · 0 = 무제한 · 전역 제한과 별도 작동</div>
+              <div class="sb">프리셋 단위 · 0 = 무제한 · 전역 제한과 별도 작동</div>
             </div>
           </div>
           <div class="ti">연결</div>
@@ -507,9 +508,9 @@ internal object WebDashboardHtml {
               </div>
               <div class="sb">받은 양 대비 업로드 비율 도달 시 자동 일시정지 · 0 = 제한 없음</div>
             </div>
-            <div class="si">
-              <button class="ghost sm" onclick="minimizeUpload()">⬇ 업로드 최소화 (비율 0.5 + 업로드 32KB/s + DHT 끔)</button>
-            </div>
+          </div>
+          <div class="sr" style="margin-top:4px">
+            <button class="ghost sm" onclick="minimizeUpload()">⬇ 업로드 최소화 (비율 0.5 + 업로드 32KB/s + DHT 끔)</button>
           </div>
           <div class="ti">고급</div>
           <div class="ck" style="gap:20px">
@@ -526,6 +527,20 @@ internal object WebDashboardHtml {
               <input type="number" id="torrentMinSeedWaitSec" min="0" max="3600" value="0" style="width:90px">
             </div>
             <div class="sb">시더(파일 100% 보유 피어)가 없으면 이 시간만큼 기다린 뒤 자동 일시정지. 0 = 끄기 (기본). 예: 300 = 5분 대기</div>
+          </div>
+          <div class="ti">정체 torrent 회전</div>
+          <div class="ck"><input type="checkbox" id="torrentStallEnabled" checked><label for="torrentStallEnabled">정체 감지 → 자동 일시정지 + 순서 맨뒤로</label></div>
+          <div class="sr">
+            <div class="si">
+              <div class="sl">정체 기준</div>
+              <div class="sv"><select id="torrentStallThresholdKbps"></select></div>
+              <div class="sb">이 속도 이하(또는 시더 0)가 지속되면 정체로 봅니다</div>
+            </div>
+            <div class="si">
+              <div class="sl">정체 지속 시간</div>
+              <div class="sv"><select id="torrentStallTimeoutSec"></select></div>
+              <div class="sb">이 시간이 지나면 다음 torrent가 받도록 자리를 넘깁니다 (최대 활성 수 범위)</div>
+            </div>
           </div>
           <div class="ti">리슨 포트</div>
           <div class="ft">
@@ -865,12 +880,42 @@ window.onerror=function(msg,src,line){var t=document.createElement('div');t.text
 function esc(s){return (s||'').replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
 function num(v,d){v=parseFloat(v);return isFinite(v)?v:d;}
 function kblabel(v,d,zero){v=(v!=null?v:d);return v===0?zero:v+' KB/s';}
+// ── 속도 제한 프리셋 (T-1050) — 앱 SpeedLimits.KBPS와 같은 목록이 단일 진실 ──
+var SPEED_PRESETS=[0,256,512,1024,2048,5120,10240,20480];
+function kbpsName(k){return k<=0?'무제한':(k<1024?k+'KB/s':(k/1024)+'MB/s');}
+// unitScale: 1 = option value를 KB/s로, 1024 = B/s로 저장
+function fillSpeedSelect(el,curKbps,unitScale){
+  if(!el)return;
+  var cur=Number(curKbps)||0, list=SPEED_PRESETS.slice();
+  if(list.indexOf(cur)<0)list.push(cur);
+  el.innerHTML=list.map(function(k){
+    return '<option value="'+(k*(unitScale||1))+'"'+(k===cur?' selected':'')+'>'+kbpsName(k)+'</option>';
+  }).join('');
+}
+function speedSelectKbps(el,unitScale){return Math.round(num(el.value,0)/(unitScale||1));}
+// 현재 B/s 값을 프리셋 option HTML로 (제한 셀렉트 공용)
+function presetOptionsHtml(curBps){
+  var cur=Number(curBps)||0, kbps=cur>0?Math.ceil(cur/1024):0;
+  var list=SPEED_PRESETS.slice();
+  if(list.indexOf(kbps)<0)list.push(kbps);
+  return list.map(function(k){
+    return '<option value="'+(k*1024)+'"'+(k===kbps?' selected':'')+'>'+kbpsName(k)+'</option>';
+  }).join('');
+}
+function fillSelect(id,values,cur,unit){
+  var el=document.getElementById(id);if(!el)return;
+  var list=values.slice(), c=Number(cur);
+  if(list.indexOf(c)<0)list.push(c);
+  el.innerHTML=list.map(function(v){
+    return '<option value="'+v+'"'+(v===c?' selected':'')+'>'+v+(unit||'')+'</option>';
+  }).join('');
+}
 function apiGet(p){return fetch(p).then(function(r){return r.json();});}
 function apiPost(p,b){return fetch(p,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b||{})}).then(function(r){return r.json();});}
 function showDlToast(msg){var t=document.createElement('div');t.textContent=msg||'다운로드 요청 했습니다';t.style.cssText='position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#1a5c3a;color:#69e29b;padding:10px 20px;border-radius:8px;font-size:14px;z-index:9999;opacity:1;transition:opacity 1.5s';document.body.appendChild(t);setTimeout(function(){t.style.opacity='0'},1500);setTimeout(function(){t.remove()},3000);}
 function fmt(n){if(n==null||n<0)return '?';if(n<1048576)return (n/1024).toFixed(0)+' KB';if(n<1073741824)return (n/1048576).toFixed(1)+' MB';return (n/1073741824).toFixed(2)+' GB';}
 function spd(bps){return bps>0?(bps/1024).toFixed(0)+' KB/s':'-';}
-function label(st){return {QUEUED:'대기',RUNNING:'진행 중',PAUSED:'일시정지',DONE:'완료',FAILED:'실패',CANCELED:'취소됨',ADDING:'추가 중',METADATA:'메타데이터',FETCHING_METADATA:'메타데이터 추출 중',DOWNLOADING:'진행 중',SEEDING:'시딩'}[st]||st;}
+function label(st){return {QUEUED:'대기',RUNNING:'진행 중',PAUSED:'일시정지',STALLED:'정체',DONE:'완료',FAILED:'실패',CANCELED:'취소됨',ADDING:'추가 중',METADATA:'메타데이터',FETCHING_METADATA:'메타데이터 추출 중',DOWNLOADING:'진행 중',SEEDING:'시딩'}[st]||st;}
 function fmtDuration(sec){
   if(sec==null||sec<0||!isFinite(sec))return'';
   sec=Math.round(sec);
@@ -1056,11 +1101,7 @@ function render(jobs){
     if(j.type!=='video'&&j.state!=='DONE'&&j.state!=='CANCELED'){
       var cur=j.maxDownBps||0;
       limit='<select class="ghost" style="width:100%;box-sizing:border-box" onchange="setJobLimit(\''+j.id+'\',this.value)">'
-        +'<option value="0"'+(cur<=0?' selected':'')+'>무제한</option>'
-        +'<option value="262144"'+(cur===262144?' selected':'')+'>256KB/s</option>'
-        +'<option value="524288"'+(cur===524288?' selected':'')+'>512KB/s</option>'
-        +'<option value="1048576"'+(cur===1048576?' selected':'')+'>1MB/s</option>'
-        +'<option value="5242880"'+(cur===5242880?' selected':'')+'>5MB/s</option></select>';
+        +presetOptionsHtml(cur)+'</select>';
     }
     h+='<div class="card" draggable="true" data-id="'+j.id+'">'
       +'<div style="flex:1;min-width:0;padding:14px">'
@@ -1083,12 +1124,12 @@ function updateInfoBar(){
   var tDown=tActive.reduce(function(a,t){return a+(t.downloadSpeed||0);},0);
   var tUp=tActive.reduce(function(a,t){return a+(t.uploadSpeed||0);},0);
   var left='<div class="info-left">'
-    +'<span class="info-item">진행 <b>'+running.length+'</b>건</span>';
+    +'<span class="info-item">다운로드 <b>'+running.length+'</b>건</span>';
   if(running.length>0||tActive.length>0){
     left+='<span class="info-item speed">총 속도 <b>'+spd(totalSpeed+tDown)+'</b></span>';
     if(tUp>0)left+='<span class="info-item speed" style="color:#f96">▲ '+spd(tUp)+'</span>';
     if(tActive.length>0)left+='<span class="info-item">토렌트 <b>'+tActive.length+'</b>건</span>';
-    document.title='DroidRelay : '+spd(totalSpeed+tDown)+(tUp>0?' ▲'+spd(tUp):'');
+    document.title='DroidRelay : ▲'+spd(tUp)+' ▼'+spd(totalSpeed+tDown);
   }else{
     left+='<span class="info-item idle">대기중...</span>';
     document.title='DroidRelay';
@@ -1140,19 +1181,22 @@ function renderTorrents(ts){
     }
     var err=t.errorMessage?'<div class="err">'+esc(t.errorMessage)+'</div>':'';
     var st=t.state||'UNKNOWN';
-    var badgeClass={DOWNLOADING:'RUNNING',SEEDING:'DONE',PAUSED:'PAUSED',ERROR:'FAILED',FETCHING_METADATA:'QUEUED',METADATA:'QUEUED',ADDING:'QUEUED'}[st]||'QUEUED';
+    var badgeClass={DOWNLOADING:'RUNNING',SEEDING:'DONE',PAUSED:'PAUSED',STALLED:'STALLED',ERROR:'FAILED',FETCHING_METADATA:'QUEUED',METADATA:'QUEUED',ADDING:'QUEUED'}[st]||'QUEUED';
     var pause='';
     if(st==='DOWNLOADING'||st==='FETCHING_METADATA')pause='<button class="ghost" onclick="torrentAct(\''+t.id+'\',\'pause\')">일시정지</button>';
-    if(st==='PAUSED'||st==='FAILED')pause='<button class="ghost" onclick="torrentAct(\''+t.id+'\',\'resume\')">재개</button>';
+    if(st==='PAUSED'||st==='FAILED'||st==='STALLED'||st==='QUEUED')pause='<button class="ghost" onclick="torrentAct(\''+t.id+'\',\'resume\')">재개</button>';
     var del='<button class="ghost" onclick="torrentDelConfirm(\''+t.id+'\')">삭제</button>';
+    var tlimit='<select class="ghost" style="width:104px" onchange="setTorrentLimit(\''+t.id+'\',this.value)" title="torrent 다운로드 제한">'
+      +presetOptionsHtml(t.maxDownBps||0)+'</select>';
     h+='<div class="card" draggable="true" data-id="'+t.id+'">'
       +'<div style="flex:1;min-width:0;padding:14px">'
       +'<div class="name">'+esc(t.name||t.hash||'파일 불명')+'</div>'
       +'<div class="meta"><span class="badge '+badgeClass+'">'+label(st)+'</span><span>'+size+'</span><span>'+pct+'%</span>'+sp+up+eta+(seedInfo?' '+seedInfo:'')+'</div>'
       +'<div class="bar"><div class="fill" style="width:'+pct+'%"></div></div>'+filePath+err
-      +'</div><div class="card-acts">'+pause+del+'</div></div>';
+      +'</div><div class="card-acts">'+tlimit+pause+del+'</div></div>';
   });
-  if(window.__lastTorrentsH!==h){window.__lastTorrentsH=h;el.innerHTML=h;}
+  // 틱 리렌더 중 select 조작 보호 (T-998)
+  if(!uiBusy(el)&&window.__lastTorrentsH!==h){window.__lastTorrentsH=h;el.innerHTML=h;}
   var totalDown=ts.reduce(function(a,t){return a+(t.downloadSpeed||0);},0);
   var totalUp=ts.reduce(function(a,t){return a+(t.uploadSpeed||0);},0);
   var active=ts.filter(function(t){return t.state==='DOWNLOADING'||t.state==='SEEDING'||t.state==='FETCHING_METADATA';}).length;
@@ -1591,6 +1635,12 @@ function uploadTorrent(input){
 function act(id,a){fetch('/api/jobs/'+id+'/'+a,{method:'POST'}).then(refresh);}
 function delJob(id){fetch('/api/jobs/'+id,{method:'DELETE'}).then(refresh);}
 function torrentAct(id,a){fetch('/api/torrents/'+id+'/'+a,{method:'POST'}).then(refresh);}
+// torrent 개별 다운로드 제한 (T-1050) — 응답은 text("ok")라 json 파싱 회피
+function setTorrentLimit(id,bps){
+  fetch('/api/torrents/'+id+'/limit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({maxDownBps:Number(bps)||0})})
+    .then(function(){showDlToast('torrent 속도 제한 적용됨');refresh();})
+    .catch(function(e){alert('적용 실패: '+e);});
+}
 function searchTorrents(){
   var q=document.getElementById('tsearch').value.trim();if(!q)return;
   document.getElementById('searchResults').innerHTML='<div style="padding:8px 16px;color:var(--muted)">검색 중...</div>';
@@ -1743,7 +1793,7 @@ function setTheme(t){
   applyTheme();
 }
 
-// ── 접이식 섹션 (T-1003, 기본 접힘 + localStorage 기억) ──
+// ── 접이식 섹션 (T-1003, 기본 접힘 + localStorage 기억 — 비디오 분석은 예외로 항상 접힘) ──
 function setColl(bodyId,headId,open){
   var b=document.getElementById(bodyId);var h=document.getElementById(headId);
   if(b)b.style.display=open?'block':'none';
@@ -1752,7 +1802,7 @@ function setColl(bodyId,headId,open){
 function toggleColl(bodyId,headId,key){
   var b=document.getElementById(bodyId);
   var open=!b||b.style.display==='none';
-  try{localStorage.setItem('dr_coll_'+key,open?'1':'0');}catch(e){}
+  if(key){try{localStorage.setItem('dr_coll_'+key,open?'1':'0');}catch(e){}}
   setColl(bodyId,headId,open);
 }
 function applyColl(bodyId,headId,key){
@@ -1760,8 +1810,9 @@ function applyColl(bodyId,headId,key){
   try{open=localStorage.getItem('dr_coll_'+key)==='1';}catch(e){}
   setColl(bodyId,headId,open);
 }
-applyColl('videoBody','videoHead','video');
 applyColl('tsearchBody','tsearchHead','tsearch');
+// 비디오 분석: 저장값과 무관하게 항상 접힘 시작 (요청 — 열림 상태는 저장하지 않음)
+setColl('videoBody','videoHead',false);
 function refreshSearchVisibility(){
   fetch('/api/settings/search').then(function(r){return r.json();}).then(function(s){
     var on=s.searchEnabled===true;
@@ -1934,8 +1985,8 @@ function loadSettings(){
     // 전역 속도 제한
     document.getElementById('dlSpeedEnabled').checked=sl.maxDownloadBps>0;
     document.getElementById('maxDownloadMbps').disabled=sl.maxDownloadBps<=0;
-    document.getElementById('maxDownloadMbps').value=sl.maxDownloadBps!=null?Math.round(sl.maxDownloadBps/1048576):3;
-    document.getElementById('maxDownloadLabel').textContent=(sl.maxDownloadBps!=null?Math.round(sl.maxDownloadBps/1048576):3)+' Mbps';
+    fillSpeedSelect(document.getElementById('maxDownloadMbps'), sl.maxDownloadBps>0?Math.ceil(sl.maxDownloadBps/1024):3072, 1024);
+    document.getElementById('maxDownloadLabel').textContent=kbpsName(sl.maxDownloadBps>0?Math.ceil(sl.maxDownloadBps/1024):3072);
     document.getElementById('ulSpeedEnabled').checked=sl.maxUploadBps>0;
     document.getElementById('maxUploadMbps').disabled=sl.maxUploadBps<=0;
     document.getElementById('maxUploadMbps').value=sl.maxUploadBps!=null?Math.round(sl.maxUploadBps/1048576):3;
@@ -1944,8 +1995,8 @@ function loadSettings(){
     // 다운로드 설정
     document.getElementById('concurrency').value=dl.concurrency!=null?dl.concurrency:2;
     document.getElementById('concurrencyLabel').textContent=dl.concurrency!=null?dl.concurrency:2;
-    document.getElementById('speedLimitKbps').value=dl.speedLimitKbps!=null?dl.speedLimitKbps:0;
-    document.getElementById('speedLimitLabel').textContent=kblabel(dl.speedLimitKbps,0,'무제한');
+    fillSpeedSelect(document.getElementById('speedLimitKbps'), dl.speedLimitKbps!=null?dl.speedLimitKbps:0, 1024);
+    document.getElementById('speedLimitLabel').textContent=kbpsName(dl.speedLimitKbps||0);
     document.getElementById('notifications').checked=dl.notifications!==false;
     document.getElementById('storageQuotaGb').value=dl.storageQuotaGb!=null?dl.storageQuotaGb:0;
     document.getElementById('storageQuotaLabel').textContent=dl.storageQuotaGb>0?dl.storageQuotaGb+'GB':'끔';
@@ -1955,8 +2006,11 @@ function loadSettings(){
     // 토렌트 설정
     document.getElementById('torrentUploadLimit').value=tr.torrentUploadLimit!=null?tr.torrentUploadLimit:512;
     document.getElementById('torrentUploadLabel').textContent=kblabel(tr.torrentUploadLimit,512,'끔');
-    document.getElementById('torrentDownloadLimit').value=tr.torrentDownloadLimit!=null?tr.torrentDownloadLimit:0;
-    document.getElementById('torrentDownloadLabel').textContent=kblabel(tr.torrentDownloadLimit,0,'무제한');
+    fillSpeedSelect(document.getElementById('torrentDownloadLimit'), tr.torrentDownloadLimit!=null?tr.torrentDownloadLimit:0, 1024);
+    document.getElementById('torrentDownloadLabel').textContent=kbpsName(tr.torrentDownloadLimit||0);
+    document.getElementById('torrentStallEnabled').checked=tr.torrentStallEnabled!==false;
+    fillSelect('torrentStallThresholdKbps',[1,2,4,8,16,32,64,128],tr.torrentStallThresholdKbps!=null?tr.torrentStallThresholdKbps:2,'KB/s');
+    fillSelect('torrentStallTimeoutSec',[30,60,120,300,600,1800],tr.torrentStallTimeoutSec!=null?tr.torrentStallTimeoutSec:60,'초');
     document.getElementById('torrentMaxActive').value=tr.torrentMaxActive!=null?tr.torrentMaxActive:3;
     document.getElementById('torrentMaxActiveLabel').textContent=tr.torrentMaxActive!=null?tr.torrentMaxActive:3;
     document.getElementById('torrentSeedRatio').value=tr.torrentSeedRatio!=null?tr.torrentSeedRatio:2.0;
@@ -2048,26 +2102,34 @@ function toggleSpeedLimit(type){
   }
   input.disabled=!enabled;
   if(enabled){
-    var mbps=parseInt(input.value)||3;
-    var bps=mbps*1048576;
+    var bps=speedInputBps(type,input);
     saveSpeedLimit(type==='dl'?bps:0, type==='ul'?bps:0);
   }else{
     saveSpeedLimit(type==='dl'?0:undefined, type==='ul'?0:undefined);
   }
 }
 
+// 다운로드는 B/s 프리셋 select, 업로드는 Mbps range 유지
+function speedInputBps(type,input){
+  var v=parseInt(input.value,10);
+  if(type==='ul')return (v||3)*1048576;
+  return v||3145728;
+}
+
 function onSpeedLimitChange(type){
-  var input, label, mbps, bps;
+  var input, label, bps;
   if(type==='dl'){
     input=document.getElementById('maxDownloadMbps');
     label=document.getElementById('maxDownloadLabel');
+    bps=parseInt(input.value,10)||3145728;
+    label.textContent=input.selectedIndex>=0?input.options[input.selectedIndex].text:kbpsName(Math.ceil(bps/1024));
   }else{
     input=document.getElementById('maxUploadMbps');
     label=document.getElementById('maxUploadLabel');
+    var mbps=parseInt(input.value,10)||3;
+    bps=mbps*1048576;
+    label.textContent=mbps+' Mbps';
   }
-  mbps=parseInt(input.value)||3;
-  bps=mbps*1048576;
-  label.textContent=mbps+' Mbps';
   saveSpeedLimit(type==='dl'?bps:undefined, type==='ul'?bps:undefined);
 }
 
@@ -2083,7 +2145,7 @@ function saveSpeedLimit(dl, ul){
 function saveDownloadSettings(){
   var body={
     concurrency:num(document.getElementById('concurrency').value,2),
-    speedLimitKbps:num(document.getElementById('speedLimitKbps').value,0),
+    speedLimitKbps:speedSelectKbps(document.getElementById('speedLimitKbps'),1024),
     notifications:document.getElementById('notifications').checked,
     storageQuotaGb:num(document.getElementById('storageQuotaGb').value,0),
     autoClassify:document.getElementById('autoClassify').checked,
@@ -2157,7 +2219,10 @@ function deleteSpeedWindow(i){
 function saveTorrentSettings(){
   var body={
     torrentUploadLimit:num(document.getElementById('torrentUploadLimit').value,512),
-    torrentDownloadLimit:num(document.getElementById('torrentDownloadLimit').value,0),
+    torrentDownloadLimit:speedSelectKbps(document.getElementById('torrentDownloadLimit'),1024),
+    torrentStallEnabled:document.getElementById('torrentStallEnabled').checked,
+    torrentStallThresholdKbps:num(document.getElementById('torrentStallThresholdKbps').value,2),
+    torrentStallTimeoutSec:num(document.getElementById('torrentStallTimeoutSec').value,60),
     torrentMaxActive:num(document.getElementById('torrentMaxActive').value,3),
     torrentSeedRatio:num(document.getElementById('torrentSeedRatio').value,2.0),
     torrentDhtEnabled:document.getElementById('torrentDhtEnabled').checked,
@@ -2169,7 +2234,7 @@ function saveTorrentSettings(){
     torrentMinSeedWaitSec:num(document.getElementById('torrentMinSeedWaitSec').value,0)
   };
   document.getElementById('torrentUploadLabel').textContent=kblabel(body.torrentUploadLimit,512,'끔');
-  document.getElementById('torrentDownloadLabel').textContent=kblabel(body.torrentDownloadLimit,0,'무제한');
+  document.getElementById('torrentDownloadLabel').textContent=kbpsName(body.torrentDownloadLimit);
   document.getElementById('torrentMaxActiveLabel').textContent=body.torrentMaxActive;
   document.getElementById('torrentSeedRatioLabel').textContent=body.torrentSeedRatio.toFixed(1);
   apiPost('/api/settings/torrent',body)
@@ -2344,13 +2409,13 @@ function resetSettings(category){
   var s=document.getElementById('concurrency');
   if(s)s.addEventListener('input',function(){document.getElementById('concurrencyLabel').textContent=this.value;});
   s=document.getElementById('speedLimitKbps');
-  if(s)s.addEventListener('input',function(){document.getElementById('speedLimitLabel').textContent=this.value>0?this.value+' KB/s':'무제한';});
+  if(s)s.addEventListener('change',function(){document.getElementById('speedLimitLabel').textContent=this.selectedIndex>=0?this.options[this.selectedIndex].text:'무제한';});
   s=document.getElementById('storageQuotaGb');
   if(s)s.addEventListener('input',function(){document.getElementById('storageQuotaLabel').textContent=this.value>0?this.value+'GB':'끔';});
   s=document.getElementById('torrentUploadLimit');
   if(s)s.addEventListener('input',function(){document.getElementById('torrentUploadLabel').textContent=this.value+' KB/s';});
   s=document.getElementById('torrentDownloadLimit');
-  if(s)s.addEventListener('input',function(){document.getElementById('torrentDownloadLabel').textContent=this.value>0?this.value+' KB/s':'무제한';});
+  if(s)s.addEventListener('change',function(){document.getElementById('torrentDownloadLabel').textContent=this.selectedIndex>=0?this.options[this.selectedIndex].text:'무제한';});
   s=document.getElementById('torrentMaxActive');
   if(s)s.addEventListener('input',function(){document.getElementById('torrentMaxActiveLabel').textContent=this.value;});
   s=document.getElementById('torrentSeedRatio');
@@ -2363,7 +2428,6 @@ function resetSettings(category){
       debounceTimers[key]=setTimeout(fn,500);
     };
   }
-  document.getElementById('maxDownloadMbps')?.addEventListener('input',function(){document.getElementById('maxDownloadLabel').textContent=this.value+' Mbps';});
   document.getElementById('maxUploadMbps')?.addEventListener('input',function(){document.getElementById('maxUploadLabel').textContent=this.value+' Mbps';});
   document.getElementById('maxDownloadMbps')?.addEventListener('change',autoSave('sl',function(){onSpeedLimitChange('dl');}));
   document.getElementById('maxUploadMbps')?.addEventListener('change',autoSave('sl',function(){onSpeedLimitChange('ul');}));
@@ -2383,6 +2447,9 @@ function resetSettings(category){
   document.getElementById('torrentTrackerSync')?.addEventListener('change',autoSave('tr',saveTorrentSettings));
   document.getElementById('torrentListenPort')?.addEventListener('change',autoSave('tr',saveTorrentSettings));
   document.getElementById('torrentSavePath')?.addEventListener('change',autoSave('tr',saveTorrentSettings));
+  document.getElementById('torrentStallEnabled')?.addEventListener('change',autoSave('tr',saveTorrentSettings));
+  document.getElementById('torrentStallThresholdKbps')?.addEventListener('change',autoSave('tr',saveTorrentSettings));
+  document.getElementById('torrentStallTimeoutSec')?.addEventListener('change',autoSave('tr',saveTorrentSettings));
   document.getElementById('guardThermalLimit')?.addEventListener('input',function(){document.getElementById('guardThermalLabel').textContent=this.value+'°C';});
   document.getElementById('guardBatteryLimit')?.addEventListener('input',function(){document.getElementById('guardBatteryLabel').textContent=this.value+'%';});
   document.getElementById('guardStorageLimit')?.addEventListener('input',function(){document.getElementById('guardStorageLabel').textContent=this.value+'%';});

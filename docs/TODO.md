@@ -527,3 +527,13 @@ T-001~T-008 전부 완료 (커밋 7574486).
 | T-1047 | Phase C — onTaskRemoved 유휴 종료·429/5xx 재시도·DeviceGate TTL·moveToStorage 회피이름·Thumb Semaphore·Janitor 캐시·UUID/reorder·respondErr 이스케이프·RSS close·OkHttp 공유 (#9~#18) | ✅ |
 | T-1048 | Phase D — mockk/coroutines-test/turbine + 회귀 테스트 + test 169 GREEN + ktlint GREEN + assembleDebug + 실기기 설치 | ✅ |
 | T-1049 | Phase E — WebAssets 파사드 분할(2859→8+2715+146) + SettingsScreen 섹션 분할(1236→68+5파일) + READ/WRITE maxSdkVersion 축소 | ✅ |
+
+## v0.41 (2026-09-25) — 토렌트 정체 회전 + 속도 프리셋 통일 (PLAN_v0.41_torrent-queue-rotate_android.md)
+
+| T-번호 | 내용 | 상태 |
+|--------|------|------|
+| T-1050 | 정체 토렌트 자동 일시정지+큐 맨뒤 회전 (STALLED 상태·Session 세팅·순수 함수·maintainSlots·설정 3종·앱/웹 UI) | ✅ |
+| T-1051 | 토렌트 개별 다운로드 제한 (/api/torrents/{id}/limit + 엔진 반영·영속 + 카드 선택 UI) | ✅ |
+| T-1052 | 속도 프리셋 단일화 (SpeedLimits.kt + 슬라이더 3곳 select + 작업/토렌트 개별 제한 프리셋) | ✅ |
+| T-1053 | 웹 대시보드 미러 (속도 select 3종·정체 설정 블록·STALLED 배지·uiBusy 가드) | ✅ |
+| T-1054 | 검증 (TorrentStallTest 9건+test/ktlint GREEN+실기기 설치·API/웹 실측) | ✅ |

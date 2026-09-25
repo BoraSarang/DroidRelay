@@ -1,5 +1,6 @@
 package com.borasarang.droidrelay.ui
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -67,6 +68,85 @@ internal fun SwitchRow(label: String, checked: Boolean, enabled: Boolean = true,
     }
 }
 
+/** 속도 제한 프리셋 선택 (KB/s, T-1050) — 앱 레벨/전역/토렌트 기본이 같은 SpeedLimits 목록 사용 */
+@Composable
+internal fun SpeedSelectRow(
+    label: String,
+    value: Int,
+    onSelect: (Int) -> Unit,
+    options: List<Pair<Int, String>> = com.borasarang.droidrelay.relay.SpeedLimits.kbpsOptions(value),
+) {
+    var show by remember { mutableStateOf(false) }
+    SpeedPresetRow(label, options.firstOrNull { it.first == value }?.second ?: "${value}KB/s") { show = true }
+    if (show) {
+        SpeedPresetDialog(label, options, value, onSelect = {
+            DebugLogger.i("Settings", "$label → ${if (it <= 0) "무제한" else "${it}KB/s"}")
+            onSelect(it)
+            show = false
+        }, onDismiss = { show = false })
+    }
+}
+
+/** 속도 제한 프리셋 선택 (B/s, T-1050) — 전역 다운로드/토렌트 개별 제한용 */
+@Composable
+internal fun SpeedSelectBpsRow(
+    label: String,
+    value: Long,
+    onSelect: (Long) -> Unit,
+    options: List<Pair<Long, String>> = com.borasarang.droidrelay.relay.SpeedLimits.bpsOptions(),
+) {
+    var show by remember { mutableStateOf(false) }
+    SpeedPresetRow(label, options.firstOrNull { it.first == value }?.second
+        ?: com.borasarang.droidrelay.relay.SpeedLimits.labelBps(value)) { show = true }
+    if (show) {
+        SpeedPresetDialog(label, options, value, onSelect = {
+            DebugLogger.i("Settings", "$label → ${com.borasarang.droidrelay.relay.SpeedLimits.labelBps(it)}")
+            onSelect(it)
+            show = false
+        }, onDismiss = { show = false })
+    }
+}
+
+@Composable
+private fun SpeedPresetRow(label: String, valueLabel: String, onClick: () -> Unit) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text(label, Modifier.weight(1f), color = MaterialTheme.colorScheme.onSurface)
+        OutlinedButton(onClick = onClick) { Text(valueLabel) }
+    }
+}
+
+@Composable
+private fun <T> SpeedPresetDialog(
+    title: String,
+    options: List<Pair<T, String>>,
+    selected: T,
+    onSelect: (T) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            Column {
+                options.forEach { (key, name) ->
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth().clickable { onSelect(key) },
+                    ) {
+                        androidx.compose.material3.RadioButton(
+                            selected = selected == key,
+                            onClick = { onSelect(key) },
+                        )
+                        Text(name, color = MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = { TextButton(onClick = onDismiss) { Text("닫기") } },
+    )
+}
+
 internal fun resetSettings(ctx: android.content.Context, repo: SettingsRepository, category: String) {
     DebugLogger.w("Settings", "설정 기본값 복원 진행 category=$category")
     val scope = kotlinx.coroutines.MainScope()
@@ -88,6 +168,9 @@ internal fun resetSettings(ctx: android.content.Context, repo: SettingsRepositor
             repo.setTorrentPexEnabled(true)
             repo.setTorrentListenPort(SettingsConstraints.randomEphemeralPort())
                 repo.setTorrentSavePath(com.borasarang.droidrelay.relay.StorageGuard.dlRoot.path)
+            repo.setTorrentStallEnabled(SettingsConstraints.DEFAULT_TORRENT_STALL_ENABLED)
+            repo.setTorrentStallThresholdKbps(SettingsConstraints.DEFAULT_TORRENT_STALL_THRESHOLD_KBPS)
+            repo.setTorrentStallTimeoutSec(SettingsConstraints.DEFAULT_TORRENT_STALL_TIMEOUT_SEC)
             RelayApp.getTorrent(ctx).applySettings(repo.firstBlocking())
         }
         "all" -> {
@@ -108,6 +191,9 @@ internal fun resetSettings(ctx: android.content.Context, repo: SettingsRepositor
                 repo.setTorrentPexEnabled(true)
                 repo.setTorrentListenPort(SettingsConstraints.randomEphemeralPort())
                 repo.setTorrentSavePath(com.borasarang.droidrelay.relay.StorageGuard.dlRoot.path)
+                repo.setTorrentStallEnabled(SettingsConstraints.DEFAULT_TORRENT_STALL_ENABLED)
+                repo.setTorrentStallThresholdKbps(SettingsConstraints.DEFAULT_TORRENT_STALL_THRESHOLD_KBPS)
+                repo.setTorrentStallTimeoutSec(SettingsConstraints.DEFAULT_TORRENT_STALL_TIMEOUT_SEC)
                 RelayApp.getTorrent(ctx).applySettings(repo.firstBlocking())
             }
         }

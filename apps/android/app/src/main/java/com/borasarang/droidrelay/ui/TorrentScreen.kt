@@ -6,6 +6,7 @@ import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -42,6 +43,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -63,6 +65,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.borasarang.droidrelay.relay.DebugLogger
 import com.borasarang.droidrelay.relay.RelayApp
+import com.borasarang.droidrelay.relay.SpeedLimits
 import com.borasarang.droidrelay.relay.TorrentJob
 import com.borasarang.droidrelay.relay.TorrentRepository
 import com.borasarang.droidrelay.relay.TorrentState
@@ -219,6 +222,10 @@ fun TorrentScreen(onShowSnack: (String) -> Unit = {}) {
                             if (engine.setFileSelection(job.id, sel)) onShowSnack("파일 선택 적용됨 (${sel.size}/${job.files.size}개)")
                             else onShowSnack("파일 목록 없음 — 메타데이터 수신 후 시도")
                         },
+                        onSetLimit = { bps ->
+                            engine.setDownloadLimit(job.id, bps)
+                            onShowSnack("torrent 다운로드 제한 ${SpeedLimits.labelBps(bps)}")
+                        },
                     )
                 }
                 item { Spacer(Modifier.height(80.dp)) }
@@ -292,9 +299,11 @@ private fun TorrentItem(
     onMoveUp: () -> Unit,
     onMoveDown: () -> Unit,
     onSelectFiles: (Set<Int>) -> Unit,
+    onSetLimit: (Long) -> Unit,
 ) {
     val now = System.currentTimeMillis()
     var filesExpanded by remember(job.id) { mutableStateOf(false) }
+    var showLimitDialog by remember(job.id) { mutableStateOf(false) }
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -355,7 +364,9 @@ private fun TorrentItem(
                             IconButton(onClick = onPause) {
                                 Icon(Icons.Filled.Pause, "일시정지")
                             }
-                        } else if (job.state == TorrentState.PAUSED || job.state == TorrentState.FAILED) {
+                        } else if (job.state == TorrentState.PAUSED || job.state == TorrentState.FAILED ||
+                            job.state == TorrentState.STALLED || job.state == TorrentState.QUEUED
+                        ) {
                             IconButton(onClick = onResume) {
                                 Icon(Icons.Filled.PlayArrow, "재개")
                             }
@@ -364,6 +375,17 @@ private fun TorrentItem(
                             Icon(Icons.Filled.Delete, "삭제")
                         }
                     }
+                }
+            }
+            // torrent 개별 다운로드 제한 (T-1050)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "다운로드 제한",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.outline,
+                )
+                TextButton(onClick = { showLimitDialog = true }) {
+                    Text(SpeedLimits.labelBps(job.downloadLimit), style = MaterialTheme.typography.labelMedium)
                 }
             }
             if (job.totalSize > 0) {
@@ -431,6 +453,38 @@ private fun TorrentItem(
             }
         }
     }
+    if (showLimitDialog) {
+        AlertDialog(
+            onDismissRequest = { showLimitDialog = false },
+            title = { Text("torrent 다운로드 제한") },
+            text = {
+                Column {
+                    SpeedLimits.bpsOptions().forEach { (bps, name) ->
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.fillMaxWidth().clickable {
+                                onSetLimit(bps)
+                                showLimitDialog = false
+                            },
+                        ) {
+                            RadioButton(
+                                selected = job.downloadLimit == bps,
+                                onClick = {
+                                    onSetLimit(bps)
+                                    showLimitDialog = false
+                                },
+                            )
+                            Text(name, style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { showLimitDialog = false }) { Text("닫기") }
+            },
+        )
+    }
 }
 
 @Composable
@@ -474,6 +528,7 @@ private fun stateLabel(job: TorrentJob): String = when (job.state) {
     TorrentState.DOWNLOADING -> "다운로드 중"
     TorrentState.SEEDING -> "시딩 중"
     TorrentState.PAUSED -> "일시정지"
+    TorrentState.STALLED -> "정체 — 다음 torrent로 전환"
     TorrentState.FAILED -> "실패: ${job.errorMessage ?: "알 수 없음"}"
     TorrentState.DONE -> "완료"
 }
@@ -483,6 +538,7 @@ private fun stateColor(state: TorrentState) = when (state) {
     TorrentState.DOWNLOADING -> MaterialTheme.colorScheme.primary
     TorrentState.SEEDING -> MaterialTheme.colorScheme.tertiary
     TorrentState.PAUSED -> MaterialTheme.colorScheme.outline
+    TorrentState.STALLED -> MaterialTheme.colorScheme.secondary
     TorrentState.FAILED -> MaterialTheme.colorScheme.error
     TorrentState.DONE -> MaterialTheme.colorScheme.tertiary
     else -> MaterialTheme.colorScheme.onSurfaceVariant
