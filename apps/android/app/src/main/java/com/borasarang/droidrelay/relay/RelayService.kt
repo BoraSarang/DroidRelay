@@ -97,12 +97,23 @@ class RelayService : Service() {
                         engine.pause(j.id)
                     }
                 }
+                // 토렌트도 함께 스로틀 (결함 #5)
+                TorrentRepository.all().forEach { t ->
+                    if (t.state == TorrentState.DOWNLOADING || t.state == TorrentState.SEEDING) {
+                        torrentEng.pause(t.id)
+                    }
+                }
             } else {
                 // 가드가 pause한 잡(PAUSED)과 실패 잡을 재개 — retryFailed만으로는 일시정지가 풀리지 않음
                 engine.retryFailed()
                 JobsRepository.jobs.value.forEach { j ->
                     if (j.state == JobState.PAUSED) {
                         engine.resume(j.id)
+                    }
+                }
+                TorrentRepository.all().forEach { t ->
+                    if (t.state == TorrentState.PAUSED) {
+                        torrentEng.resume(t.id)
                     }
                 }
             }

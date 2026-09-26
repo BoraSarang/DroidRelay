@@ -3,6 +3,7 @@ package com.borasarang.droidrelay.ui
 import android.content.Intent
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -17,6 +18,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ContentCut
 import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.Delete
@@ -24,9 +26,12 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Sort
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -59,6 +64,26 @@ private data class StorageItem(
     val count: Int = 0,
     val modified: Long = 0,
 )
+
+/** 보관함 정렬 기준 — DIR(디렉토리 우선)이 기본, 어느 기준이든 폴더는 파일보다 위 (NAME만 예외 혼합) */
+private enum class SortMode(val label: String) {
+    DIR("디렉토리순"),
+    DATE("최신순"),
+    NAME("이름순"),
+    SIZE("용량순"),
+}
+
+/** 폴더 용량 — 재귀 합계 (.trash 제외) */
+private fun dirSizeOf(f: File): Long =
+    if (f.isFile) f.length()
+    else f.walkTopDown().onEnter { it.name != ".trash" }.filter { it.isFile }.sumOf { it.length() }
+
+private fun sortComparator(mode: SortMode): Comparator<StorageItem> = when (mode) {
+    SortMode.DIR -> compareByDescending<StorageItem> { it.isDir }.thenBy { it.name }
+    SortMode.DATE -> compareByDescending<StorageItem> { it.isDir }.thenByDescending { it.modified }
+    SortMode.SIZE -> compareByDescending<StorageItem> { it.isDir }.thenByDescending { it.size }
+    SortMode.NAME -> compareBy { it.name }
+}
 
 private fun fmtDateS(ts: Long): String =
     if (ts <= 0) "" else java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault()).format(java.util.Date(ts))
@@ -127,6 +152,8 @@ fun FilesScreen(onShowSnack: (String) -> Unit = {}) {
 
     val currentPath = remember { mutableStateOf("") }
     val items = remember { mutableStateListOf<StorageItem>() }
+    val sortMode = remember { mutableStateOf(SortMode.DIR) }
+    val sortMenuOpen = remember { mutableStateOf(false) }
 
     val showNewFolder = remember { mutableStateOf(false) }
     val newFolderName = remember { mutableStateOf("") }
@@ -138,31 +165,34 @@ fun FilesScreen(onShowSnack: (String) -> Unit = {}) {
 
     val cutItem = remember { mutableStateOf<StorageItem?>(null) }
 
-    val refresh = {
-        scope.launch(Dispatchers.IO) {
-            runCatching {
-                val dir = if (currentPath.value.isEmpty()) DL_ROOT else File(DL_ROOT, currentPath.value)
+    /** 목록 로딩 — suspend 구조로, LaunchedEffect 재실행 시 이전 로딩이 취소되어 정렬 race 방지 */
+    val refresh: suspend () -> Unit = {
+        runCatching {
+            val path = currentPath.value
+            val mode = sortMode.value
+            val list = withContext(Dispatchers.IO) {
+                val dir = if (path.isEmpty()) DL_ROOT else File(DL_ROOT, path)
                 if (!dir.exists()) dir.mkdirs()
-                val list = dir.listFiles()?.sortedWith(
-                    compareByDescending<File> { it.isDirectory }.thenBy { it.name }
-                )?.filter { !(currentPath.value.isEmpty() && it.name == ".trash") }?.map { f ->
+                dir.listFiles()?.map { f ->
                     StorageItem(
                         name = f.name,
                         isDir = f.isDirectory,
-                        size = if (f.isFile) f.length() else 0,
+                        size = dirSizeOf(f),
                         count = if (f.isDirectory) (f.listFiles()?.size ?: 0) else 0,
                         modified = f.lastModified(),
                     )
-                } ?: emptyList()
-                withContext(Dispatchers.Main) {
-                    items.clear()
-                    items.addAll(list)
-                }
-            }.onFailure { DebugLogger.e("Storage", "목록 조회 실패", it) }
+                }?.filter { !(path.isEmpty() && it.name == ".trash") }
+                    ?.sortedWith(sortComparator(mode)) ?: emptyList()
+            }
+            items.clear()
+            items.addAll(list)
+        }.onFailure {
+            if (it is kotlinx.coroutines.CancellationException) throw it
+            DebugLogger.e("Storage", "목록 조회 실패", it)
         }
     }
 
-    LaunchedEffect(currentPath.value) { refresh.invoke() }
+    LaunchedEffect(currentPath.value, sortMode.value) { refresh() }
 
     fun fullPath(name: String) = if (currentPath.value.isEmpty()) name else "${currentPath.value}/$name"
 
@@ -224,6 +254,34 @@ fun FilesScreen(onShowSnack: (String) -> Unit = {}) {
                     Icon(Icons.Filled.Add, "붙여넣기", tint = cs.tertiary)
                 }
             }
+            Spacer(Modifier.weight(1f))
+            // 정렬 기준 선택 (최신순·이름순·용량순·디렉토리순)
+            Box {
+                IconButton(onClick = { sortMenuOpen.value = true }) {
+                    Icon(Icons.Filled.Sort, "정렬", tint = cs.primary)
+                }
+                DropdownMenu(expanded = sortMenuOpen.value, onDismissRequest = { sortMenuOpen.value = false }) {
+                    SortMode.entries.forEach { mode ->
+                        DropdownMenuItem(
+                            text = {
+                                Text(
+                                    mode.label,
+                                    color = if (sortMode.value == mode) cs.primary else cs.onSurface,
+                                    fontWeight = if (sortMode.value == mode) FontWeight.SemiBold else FontWeight.Normal,
+                                )
+                            },
+                            leadingIcon = {
+                                if (sortMode.value == mode) Icon(Icons.Filled.Check, null, tint = cs.primary)
+                                else Spacer(Modifier.size(24.dp))
+                            },
+                        onClick = {
+                            sortMenuOpen.value = false
+                            if (sortMode.value != mode) sortMode.value = mode
+                        },
+                        )
+                    }
+                }
+            }
         }
 
         // 파일 목록
@@ -252,8 +310,11 @@ fun FilesScreen(onShowSnack: (String) -> Unit = {}) {
                         Column(Modifier.weight(1f)) {
                             Text(item.name, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis, color = cs.onSurface)
                             Text(
-                                (if (item.isDir) "${item.count}개" else fmtBytesS(item.size)) +
-                                    (fmtDateS(item.modified).let { if (it.isNotEmpty()) " · $it" else "" }),
+                                (if (item.isDir) {
+                                    "${item.count}개" + (if (item.size > 0) " · ${fmtBytesS(item.size)}" else "")
+                                } else {
+                                    fmtBytesS(item.size)
+                                }) + (fmtDateS(item.modified).let { if (it.isNotEmpty()) " · $it" else "" }),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = cs.onSurfaceVariant,
                             )

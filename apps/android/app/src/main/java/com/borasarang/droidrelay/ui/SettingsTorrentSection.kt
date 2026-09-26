@@ -146,7 +146,7 @@ internal fun TorrentSection(
         SwitchRow("DHT (분산 해시 테이블)", s.torrentDhtEnabled) { v -> scope.launch { repo.setTorrentDhtEnabled(v) } }
         SwitchRow("PEX (피어 교환)", s.torrentPexEnabled) { v -> scope.launch { repo.setTorrentPexEnabled(v) } }
         Text(
-            "PEX는 libtorrent에 on/off가 없어 항상 켜짐. 피어 탐색용으로 트래픽은 미미합니다",
+            "피어 탐색용으로 트래픽은 미미합니다. 끄면 DHT·트래커로만 피어를 찾습니다",
             color = cs.onSurfaceVariant,
             style = MaterialTheme.typography.labelSmall,
         )

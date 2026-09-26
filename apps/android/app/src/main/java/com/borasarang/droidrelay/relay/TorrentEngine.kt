@@ -48,6 +48,38 @@ internal fun stallTimedOut(sinceMs: Long, nowMs: Long, timeoutSec: Int): Boolean
 
 /** magnet URI의 SHA-1 infohash(hex 40자) 그룹 캡처 */
 private val magnetHexRegex = Regex("urn:btih:([0-9a-fA-F]{40})")
+/** magnet URI의 SHA-1 infohash(base32 32자, padding 없음) 그룹 캡처 */
+private val magnetBase32Regex = Regex("urn:btih:([A-Za-z2-7]{32})")
+
+/** base32 infohash(32자) → hex(40자) — RFC 4648. 잘못된 문자면 null */
+internal fun base32ToHex(s: String): String? {
+    if (s.length != 32) return null
+    val alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
+    var bits = 0
+    var value = 0
+    val sb = StringBuilder(40)
+    for (c in s.uppercase()) {
+        val idx = alphabet.indexOf(c)
+        if (idx < 0) return null
+        value = (value shl 5) or idx
+        bits += 5
+        if (bits >= 8) {
+            bits -= 8
+            sb.append(((value shr bits) and 0xFF).toString(16).padStart(2, '0'))
+        }
+    }
+    return if (sb.length == 40) sb.toString() else null
+}
+
+/** magnet URI에서 infohash(SHA-1 hex 40자) 추출 — hex 40자 / base32 32자 모두 지원. 없으면 null. */
+internal fun magnetInfoHash(magnet: String): String? {
+    magnetHexRegex.find(magnet)?.groupValues?.get(1)?.let { return it.lowercase() }
+    magnetBase32Regex.find(magnet)?.groupValues?.get(1)?.let { base32ToHex(it) }?.let { return it }
+    return null
+}
+
+/** 동일 infohash의 .torrent 중복 추가 방지 (결함 #9) */
+class DuplicateTorrentException(val infoHash: String) : IllegalStateException("이미 다운로드 중인 토렌트입니다")
 
 class TorrentEngine(
     private val context: Context,
@@ -232,6 +264,7 @@ class TorrentEngine(
     @Volatile private var torrentMinSeedWaitSec: Int = 0
     @Volatile private var latestSeedRatio: Float = 2.0f
     @Volatile private var latestDhtEnabled: Boolean = true
+    @Volatile private var latestPexEnabled: Boolean = true
     @Volatile private var latestSavePath: String = StorageGuard.dlRoot.path
     /** id → 시더 부재 대기 시작 시각(ms). 0이면 미측정 */
     private val seedWaitSince = ConcurrentHashMap<String, Long>()
@@ -267,15 +300,17 @@ class TorrentEngine(
                 latestSequentialDownload = s.torrentSequentialDownload
                 latestSeedRatio = s.torrentSeedRatio
                 latestDhtEnabled = s.torrentDhtEnabled
+                latestPexEnabled = s.torrentPexEnabled
                 latestSavePath = s.torrentSavePath.ifBlank { StorageGuard.dlRoot.path }
                 latestStallEnabled = s.torrentStallEnabled
                 latestStallThresholdKbps = s.torrentStallThresholdKbps
                 latestStallTimeoutSec = s.torrentStallTimeoutSec
                 latestMaxActive = s.torrentMaxActive
-                DebugLogger.d(TAG, "설정 반영 업로드=${s.torrentUploadLimit}KB/s 다운로드=${s.torrentDownloadLimit}KB/s 시퀀셜=${s.torrentSequentialDownload} 비율=${s.torrentSeedRatio} DHT=${s.torrentDhtEnabled} 정체=${s.torrentStallEnabled}(${s.torrentStallThresholdKbps}KB/s·${s.torrentStallTimeoutSec}초)")
+                DebugLogger.d(TAG, "설정 반영 업로드=${s.torrentUploadLimit}KB/s 다운로드=${s.torrentDownloadLimit}KB/s 시퀀셜=${s.torrentSequentialDownload} 비율=${s.torrentSeedRatio} DHT=${s.torrentDhtEnabled} PEX=${s.torrentPexEnabled} 정체=${s.torrentStallEnabled}(${s.torrentStallThresholdKbps}KB/s·${s.torrentStallTimeoutSec}초)")
                 applyRateLimits()
                 applySequentialToAll(s.torrentSequentialDownload)
                 applyDhtEnabled(s.torrentDhtEnabled)
+                applyPexEnabled(s.torrentPexEnabled)
                 applyStallSessionSettings(s)
             }
         }
@@ -428,7 +463,9 @@ class TorrentEngine(
         scope.launch {
             try {
                 val flags = if (latestSequentialDownload) TorrentFlags.SEQUENTIAL_DOWNLOAD else torrent_flags_t()
-                withGate { session?.download(magnet, saveDir, flags) }
+                // 세션 미기동 시 session?.download()는 no-op → FETCHING_METADATA 영구 고착 방지 (결함 #1)
+                val sess = session ?: throw IllegalStateException("내장 서버 미기동 — 서버를 시작한 뒤 다시 추가하세요")
+                withGate { sess.download(magnet, saveDir, flags) }
                 DebugLogger.d(TAG, "magnet download 호출 완료 id=$id (ADD_TORRENT 대기) 시퀀셜=$latestSequentialDownload")
             } catch (e: Exception) {
                 DebugLogger.e(TAG, "magnet 추가 실패 id=$id", e)
@@ -469,12 +506,15 @@ class TorrentEngine(
         return TorznabClient(context).search(s.searchUrl, s.searchApiKey, q)
     }
 
-    /** magnet URI에서 infohash(SHA-1 hex 40자) 추출. 없거나 base32면 null. */
-    private fun magnetInfoHash(magnet: String): String? {
-        return magnetHexRegex.find(magnet)?.groupValues?.get(1)
-    }
-
     fun addTorrentFile(bytes: ByteArray, filename: String): TorrentJob {
+        // .torrent 중복 가드 (결함 #9) — job 추가 전 infohash 검사. 손상 파일은 파싱 실패 → 기존 FAILED 흐름 진행
+        runCatching { TorrentInfo(bytes) }.getOrNull()?.let { ti ->
+            val h = ti.infoHash().toString()
+            TorrentRepository.all().find { it.infoHash.isNotEmpty() && it.infoHash == h }?.let {
+                DebugLogger.w(TAG, "중복 .torrent 감지 ($h) → 거부 (기존 id=${it.id})")
+                throw DuplicateTorrentException(h)
+            }
+        }
         val id = TorrentRepository.newId()
         val job = TorrentJob(
             id = id,
@@ -499,7 +539,9 @@ class TorrentEngine(
                 val ti = TorrentInfo(tempFile)
                 val expectedHash = ti.infoHash().toString()
                 val flags = if (latestSequentialDownload) TorrentFlags.SEQUENTIAL_DOWNLOAD else torrent_flags_t()
-                withGate { session?.download(ti, saveDir, null, null, null, flags) }
+                // 세션 미기동 가드 (결함 #1)
+                val sess = session ?: throw IllegalStateException("내장 서버 미기동 — 서버를 시작한 뒤 다시 추가하세요")
+                withGate { sess.download(ti, saveDir, null, null, null, flags) }
                 val files = (0 until ti.numFiles()).map { fi ->
                     TorrentFile(
                         index = fi,
@@ -622,9 +664,7 @@ val th = withGate { session?.find(Sha1Hash.parseHex(expectedHash)) }
                 try {
                     val dir = java.io.File(saveDir, torrentName)
                     if (dir.exists()) dir.deleteRecursively()
-                    // 보관함에도 있을 수 있음
-                    val storageFile = File(storageDir, torrentName)
-                    if (storageFile.exists()) storageFile.deleteRecursively()
+                    // 보관함(storageDir)은 삭제하지 않음 — 이름 충돌 회피로 타인 파일과 같은 이름일 수 있음 (결함 #4)
                     DebugLogger.i(TAG, "torrent 미완료 쓰레기 삭제 id=$id")
                 } catch (e: Exception) {
                     DebugLogger.w(TAG, "쓰레기 삭제 실패 id=$id: ${e.message}")
@@ -763,6 +803,21 @@ val th = withGate { session?.find(Sha1Hash.parseHex(expectedHash)) }
         }
     }
 
+    /** PEX on/off 반영 (결함 #6) — settings_pack.enable_pex는 세션 레벨 설정 */
+    private fun applyPexEnabled(enabled: Boolean) {
+        try {
+            withGate {
+                val session = session ?: return@withGate
+                val sp = session.settings()
+                swigSetting("bool_types", "enable_pex")?.let { sp.setBoolean(it, enabled) }
+                session.applySettings(sp)
+                DebugLogger.i(TAG, "PEX ${if (enabled) "활성화" else "비활성화"}")
+            }
+        } catch (e: Exception) {
+            DebugLogger.w(TAG, "PEX 전환 실패: ${e.message}")
+        }
+    }
+
     /** 전체 설정 동적 적용 (재시작 불필요) */
     fun applySettings(s: AppSettings) {
         withGate {
@@ -774,6 +829,7 @@ val th = withGate { session?.find(Sha1Hash.parseHex(expectedHash)) }
                 .maxPeerlistSize(5000)
             session.applySettings(sp)
             applyStallSessionSettings(s)
+            applyPexEnabled(s.torrentPexEnabled)
 
             // 리슨 포트 변경은 재시작 필요 — 로그만 남김
             if (s.torrentListenPort != 6881) {
@@ -830,8 +886,7 @@ val th = withGate { session?.find(Sha1Hash.parseHex(expectedHash)) }
     private fun handleAlert(alert: Alert<*>) {
         // JNI 호출 포함 — remove/status 경합 방지 위해 게이트 내에서 처리
         // 주의: alert.handle()은 콜백 생존 중에만 유효한 transient 참조 → 장기 보관 금지 (T-931).
-        // FINISHED의 파일 이동은 게이트 밖에서 처리 (T-934 S2).
-        var finishedMove: Pair<String, String>? = null
+        // 보관함 이동은 alert가 아니라 폴링의 완료 전이 시점에 일원화 (알림 유실 대비, 결함 #2).
         withGateAlert {
             when (alert.type()) {
             AlertType.ADD_TORRENT -> {
@@ -864,8 +919,6 @@ val th = withGate { session?.find(Sha1Hash.parseHex(expectedHash)) }
                 // transient handle: 콜백 내에서 infoHash 조회만 (저장 금지)
                 val th = (alert as org.libtorrent4j.alerts.TorrentFinishedAlert).handle()
                 val id = hashToId[th.infoHash().toString()] ?: return
-                val job = TorrentRepository.get(id)
-                val torrentName = job?.name ?: ""
                 TorrentRepository.update(id) {
                     it.copy(
                         state = TorrentState.DONE,
@@ -874,8 +927,7 @@ val th = withGate { session?.find(Sha1Hash.parseHex(expectedHash)) }
                     )
                 }
                 TrafficLedger.addDoneTorrent()
-                DebugLogger.i(TAG, "torrent 완료 id=$id → 보관함 이동")
-                finishedMove = id to torrentName
+                DebugLogger.i(TAG, "torrent 완료 id=$id (보관함 이동은 폴링 전이 처리)")
             }
             AlertType.TORRENT_ERROR -> {
                 // transient handle: 콜백 내에서 infoHash 조회만 (저장 금지)
@@ -919,11 +971,6 @@ val th = withGate { session?.find(Sha1Hash.parseHex(expectedHash)) }
             else -> Unit
         }
         }
-        // 게이트 밖 파일 IO (락 점유 최소화)
-        finishedMove?.let { (id, name) ->
-            if (name.isNotEmpty()) moveToStorage(id, name)
-            persistNow()
-        }
     }
 
     /** ADD_TORRENT 시 아직 매핑되지 않은 torrent를 찾음 */
@@ -966,6 +1013,7 @@ val th = withGate { session?.find(Sha1Hash.parseHex(expectedHash)) }
                             return@forEach
                         }
                         val job = TorrentRepository.get(id) ?: return@forEach
+                        val prevState = job.state
                         // 시드 비율 강제 (T-956) — SEEDING 중 비율 도달 시 자동 일시정지 (0=제한 없음)
                         val ratioLimit = latestSeedRatio
                         if (shouldPauseAtRatio(status.isSeeding, status.totalUpload(), status.totalDownload(), ratioLimit)) {
@@ -974,7 +1022,7 @@ val th = withGate { session?.find(Sha1Hash.parseHex(expectedHash)) }
                             pause(id)
                             return@forEach
                         }
-                        if (job.state == TorrentState.PAUSED || job.state == TorrentState.DONE || job.state == TorrentState.FAILED) return@forEach
+                        if (prevState == TorrentState.PAUSED || prevState == TorrentState.DONE || prevState == TorrentState.FAILED) return@forEach
 
                         // libtorrent 2.x에는 QUEUED 상태가 없어 status.state()만 보면 전부 DOWNLOADING으로 보인다.
                         // paused/auto-managed 플래그로 대기(QUEUED)·정체 정지(STALLED)를 가른다 (T-1050)
@@ -993,6 +1041,18 @@ val th = withGate { session?.find(Sha1Hash.parseHex(expectedHash)) }
                                 TorrentStatus.State.FINISHED -> TorrentState.DONE
                                 TorrentStatus.State.UNKNOWN -> job.state
                             }
+                        }
+
+                        // 완료 전이 감지 → 보관함 이동 일원화 (FINISHED alert 유실 대비, 결함 #2)
+                        // 이동 전 시딩 중단 — 시딩 대상 파일 소실·오류 방지 (결함 #3)
+                        val wasComplete = prevState == TorrentState.DONE || prevState == TorrentState.SEEDING
+                        val completeNow = state == TorrentState.DONE || state == TorrentState.SEEDING
+                        if (completeNow && !wasComplete && job.name.isNotEmpty()) {
+                            try {
+                                withGate { th.unsetFlags(TorrentFlags.AUTO_MANAGED); th.pause() }
+                            } catch (_: Exception) {}
+                            moveToStorage(id, job.name)
+                            DebugLogger.i(TAG, "torrent 완료 전이 → 시딩 중단 + 보관함 이동 id=$id")
                         }
 
                         TorrentRepository.update(id) {
