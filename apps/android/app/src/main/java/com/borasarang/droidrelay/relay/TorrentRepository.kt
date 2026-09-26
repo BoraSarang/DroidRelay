@@ -137,4 +137,12 @@ object TorrentRepository {
     }
 
     fun newId(): String = java.util.UUID.randomUUID().toString()
+
+    /** 테스트 전용 — 전역 상태 초기화 (싱글턴이라 테스트 간 간섭이 생긴다) */
+    internal fun clearForTest() {
+        synchronized(this) {
+            map.clear()
+            _torrents.value = emptyList()
+        }
+    }
 }

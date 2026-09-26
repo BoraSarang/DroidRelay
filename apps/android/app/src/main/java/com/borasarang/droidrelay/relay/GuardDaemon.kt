@@ -26,10 +26,15 @@ class GuardDaemon(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     @Volatile private var isRunning = false
     @Volatile private var pollingJob: kotlinx.coroutines.Job? = null
+    /**
+     * 최신 설정.
+     * 이전에는 5분 TTL 캐시라 임계치를 낮춘 뒤에도 최대 5분간 기존 값으로 판정했고
+     * 게이드를 꺼도 그만큼 다운로드가 재개되지 않았다 (UI 는 최신 settings 로 계산되어
+     * "throttled:false" 를 보여주므로 대시보드와 실제 동작이 어긋났다).
+     * DataStore Flow 로 밀어 넣으면 TTL 없이 즉시 반영된다.
+     */
     @Volatile private var cachedSettings: AppSettings? = null
-    private var cachedAt = 0L
-    private val cacheTtlMs = 5 * 60 * 1000L
-    // 센서 상태 캐시 — /api/guard/status 폴링마다 thermal/Binder/stat 반복 제거 (15s TTL)
+    // 센서 상태 캐시 — getStatus() 반복 호출 시 thermal/Binder/stat 재실행 방지 (15s TTL)
     @Volatile private var cachedStatus: GuardStatus? = null
     @Volatile private var cachedStatusAt = 0L
     private val statusTtlMs = 15_000L
@@ -44,10 +49,15 @@ class GuardDaemon(
     fun start() {
         if (isRunning) return
         isRunning = true
+        // 설정 푸시 구독 — 변경 즉시 임계치에 반영
+        scope.launch {
+            settings.settings.collect { s -> cachedSettings = s }
+        }
         pollingJob = scope.launch {
             DebugLogger.i(TAG, "가드 데몬 시작 (120초 폴링)")
             while (isRunning) {
-                checkGuard()
+                runCatching { checkGuard() }
+                    .onFailure { DebugLogger.e(TAG, "가드 체크 실패 (계속)", it) }
                 delay(120_000) // 2분
             }
         }
@@ -141,19 +151,11 @@ class GuardDaemon(
         }
     }
 
-    /**
-     * 설정 조회 — 5분간 캐시, 주기 폴링의 DataStore I/O 절감 (T-848)
-     */
-    private fun settingsNow(): AppSettings {
-        val now = System.currentTimeMillis()
-        cachedSettings?.let {
-            if (now - cachedAt < cacheTtlMs) return it
-        }
-        return settings.firstBlocking().also {
-            cachedSettings = it
-            cachedAt = now
-        }
-    }
+    /** 설정 조회 — start() 의 Flow 구독이 유지하는 최신 스냅샷 (T-848) */
+    private fun settingsNow(): AppSettings =
+        // start() 의 Flow 구독이 밀어 넣은 최신값. 구독이 아직 첫 값을 내기 전일 때만
+        // 동기 읽기로 폴백한다 (DataStore 는 캐시라 즉시 반환).
+        cachedSettings ?: settings.firstBlocking().also { cachedSettings = it }
 
     // 온도·배터리·스토리지 실측은 GuardSensorCache 가 15초 TTL 로 공유한다.
     // (라우트와 데몬이 각각 읽으면 폴링 1회당 sysfs+binder+statfs 가 중복된다)

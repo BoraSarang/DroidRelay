@@ -2164,7 +2164,9 @@ function toggleSpeedLimit(type){
   input.disabled=!enabled;
   if(enabled){
     var bps=speedInputBps(type,input);
-    saveSpeedLimit(type==='dl'?bps:0, type==='ul'?bps:0);
+    // 한쪽만 보낸다 — 이전엔 반대편에 0을 함께 보내서
+    // "다운로드 제한 켜기"가 업로드 제한까지 0(끔)으로 덮어썼다.
+    saveSpeedLimit(type==='dl'?bps:undefined, type==='ul'?bps:undefined);
   }else{
     saveSpeedLimit(type==='dl'?0:undefined, type==='ul'?0:undefined);
   }

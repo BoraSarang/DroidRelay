@@ -17,7 +17,9 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import com.borasarang.droidrelay.relay.TorrentRepository
 import com.borasarang.droidrelay.relay.TorrentState
 import kotlinx.coroutines.launch
@@ -130,6 +132,29 @@ class RelayService : Service() {
         val tunnel = TunnelManager(applicationContext)
         tunnelManager = tunnel
         DebugLogger.i(TAG, "터널 매니저 시작 완료")
+
+        // ⓪ 터널 설정 감시 — 이전에는 TunnelManager.start() 호출이 어디에도 없어
+        // "터널 사용" 스위치와 프로바이더 선택이 저장만 되고 아무 일도 일어나지 않았다.
+        // 이제 설정을 실제로 구독해 켜면 시작·끄면 중지한다.
+        scope.launch {
+            settingsRepo.settings
+                .map { it.tunnelEnabled to it.tunnelProvider }
+                .distinctUntilChanged()
+                .collect { (enabled, provider) ->
+                    if (!enabled) {
+                        runCatching { tunnel.stop() }
+                        DebugLogger.i(TAG, "터널 비활성 — 중지됨")
+                    } else {
+                        val r = tunnel.start(settingsRepo.firstBlocking())
+                        if (r.success) {
+                            DebugLogger.i(TAG, "터널 시작 성공 provider=$provider ${r.message}")
+                        } else {
+                            // 바이너리 미설치 등으로 실패 — 스위치는 켜진 채 유지하고 사유를 로그로 남긴다
+                            DebugLogger.w(TAG, "터널 시작 실패 provider=$provider: ${r.message}")
+                        }
+                    }
+                }
+        }
 
         // 스케줄러 시작 (Phase 3)
         val scheduler = SchedulerManager(applicationContext)

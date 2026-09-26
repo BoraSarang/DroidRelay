@@ -56,6 +56,21 @@ object SettingsConstraints {
     const val COMPLETION_ACTION_NONE = "none"
     const val COMPLETION_ACTION_STOP_SERVER = "stop_server"
 
+    /**
+     * 속도 상한 (B/s, 0=무제한/끔).
+     * 서버 측 상한이 없으면 API 직접 호출로 임의 값이 저장된다 —
+     * ThrottleInterceptor 의 토큰 버킷이 `limit*2`·`limit*elapsed` 를 계산하며
+     * 값이 Long 범위를 넘으면 음수로 포화되어 토큰이 음수로 고정이 되고
+     * 이후 프로세스 수명 동안 다운로드 제한이 조용히失效한다.
+     */
+    const val MAX_BPS = 10_737_418_240L // 10 GiB/s — 물리적 한계보다 충분히 위
+
+    /** 속도 상한 클램프 (음수는 0) */
+    fun clampBps(bps: Long): Long = bps.coerceIn(0L, MAX_BPS)
+
+    // 시드 미확보 대기 (초, 0=끄기)
+    const val TORRENT_MIN_SEED_WAIT_MAX = 3600
+
     // 내장 웹 서버 포트 (v0.34) — HTTP·HTTPS는 서로 달라야 한다
     const val PORT_MIN = 1024
     const val PORT_MAX = 65535

@@ -224,9 +224,21 @@ internal fun SecuritySection(
         var authEnabled by remember(s.webAuthEnabled) { mutableStateOf(s.webAuthEnabled) }
         var user by remember(s.webUser) { mutableStateOf(s.webUser) }
         var pass by remember(s.webPassword) { mutableStateOf("") }
+        var authMsg by remember { mutableStateOf<String?>(null) }
         SwitchRow("웹 접속 암호 요청 (HTTP Basic)", authEnabled) {
             authEnabled = it
-            scope.launch { repo.setWebAuth(it, user, pass) }
+            scope.launch {
+                if (!it) {
+                    repo.setWebAuth(false, user, pass)
+                    authMsg = null
+                } else if (repo.setWebAuth(true, user, pass)) {
+                    authMsg = null
+                } else {
+                    // 암호 없이 켜면 인증이 적용되지 않는다 — 스위치를 되돌리고 안내
+                    authEnabled = false
+                    authMsg = "비밀번호를 먼저 입력하세요. 암호 없이는 인증이 적용되지 않습니다."
+                }
+            }
         }
         if (authEnabled) {
             OutlinedTextField(
@@ -241,8 +253,18 @@ internal fun SecuritySection(
             Spacer(Modifier.height(6.dp))
             Button(onClick = {
                 DebugLogger.i("Settings", "웹 인증 저장 user=$user")
-                scope.launch { repo.setWebAuth(true, user, pass.ifBlank { s.webPassword }) }
+                scope.launch {
+                    if (repo.setWebAuth(true, user, pass.ifBlank { s.webPassword })) {
+                        authMsg = null
+                    } else {
+                        authMsg = "비밀번호를 입력해야 인증을 켤 수 있습니다."
+                    }
+                }
             }) { Text("인증 정보 저장") }
+            authMsg?.let {
+                Spacer(Modifier.height(4.dp))
+                Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)
+            }
         }
         Spacer(Modifier.height(12.dp))
         var guestEnabled by remember(s.guestEnabled) { mutableStateOf(s.guestEnabled) }

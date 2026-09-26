@@ -296,6 +296,8 @@ class TorrentEngine(
     init {
         scope.launch {
             settings.settings.collect { s ->
+                // 캐시 필드는 세션 유무와 무관하게 먼저 갱신해야 한다 —
+                // 세션이 아직 없으면 아래 apply* 들이 return 해도 폴링/추가는 최신값을 읽어야 한다.
                 latestUploadKbps = s.torrentUploadLimit
                 latestDownloadKbps = s.torrentDownloadLimit
                 latestSequentialDownload = s.torrentSequentialDownload
@@ -307,12 +309,18 @@ class TorrentEngine(
                 latestStallThresholdKbps = s.torrentStallThresholdKbps
                 latestStallTimeoutSec = s.torrentStallTimeoutSec
                 latestMaxActive = s.torrentMaxActive
+                // 누락됐던 필드: 시드 미확보 시 대기 시간. 이전엔 applySettings 안에서만 갱신돼
+                // 앱 설정 화면에서 바꿔도 반영되지 않았다.
+                torrentMinSeedWaitSec = s.torrentMinSeedWaitSec
                 DebugLogger.d(TAG, "설정 반영 업로드=${s.torrentUploadLimit}KB/s 다운로드=${s.torrentDownloadLimit}KB/s 시퀀셜=${s.torrentSequentialDownload} 비율=${s.torrentSeedRatio} DHT=${s.torrentDhtEnabled} PEX=${s.torrentPexEnabled} 정체=${s.torrentStallEnabled}(${s.torrentStallThresholdKbps}KB/s·${s.torrentStallTimeoutSec}초)")
                 applyRateLimits()
                 applySequentialToAll(s.torrentSequentialDownload)
                 applyDhtEnabled(s.torrentDhtEnabled)
                 applyPexEnabled(s.torrentPexEnabled)
                 applyStallSessionSettings(s)
+                // maxActive(torrentMaxActive) 반영 — 이것도 이전엔 applySettings 안에서만
+                // 갱신되어 앱 화면 변경분이 세션에 전달되지 않았다.
+                applySettings(s)
             }
         }
     }
@@ -822,7 +830,7 @@ val th = withGate { session?.find(Sha1Hash.parseHex(expectedHash)) }
         }
     }
 
-    /** 전체 설정 동적 적용 (재시작 불필요) */
+    /** 전체 설정 동적 적용 (재시작 불필요) — 앱·웹 공통 진입점 */
     fun applySettings(s: AppSettings) {
         withGate {
             // stop()과 레이스 방지 — 게이트 안에서 null 체크 (T-934 S4)
@@ -832,33 +840,12 @@ val th = withGate { session?.find(Sha1Hash.parseHex(expectedHash)) }
                 .connectionsLimit(200)
                 .maxPeerlistSize(5000)
             session.applySettings(sp)
-            applyStallSessionSettings(s)
-            applyPexEnabled(s.torrentPexEnabled)
+            DebugLogger.i(TAG, "토렌트 활성 한도 적용 maxActive=${s.torrentMaxActive}")
 
             // 리슨 포트 변경은 재시작 필요 — 로그만 남김
             if (s.torrentListenPort != 6881) {
                 DebugLogger.w(TAG, "listenPort(${s.torrentListenPort}) 변경은 서버 재시작 후 반영됩니다")
             }
-
-            // 속도 제한도 함께 적용
-            val upBps = if (s.torrentUploadLimit <= 0) 1024 else (s.torrentUploadLimit * 1024).coerceIn(1, Int.MAX_VALUE.toLong()).toInt()
-            val downBps = if (s.torrentDownloadLimit <= 0) 0 else (s.torrentDownloadLimit * 1024).coerceIn(0, Int.MAX_VALUE.toLong()).toInt()
-            try {
-                session.uploadRateLimit(upBps)
-                session.downloadRateLimit(downBps)
-            } catch (e: Exception) { DebugLogger.e(TAG, "토렌트 속도 제한 적용 실패", e) }
-            DebugLogger.i(TAG, "토렌트 설정 적용 maxActive=${s.torrentMaxActive} up=${if(s.torrentUploadLimit<=0) "끔" else "${s.torrentUploadLimit}KB/s"} down=${if(s.torrentDownloadLimit<=0) "무제한" else "${s.torrentDownloadLimit}KB/s"}")
-
-            // 시더 부재 자동 중단 대기 시간 (0 = 꺼짐)
-            torrentMinSeedWaitSec = s.torrentMinSeedWaitSec
-            latestSeedRatio = s.torrentSeedRatio
-            latestDhtEnabled = s.torrentDhtEnabled
-            latestSavePath = s.torrentSavePath.ifBlank { StorageGuard.dlRoot.path }
-            latestStallEnabled = s.torrentStallEnabled
-            latestStallThresholdKbps = s.torrentStallThresholdKbps
-            latestStallTimeoutSec = s.torrentStallTimeoutSec
-            latestMaxActive = s.torrentMaxActive
-            applyDhtEnabled(s.torrentDhtEnabled)
         }
     }
 

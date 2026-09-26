@@ -308,68 +308,13 @@ internal fun Route.settingsRoutes(context: Context, serverRef: RelayServer) {
     }
 
     // ── 설정 리셋 (기본값 복원) ──
+    // 앱(SettingsComponents.resetSettings)과 키 집합을 공유한다 — 두 구현이 어긋나 있었다.
     post("/api/settings/reset") {
         val body = call.receiveText()
         val json = try { JSONObject(body) } catch (_: Exception) { JSONObject() }
         val category = json.optString("category", "all")
         val repo = SettingsRepository.get(context)
-        val ctx = context
-        when (category) {
-            "download" -> {
-                repo.setConcurrency(SettingsConstraints.DEFAULT_CONCURRENCY)
-                repo.setSpeedLimit(0)
-                repo.setNotifications(true)
-                repo.setStorageQuotaGb(0)
-                repo.setAutoClassify(false)
-                repo.setSpeedSchedule(emptyList())
-                repo.setCompletionAction(SettingsConstraints.COMPLETION_ACTION_NONE)
-                RelayApp.get(ctx).applySettings(repo.firstBlocking())
-            }
-            "torrent" -> {
-                repo.setTorrentUploadLimit(SettingsConstraints.DEFAULT_TORRENT_UPLOAD_KBPS)
-                repo.setTorrentDownloadLimit(SettingsConstraints.DEFAULT_TORRENT_DOWNLOAD_KBPS)
-                repo.setTorrentMaxActive(SettingsConstraints.DEFAULT_TORRENT_MAX_ACTIVE)
-                repo.setTorrentSeedRatio(2.0f)
-                repo.setTorrentDhtEnabled(true)
-                repo.setTorrentPexEnabled(true)
-                repo.setTorrentListenPort(SettingsConstraints.randomEphemeralPort())
-                repo.setTorrentSavePath(StorageGuard.dlRoot.path)
-                repo.setTorrentTrackerSync(true)
-                repo.setTorrentStallEnabled(SettingsConstraints.DEFAULT_TORRENT_STALL_ENABLED)
-                repo.setTorrentStallThresholdKbps(SettingsConstraints.DEFAULT_TORRENT_STALL_THRESHOLD_KBPS)
-                repo.setTorrentStallTimeoutSec(SettingsConstraints.DEFAULT_TORRENT_STALL_TIMEOUT_SEC)
-                repo.setSearchEnabled(false)
-                repo.setSearchUrl("")
-                repo.setSearchApiKey("")
-                RelayApp.getTorrent(ctx).applySettings(repo.firstBlocking())
-            }
-            else -> {
-                repo.setConcurrency(SettingsConstraints.DEFAULT_CONCURRENCY)
-                repo.setSpeedLimit(0)
-                repo.setNotifications(true)
-                repo.setStorageQuotaGb(0)
-                repo.setAutoClassify(false)
-                repo.setSpeedSchedule(emptyList())
-                repo.setCompletionAction(SettingsConstraints.COMPLETION_ACTION_NONE)
-                repo.setTorrentUploadLimit(SettingsConstraints.DEFAULT_TORRENT_UPLOAD_KBPS)
-                repo.setTorrentDownloadLimit(SettingsConstraints.DEFAULT_TORRENT_DOWNLOAD_KBPS)
-                repo.setTorrentMaxActive(SettingsConstraints.DEFAULT_TORRENT_MAX_ACTIVE)
-                repo.setTorrentSeedRatio(2.0f)
-                repo.setTorrentDhtEnabled(true)
-                repo.setTorrentPexEnabled(true)
-                repo.setTorrentTrackerSync(true)
-                repo.setTorrentStallEnabled(SettingsConstraints.DEFAULT_TORRENT_STALL_ENABLED)
-                repo.setTorrentStallThresholdKbps(SettingsConstraints.DEFAULT_TORRENT_STALL_THRESHOLD_KBPS)
-                repo.setTorrentStallTimeoutSec(SettingsConstraints.DEFAULT_TORRENT_STALL_TIMEOUT_SEC)
-                repo.setTorrentListenPort(SettingsConstraints.randomEphemeralPort())
-                repo.setTorrentSavePath(StorageGuard.dlRoot.path)
-                repo.setSearchEnabled(false)
-                repo.setSearchUrl("")
-                repo.setSearchApiKey("")
-                RelayApp.get(ctx).applySettings(repo.firstBlocking())
-                RelayApp.getTorrent(ctx).applySettings(repo.firstBlocking())
-            }
-        }
+        SettingsResetter.reset(context, repo, category)
         serverRef.settings = repo.firstBlocking()
         call.respondText("""{"ok":true}""", ContentType.Application.Json)
     }

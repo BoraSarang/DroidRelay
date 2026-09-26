@@ -290,3 +290,6 @@ private fun stateSignature(): String {
     }
     return sb.toString()
 }
+
+/** 테스트 전용 — 상태 서명 단독 호출 */
+internal fun stateSignatureForTest(): String = stateSignature()

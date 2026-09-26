@@ -216,14 +216,15 @@ class SettingsRepository(private val context: Context) {
             webUser = p[Keys.WEB_USER] ?: "droidrelay",
             webPassword = p[Keys.WEB_PASS] ?: "",
             speedLimitKbps = (p[Keys.SPEED_LIMIT] ?: 0).coerceAtLeast(0),
-            maxDownloadBps = (p[Keys.MAX_DOWNLOAD_BPS] ?: 0L).coerceAtLeast(0),
-            maxUploadBps = (p[Keys.MAX_UPLOAD_BPS] ?: 0L).coerceAtLeast(0),
+            maxDownloadBps = SettingsConstraints.clampBps(p[Keys.MAX_DOWNLOAD_BPS] ?: 0L),
+            maxUploadBps = SettingsConstraints.clampBps(p[Keys.MAX_UPLOAD_BPS] ?: 0L),
             allowedIps = p[Keys.ALLOWED_IPS] ?: emptySet(),
             accessScope = SettingsMigration.parseAccessScope(p[Keys.ACCESS_SCOPE]),
             torrentSavePath = p[Keys.TORRENT_SAVE_PATH] ?: "",
-            torrentUploadLimit = (p[Keys.TORRENT_UPLOAD_LIMIT] ?: SettingsConstraints.DEFAULT_TORRENT_UPLOAD_KBPS).toLong().coerceAtLeast(0),
-            torrentDownloadLimit = (p[Keys.TORRENT_DOWNLOAD_LIMIT] ?: 0).toLong().coerceAtLeast(0),
-            torrentMaxActive = (p[Keys.TORRENT_MAX_ACTIVE] ?: 3).coerceIn(1, 10),
+            torrentUploadLimit = (p[Keys.TORRENT_UPLOAD_LIMIT] ?: SettingsConstraints.DEFAULT_TORRENT_UPLOAD_KBPS).toLong().coerceIn(SettingsConstraints.TORRENT_UPLOAD_MIN.toLong(), SettingsConstraints.TORRENT_UPLOAD_MAX.toLong()),
+            torrentDownloadLimit = (p[Keys.TORRENT_DOWNLOAD_LIMIT] ?: 0).toLong().coerceIn(SettingsConstraints.TORRENT_DOWNLOAD_MIN.toLong(), SettingsConstraints.TORRENT_DOWNLOAD_MAX.toLong()),
+            torrentMaxActive = (p[Keys.TORRENT_MAX_ACTIVE] ?: SettingsConstraints.DEFAULT_TORRENT_MAX_ACTIVE)
+                .coerceIn(SettingsConstraints.TORRENT_MAX_ACTIVE_MIN, SettingsConstraints.TORRENT_MAX_ACTIVE_MAX),
             torrentSeedRatio = (p[Keys.TORRENT_SEED_RATIO] ?: 200).toInt().coerceIn(0, 1000) / 100f,
             torrentDhtEnabled = p[Keys.TORRENT_DHT] ?: true,
             torrentPexEnabled = p[Keys.TORRENT_PEX] ?: true,
@@ -250,7 +251,8 @@ class SettingsRepository(private val context: Context) {
             scheduleChargingOnly = p[Keys.SCHED_CHARGING] ?: false,
             scheduleBatteryMin = (p[Keys.SCHED_BATTERY_MIN] ?: 30).coerceIn(5, 100),
             watchdogIntervalSec = (p[Keys.WATCHDOG_INTERVAL_SEC] ?: 60).coerceIn(15, 3600),
-            torrentMinSeedWaitSec = (p[Keys.TORRENT_MIN_SEED_WAIT_SEC] ?: 0).coerceAtLeast(0),
+            torrentMinSeedWaitSec = (p[Keys.TORRENT_MIN_SEED_WAIT_SEC] ?: 0)
+                .coerceIn(0, SettingsConstraints.TORRENT_MIN_SEED_WAIT_MAX),
             torrentStallEnabled = p[Keys.TORRENT_STALL_ENABLED] ?: SettingsConstraints.DEFAULT_TORRENT_STALL_ENABLED,
             torrentStallThresholdKbps = (p[Keys.TORRENT_STALL_THRESHOLD_KBPS] ?: SettingsConstraints.DEFAULT_TORRENT_STALL_THRESHOLD_KBPS)
                 .coerceIn(SettingsConstraints.TORRENT_STALL_THRESHOLD_MIN, SettingsConstraints.TORRENT_STALL_THRESHOLD_MAX),
@@ -325,27 +327,41 @@ class SettingsRepository(private val context: Context) {
     suspend fun setNotifications(b: Boolean) =
         context.settingsDataStore.edit { it[Keys.NOTIFICATIONS] = b }
 
-    suspend fun setWebAuth(enabled: Boolean, user: String, pass: String) =
+    /**
+     * 웹 Basic Auth 설정.
+     * 암호는 UI 에서 매번 현재 값을 그대로 되돌려 보내므로(비밀번호 마스킹) 빈 문자열은
+     * "변경 없음" 으로 취급한다. 다만 저장된 암호가 하나도 없는 상태에서 켜면
+     * RelayServer 가 `webPassword.isNotEmpty()` 로 게이트하므로 인증이 전혀 적용되지 않은 채
+     * 스위치만 켜진 상태가 된다 — 그대로 저장하지 않고 거절한다.
+     */
+    suspend fun setWebAuth(enabled: Boolean, user: String, pass: String): Boolean {
+        val hasStored = context.settingsDataStore.data.first()[Keys.WEB_PASS]?.isNotBlank() == true
+        if (enabled && pass.isBlank() && !hasStored) return false
         context.settingsDataStore.edit {
             it[Keys.WEB_AUTH] = enabled
             if (user.isNotBlank()) it[Keys.WEB_USER] = user.trim()
             if (pass.isNotBlank()) it[Keys.WEB_PASS] = pass
         }
+        return true
+    }
 
     suspend fun setSpeedLimit(kbps: Int) =
         context.settingsDataStore.edit { it[Keys.SPEED_LIMIT] = kbps.coerceAtLeast(0) }
 
     suspend fun setMaxDownloadBps(bps: Long) =
-        context.settingsDataStore.edit { it[Keys.MAX_DOWNLOAD_BPS] = bps.coerceAtLeast(0) }
+        context.settingsDataStore.edit { it[Keys.MAX_DOWNLOAD_BPS] = SettingsConstraints.clampBps(bps) }
 
     suspend fun setMaxUploadBps(bps: Long) =
-        context.settingsDataStore.edit { it[Keys.MAX_UPLOAD_BPS] = bps.coerceAtLeast(0) }
+        context.settingsDataStore.edit { it[Keys.MAX_UPLOAD_BPS] = SettingsConstraints.clampBps(bps) }
 
     suspend fun setWatchdogIntervalSec(sec: Int) =
         context.settingsDataStore.edit { it[Keys.WATCHDOG_INTERVAL_SEC] = sec.coerceIn(15, 3600) }
 
     suspend fun setTorrentMinSeedWaitSec(sec: Int) =
-        context.settingsDataStore.edit { it[Keys.TORRENT_MIN_SEED_WAIT_SEC] = sec.coerceAtLeast(0) }
+        context.settingsDataStore.edit {
+            it[Keys.TORRENT_MIN_SEED_WAIT_SEC] =
+                sec.coerceIn(0, SettingsConstraints.TORRENT_MIN_SEED_WAIT_MAX)
+        }
 
     suspend fun setForceHttpsRedirect(b: Boolean) =
         context.settingsDataStore.edit { it[Keys.FORCE_HTTPS_REDIRECT] = b }
@@ -401,13 +417,19 @@ class SettingsRepository(private val context: Context) {
         context.settingsDataStore.edit { it[Keys.TORRENT_SAVE_PATH] = path }
 
     suspend fun setTorrentUploadLimit(kbps: Int) =
-        context.settingsDataStore.edit { it[Keys.TORRENT_UPLOAD_LIMIT] = kbps.coerceAtLeast(0) }
+        context.settingsDataStore.edit {
+            it[Keys.TORRENT_UPLOAD_LIMIT] = kbps.coerceIn(SettingsConstraints.TORRENT_UPLOAD_MIN, SettingsConstraints.TORRENT_UPLOAD_MAX)
+        }
 
     suspend fun setTorrentDownloadLimit(kbps: Int) =
-        context.settingsDataStore.edit { it[Keys.TORRENT_DOWNLOAD_LIMIT] = kbps.coerceAtLeast(0) }
+        context.settingsDataStore.edit {
+            it[Keys.TORRENT_DOWNLOAD_LIMIT] = kbps.coerceIn(SettingsConstraints.TORRENT_DOWNLOAD_MIN, SettingsConstraints.TORRENT_DOWNLOAD_MAX)
+        }
 
     suspend fun setTorrentMaxActive(n: Int) =
-        context.settingsDataStore.edit { it[Keys.TORRENT_MAX_ACTIVE] = n.coerceIn(1, 10) }
+        context.settingsDataStore.edit {
+            it[Keys.TORRENT_MAX_ACTIVE] = n.coerceIn(SettingsConstraints.TORRENT_MAX_ACTIVE_MIN, SettingsConstraints.TORRENT_MAX_ACTIVE_MAX)
+        }
 
     // 정체(스톨) 감지 setters (T-1050)
     suspend fun setTorrentStallEnabled(enabled: Boolean) =
