@@ -120,7 +120,7 @@ class ThrottleInterceptor(
             tokens.updateAndGet { it.coerceAtMost(limitBps * 2) }
         }
 
-        /** 수면한 시간은 토큰 적립에서 제외 — 미보정 시 수면분이 다음 refill에 적립되어 2배速이 된다 */
+        /** 수면한 시간은 토큰 적립에서 제외 — 미보정 시 수면분이 다음 refill에 적립되어 2배 속도가 된다 */
         fun accountSleep(ms: Long) {
             if (ms > 0) lastRefill.addAndGet(ms)
         }

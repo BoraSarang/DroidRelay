@@ -61,7 +61,7 @@ object SettingsConstraints {
      * 서버 측 상한이 없으면 API 직접 호출로 임의 값이 저장된다 —
      * ThrottleInterceptor 의 토큰 버킷이 `limit*2`·`limit*elapsed` 를 계산하며
      * 값이 Long 범위를 넘으면 음수로 포화되어 토큰이 음수로 고정이 되고
-     * 이후 프로세스 수명 동안 다운로드 제한이 조용히失效한다.
+     * 이후 프로세스 수명 동안 다운로드 제한이 조용히 무력화된다.
      */
     const val MAX_BPS = 10_737_418_240L // 10 GiB/s — 물리적 한계보다 충분히 위
 

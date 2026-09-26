@@ -204,7 +204,7 @@ object StreamDetector {
 
     /** HLS 마스터 매니페스트에서 #EXT-X-STREAM-INF(RESOLUTION) variant를 해상도별로 추출 */
     fun parseHlsMaster(manifest: String, baseUrl: String): List<Quality> {
-        // 전행 toList() 제거 — 스트리밍走査 + STREAM-INF 직후 비주석 라인만 variant로
+        // 전행 toList() 제거 — 스트리밍 순회 + STREAM-INF 직후 비주석 라인만 variant로
         val out = mutableListOf<Quality>()
         var pendingRes: String? = null
         var pending = false

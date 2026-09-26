@@ -486,7 +486,7 @@ class RelayService : Service() {
         super.onDestroy()
     }
 
-    /** 강제종료 직전 상태 저장 (onTaskRemoved = 사용자가 앱 스와이프/終了 시) */
+    /** 강제종료 직전 상태 저장 (onTaskRemoved = 사용자가 앱 스와이프 종료 시) */
     override fun onTaskRemoved(rootIntent: Intent?) {
         DebugLogger.i(TAG, "onTaskRemoved → 즉시 영구 저장")
         val jobs = com.borasarang.droidrelay.relay.JobsRepository.all()
