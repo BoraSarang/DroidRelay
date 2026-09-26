@@ -294,8 +294,13 @@ class VideoDownloadManager(
             }
             ReturnCode.isSuccess(session.returnCode) && size > 0 -> {
                 val engine = RelayApp.get(context)
-                engine.publishToDownloads(out, jobId)
-                if (out.exists()) out.delete()
+                // 게시 실패 시 원본을 지우면 영상 영구 소실 — DownloadEngine 과 동일하게 성공 때만 삭제
+                val published = runCatching { engine.publishToDownloads(out, jobId) }.getOrDefault(false)
+                if (published) {
+                    if (out.exists()) out.delete()
+                } else {
+                    DebugLogger.w(TAG, "보관함 게시 실패 → 앱 전용 원본 유지 id=$jobId '${out.name}'")
+                }
                 JobsRepository.update(jobId) {
                     it.copy(
                         state = JobState.DONE, progress = 1f, downloadedBytes = size,

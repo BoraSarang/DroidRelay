@@ -202,7 +202,7 @@ object McpServer {
         }
     }
 
-    private fun executeTool(context: Context, name: String, args: JSONObject, serverRef: RelayServer): Any {
+    private suspend fun executeTool(context: Context, name: String, args: JSONObject, serverRef: RelayServer): Any {
         // 권한 체크 (Phase 2.1 확장)
         val settings = serverRef.settings
         if (name in settings.mcpToolsDisabled) {
@@ -227,8 +227,12 @@ object McpServer {
 
     private fun fileList(args: JSONObject): JSONArray {
         val subPath = args.optString("path", "")
-        val dlRoot = StorageGuard.dlRoot
-        val dir = if (subPath.isNotBlank()) File(dlRoot, subPath) else dlRoot
+        // 경로 탈출 차단 — StorageGuard 미사용 시 "../../.." 로 루트 전체 목록이 노출된다
+        val dir = StorageGuard.storageFile(subPath)
+        if (dir == null) {
+            DebugLogger.w(TAG, "fileList: 경로 탈출 차단 path=$subPath")
+            error("경로 탈출 차단")
+        }
 
         if (!dir.exists() || !dir.isDirectory) {
             DebugLogger.d(TAG, "fileList: 디렉토리 없음 path=$subPath")
@@ -258,7 +262,9 @@ object McpServer {
         val dlRoot = StorageGuard.dlRoot
         val file = File(dlRoot, path)
         val canonical = file.canonicalFile
-        if (!canonical.path.startsWith(dlRoot.canonicalPath)) error("경로 탈출 차단")
+        // 경로 구분자 없이 startsWith 만 쓰면 "DroidRelay.bak" 같은 접두 동명이 통과한다 (StorageGuard 와 불일치)
+        val root = StorageGuard.dlRootCanonical.path
+        if (canonical.path != root && !canonical.path.startsWith(root + File.separator)) error("경로 탈출 차단")
 
         if (!file.exists()) error("파일 없음: $path")
         if (!file.isFile) error("파일이 아님: $path")
@@ -267,7 +273,7 @@ object McpServer {
         return file.readText()
     }
 
-    private fun downloadAdd(context: Context, args: JSONObject, serverRef: RelayServer): JSONObject {
+    private suspend fun downloadAdd(context: Context, args: JSONObject, serverRef: RelayServer): JSONObject {
         val url = args.optString("url", "")
         if (url.isBlank()) error("url 필요")
 
@@ -279,9 +285,9 @@ object McpServer {
                 val provider = runCatching { DebridProvider.valueOf(s.debridProvider) }.getOrNull()
                 if (provider != null) {
                     val client = DebridClient(context)
-                    val link = kotlinx.coroutines.runBlocking {
-                        client.unrestrict(url, provider, s.debridApiKey)
-                    }
+                    // runBlocking 으로 감싸면 DebridClient 의 suspend/IO 설계가 무의미해지고
+                    // Netty 이벤트루프가 40초(접속 15 + 읽기 30) 동안 블로킹된다.
+                    val link = client.unrestrict(url, provider, s.debridApiKey)
                     link.directUrl
                 } else url
             } catch (_: Exception) { url }

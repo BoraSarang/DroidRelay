@@ -213,17 +213,24 @@ fun TorrentScreen(onShowSnack: (String) -> Unit = {}) {
                 items(torrents, key = { it.id }) { job ->
                     TorrentItem(
                         job = job,
-                        onPause = { engine.pause(job.id) },
-                        onResume = { engine.resume(job.id) },
+                        // 이 연산들은 전부 sessionGate 를 잡고 libtorrent 에 JNI 를 건다.
+                        // onClick 는 메인 스레드에서 실행되므로 동기 호출이면
+                        // 폴러/alert 가 게이트를 쥔 동안 UI 가 멈춘다 (ANR).
+                        // 전부 IO 스레드에서 실행한다.
+                        onPause = { scope.launch { withContext(Dispatchers.IO) { engine.pause(job.id) } } },
+                        onResume = { scope.launch { withContext(Dispatchers.IO) { engine.resume(job.id) } } },
                         onDelete = { showDeleteDialog = job },
-                        onMoveUp = { engine.reorder(job.id, -1) },
-                        onMoveDown = { engine.reorder(job.id, 1) },
+                        onMoveUp = { scope.launch { withContext(Dispatchers.IO) { engine.reorder(job.id, -1) } } },
+                        onMoveDown = { scope.launch { withContext(Dispatchers.IO) { engine.reorder(job.id, 1) } } },
                         onSelectFiles = { sel ->
-                            if (engine.setFileSelection(job.id, sel)) onShowSnack("파일 선택 적용됨 (${sel.size}/${job.files.size}개)")
-                            else onShowSnack("파일 목록 없음 — 메타데이터 수신 후 시도")
+                            scope.launch {
+                                val ok = withContext(Dispatchers.IO) { engine.setFileSelection(job.id, sel) }
+                                if (ok) onShowSnack("파일 선택 적용됨 (${sel.size}/${job.files.size}개)")
+                                else onShowSnack("파일 목록 없음 — 메타데이터 수신 후 시도")
+                            }
                         },
                         onSetLimit = { bps ->
-                            engine.setDownloadLimit(job.id, bps)
+                            scope.launch { withContext(Dispatchers.IO) { engine.setDownloadLimit(job.id, bps) } }
                             onShowSnack("torrent 다운로드 제한 ${SpeedLimits.labelBps(bps)}")
                         },
                     )

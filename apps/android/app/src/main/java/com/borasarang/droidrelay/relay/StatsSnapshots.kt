@@ -73,18 +73,26 @@ object StatsSnapshots {
     }
 
     // ── 피어 ──
+    /**
+     * 5초 폴링에서 무조건 호출된다. 값이 그대로일 때 디스크를 건드리지 않아야 한다 —
+     * 이전 구현은 5분 데번스 구간 안에서도 savePeers() 를 호출해
+     * "다운로드 0건" 상태에서도 분당 12회(하루 17,280회) 파일을 썼다.
+     */
     @Synchronized
     fun recordPeers(seeds: Long, peers: Long, nowMs: Long = System.currentTimeMillis()) {
-        lastSeeds = seeds.coerceAtLeast(0)
-        lastPeers = peers.coerceAtLeast(0)
-        if (lastSeeds > peakSeeds) peakSeeds = lastSeeds
-        if (lastPeers > peakPeers) peakPeers = lastPeers
-        if (nowMs - lastPeerAt < PEER_MIN_INTERVAL_MS && peerHistory.isNotEmpty()) {
-            savePeers()
-            return
-        }
+        val s = seeds.coerceAtLeast(0)
+        val p = peers.coerceAtLeast(0)
+        if (s == lastSeeds && p == lastPeers) return
+
+        lastSeeds = s
+        lastPeers = p
+        if (s > peakSeeds) peakSeeds = s
+        if (p > peakPeers) peakPeers = p
+        // 5분 스냅샷 간격 안이면 이력에 추가하지 않고 디스크도 건드리지 않는다
+        if (nowMs - lastPeerAt < PEER_MIN_INTERVAL_MS && peerHistory.isNotEmpty()) return
+
         lastPeerAt = nowMs
-        peerHistory.add(PeerSnapshot(nowMs, lastSeeds, lastPeers))
+        peerHistory.add(PeerSnapshot(nowMs, s, p))
         prunePeers(nowMs)
         savePeers()
     }
@@ -156,62 +164,60 @@ object StatsSnapshots {
         keep.forEach { storageDays[it.key] = it.value }
     }
 
-    private fun savePeers() {
-        val f = f(PEER_FILE) ?: return
+    /** 원자 쓰기 — tmp→rename. kill 중 writeText 절단 시 해당 파일만 0바이트가 되는 것을 방지. */
+    private fun writeAtomic(name: String, body: String) {
+        val f = f(name) ?: return
         runCatching {
-            val sb = StringBuilder("{\"peakSeeds\":$peakSeeds,\"peakPeers\":$peakPeers,\"items\":[")
-            peerHistory.forEachIndexed { i, p ->
-                if (i > 0) sb.append(',')
-                sb.append("{\"t\":${p.t},\"s\":${p.seeds},\"p\":${p.peers}}")
-            }
-            sb.append("]}")
-            f.writeText(sb.toString())
+            val tmp = File(f.parentFile, f.name + ".tmp")
+            tmp.writeText(body)
+            // delete 선행 금지 — rename 은 Linux 에서 원자적 교체 (JobsPersistence 와 동일)
+            tmp.renameTo(f) || run { tmp.copyTo(f, overwrite = true); tmp.delete() }
+        }.onFailure { DebugLogger.w("Stats", "$name 저장 실패(무시 가능): ${it.message}") }
+    }
+
+    private fun savePeers() {
+        val sb = StringBuilder("{\"peakSeeds\":$peakSeeds,\"peakPeers\":$peakPeers,\"items\":[")
+        peerHistory.forEachIndexed { i, p ->
+            if (i > 0) sb.append(',')
+            sb.append("{\"t\":${p.t},\"s\":${p.seeds},\"p\":${p.peers}}")
         }
+        sb.append("]}")
+        writeAtomic(PEER_FILE, sb.toString())
     }
 
     private fun saveUptime() {
-        val f = f(UPTIME_FILE) ?: return
-        runCatching { f.writeText("{\"bootCount\":$bootCount,\"firstBootAt\":$firstBootAt,\"lastBootAt\":$lastBootAt}") }
+        writeAtomic(UPTIME_FILE, "{\"bootCount\":$bootCount,\"firstBootAt\":$firstBootAt,\"lastBootAt\":$lastBootAt}")
     }
 
     private fun saveStorage() {
-        val f = f(STORAGE_FILE) ?: return
-        runCatching {
-            val sb = StringBuilder("{\"days\":[")
-            storageDays.toSortedMap().values.forEachIndexed { i, s ->
-                if (i > 0) sb.append(',')
-                sb.append("{\"date\":\"${s.date}\",\"dirSize\":${s.dirSize},\"freeBytes\":${s.freeBytes},\"quotaMoved\":${s.quotaMoved}}")
-            }
-            sb.append("]}")
-            f.writeText(sb.toString())
+        val sb = StringBuilder("{\"days\":[")
+        storageDays.toSortedMap().values.forEachIndexed { i, s ->
+            if (i > 0) sb.append(',')
+            sb.append("{\"date\":\"${s.date}\",\"dirSize\":${s.dirSize},\"freeBytes\":${s.freeBytes},\"quotaMoved\":${s.quotaMoved}}")
         }
+        sb.append("]}")
+        writeAtomic(STORAGE_FILE, sb.toString())
     }
 
     private fun saveNet() {
-        val f = f(NET_FILE) ?: return
-        runCatching {
-            val sb = StringBuilder("{\"events\":[")
-            netEvents.forEachIndexed { i, e ->
-                if (i > 0) sb.append(',')
-                sb.append("{\"t\":${e.t},\"up\":${if (e.up) 1 else 0}}")
-            }
-            sb.append("]}")
-            f.writeText(sb.toString())
+        val sb = StringBuilder("{\"events\":[")
+        netEvents.forEachIndexed { i, e ->
+            if (i > 0) sb.append(',')
+            sb.append("{\"t\":${e.t},\"up\":${if (e.up) 1 else 0}}")
         }
+        sb.append("]}")
+        writeAtomic(NET_FILE, sb.toString())
     }
 
     private fun saveThrottle() {
-        val f = f(THROTTLE_FILE) ?: return
-        runCatching {
-            val sb = StringBuilder("{\"events\":[")
-            throttleEvents.forEachIndexed { i, e ->
-                if (i > 0) sb.append(',')
-                val r = e.reason.replace("\"", "")
-                sb.append("{\"t\":${e.t},\"on\":${if (e.on) 1 else 0},\"reason\":\"$r\"}")
-            }
-            sb.append("]}")
-            f.writeText(sb.toString())
+        val sb = StringBuilder("{\"events\":[")
+        throttleEvents.forEachIndexed { i, e ->
+            if (i > 0) sb.append(',')
+            val r = e.reason.replace("\"", "")
+            sb.append("{\"t\":${e.t},\"on\":${if (e.on) 1 else 0},\"reason\":\"$r\"}")
         }
+        sb.append("]}")
+        writeAtomic(THROTTLE_FILE, sb.toString())
     }
 
     private fun loadAll() {

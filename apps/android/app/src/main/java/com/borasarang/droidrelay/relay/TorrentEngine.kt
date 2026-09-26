@@ -9,6 +9,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.concurrent.TimeUnit
@@ -81,6 +82,45 @@ internal fun magnetInfoHash(magnet: String): String? {
 /** 동일 infohash의 .torrent 중복 추가 방지 (결함 #9) */
 class DuplicateTorrentException(val infoHash: String) : IllegalStateException("이미 다운로드 중인 토렌트입니다")
 
+/**
+ * **실제로 파일에 기록되는 필드만**으로 만든 영속화 서명.
+ *
+ * 기존 `lastSavedSnapshot != TorrentRepository.all()` 비교는 TorrentJob 이 data class
+ * 라 저장에 포함되지 않는 라이브 필드(seeds·peers·downloadSpeed·uploadSpeed·
+ * torrentFileBytes)까지 비교했다. 이 값들은 5초 폴링마다 갱신되므로
+ * "내용이 같다"는 가드가 영영 통과하지 못했고, 유휴 상태에서도 **바이트가 완전히
+ * 동일한 torrents.json 을 10초마다 다시 썼다**
+ * (실기기 로그로 확인 — `저장 완료 3건` 이 5~10초 간격으로 반복).
+ *
+ * TorrentPersistence.save 가 쓰는 필드와 1:1로 대응시켜야 한다.
+ */
+internal fun persistedSignature(torrents: List<TorrentJob>): String {
+    val sb = StringBuilder(64 + torrents.size * 48)
+    for (t in torrents) {
+        sb.append(t.id).append('|')
+            .append(t.infoHash).append('|')
+            .append(t.name).append('|')
+            .append(t.magnet).append('|')
+            .append(t.state.name).append('|')
+            .append(t.progress).append('|')
+            .append(t.totalSize).append('|')
+            .append(t.downloadedSize).append('|')
+            .append(t.order).append('|')
+            .append(t.uploadLimit).append('|')
+            .append(t.downloadLimit).append('|')
+            .append(t.savePath).append('|')
+            .append(t.startedAt).append('|')
+            .append(t.finishedAt).append('|')
+            .append(t.files.size)
+        for (f in t.files) {
+            sb.append('#').append(f.index).append(':').append(f.path).append(':')
+                .append(f.size).append(':').append(f.progress).append(':').append(f.selected)
+        }
+        sb.append(';')
+    }
+    return sb.toString()
+}
+
 class TorrentEngine(
     private val context: Context,
     private val settings: SettingsRepository,
@@ -93,6 +133,21 @@ class TorrentEngine(
     private val sessionGate = ReentrantLock()
     private inline fun <T> withGate(block: () -> T): T {
         sessionGate.lock()
+        return try { block() } finally { sessionGate.unlock() }
+    }
+
+    /**
+     * 읽기 전용 경로용 게이트 — 타임아웃 후 null 반환.
+     * withGate 는 무제한 대기라, /api/torrents 폴링이나 앱 UI 의 pause 버튼처럼
+     * 다른 스레드가 게이트를 쥔 상태에서 호출되면 호출자가 그만큼 붙잡힌다.
+     * UI(onClick) 에서 호출되면 메인 스레드가 멈춰 ANR 이 된다.
+     * 조회를 기다리는 것보다 최신 값을 덜 보여주는 편이 나으므로 탈락시킨다.
+     */
+    private inline fun <T> withGateRead(timeoutMs: Long = 2_000, block: () -> T): T? {
+        if (!sessionGate.tryLock(timeoutMs, TimeUnit.MILLISECONDS)) {
+            DebugLogger.w(TAG, "읽기 게이트 대기 초과(${timeoutMs}ms) — 스킵")
+            return null
+        }
         return try { block() } finally { sessionGate.unlock() }
     }
 
@@ -133,7 +188,12 @@ class TorrentEngine(
     /** 동기된 트래커를 핸들에 추가 — 도달 우선 최대 20개. 전체 try-catch (T-931 교훈). */
     internal fun applyExtraTrackers(id: String) {
         try {
-            if (!settings.firstBlocking().torrentTrackerSync) return
+            // 설정은 init 의 Flow 구독이 유지하는 스냅샷을 쓴다.
+            // 여기서 settings.firstBlocking() (runBlocking → DataStore 디스크 읽기) 을 부르면
+            // registerMapping → handleAlert → withGateAlert 경로에서
+            // sessionGate 를 쥔 채 alert 스레드가 블로킹되어
+            // 5초 폴러·모든 /api/torrents 라우트·UI 스레드가 그 동안 전부 대기한다.
+            if (!latestTrackerSync) return
             val extra = TrackerListProvider.getCached(context)
             if (extra.isEmpty()) return
             val th = handleMap[id] ?: return
@@ -265,6 +325,8 @@ class TorrentEngine(
     @Volatile private var latestSeedRatio: Float = 2.0f
     @Volatile private var latestDhtEnabled: Boolean = true
     @Volatile private var latestPexEnabled: Boolean = true
+    /** 트래커 동기 여부 — 게이트를 쥔 채 디스크를 읽지 않기 위해 스냅샷으로 유지 */
+    @Volatile private var latestTrackerSync: Boolean = true
     @Volatile private var latestSavePath: String = StorageGuard.dlRoot.path
     /** id → 시더 부재 대기 시작 시각(ms). 0이면 미측정 */
     private val seedWaitSince = ConcurrentHashMap<String, Long>()
@@ -276,16 +338,19 @@ class TorrentEngine(
     @Volatile private var latestMaxActive: Int = SettingsConstraints.DEFAULT_TORRENT_MAX_ACTIVE
     private val swigSettingCache = ConcurrentHashMap<String, Int>()
     private var lastPersistAt = 0L
-    private var lastSavedSnapshot: List<TorrentJob>? = null
+    /** 마지막 저장 시점의 "기록 대상 필드" 서명 (라이브 필드 제외) */
+    @Volatile private var lastSavedSnapshot: String? = null
     private fun persistNow() {
-        try { persistence.save(TorrentRepository.all()) } catch (_: Exception) {}
-        lastSavedSnapshot = TorrentRepository.all()
+        val all = TorrentRepository.all()
+        try { persistence.save(all) } catch (_: Exception) {}
+        lastSavedSnapshot = persistedSignature(all)
     }
     private fun persistDebounced() {
         val now = System.currentTimeMillis()
         if (now - lastPersistAt > 10_000) { // 10초 간격
-            // 내용이 마지막 저장본과 달라졌을 때만 저장 (T-845)
-            if (lastSavedSnapshot != TorrentRepository.all()) {
+            // 실제 기록 대상 필드가 달라졌을 때만 저장 (T-845 — 비교 기준이 잘못되어 무효였음)
+            val sig = persistedSignature(TorrentRepository.all())
+            if (lastSavedSnapshot != sig) {
                 lastPersistAt = now
                 persistNow()
             }
@@ -295,23 +360,32 @@ class TorrentEngine(
     init {
         scope.launch {
             settings.settings.collect { s ->
+                // 캐시 필드는 세션 유무와 무관하게 먼저 갱신해야 한다 —
+                // 세션이 아직 없으면 아래 apply* 들이 return 해도 폴링/추가는 최신값을 읽어야 한다.
                 latestUploadKbps = s.torrentUploadLimit
                 latestDownloadKbps = s.torrentDownloadLimit
                 latestSequentialDownload = s.torrentSequentialDownload
                 latestSeedRatio = s.torrentSeedRatio
                 latestDhtEnabled = s.torrentDhtEnabled
                 latestPexEnabled = s.torrentPexEnabled
+                latestTrackerSync = s.torrentTrackerSync
                 latestSavePath = s.torrentSavePath.ifBlank { StorageGuard.dlRoot.path }
                 latestStallEnabled = s.torrentStallEnabled
                 latestStallThresholdKbps = s.torrentStallThresholdKbps
                 latestStallTimeoutSec = s.torrentStallTimeoutSec
                 latestMaxActive = s.torrentMaxActive
+                // 누락됐던 필드: 시드 미확보 시 대기 시간. 이전엔 applySettings 안에서만 갱신돼
+                // 앱 설정 화면에서 바꿔도 반영되지 않았다.
+                torrentMinSeedWaitSec = s.torrentMinSeedWaitSec
                 DebugLogger.d(TAG, "설정 반영 업로드=${s.torrentUploadLimit}KB/s 다운로드=${s.torrentDownloadLimit}KB/s 시퀀셜=${s.torrentSequentialDownload} 비율=${s.torrentSeedRatio} DHT=${s.torrentDhtEnabled} PEX=${s.torrentPexEnabled} 정체=${s.torrentStallEnabled}(${s.torrentStallThresholdKbps}KB/s·${s.torrentStallTimeoutSec}초)")
                 applyRateLimits()
                 applySequentialToAll(s.torrentSequentialDownload)
                 applyDhtEnabled(s.torrentDhtEnabled)
                 applyPexEnabled(s.torrentPexEnabled)
                 applyStallSessionSettings(s)
+                // maxActive(torrentMaxActive) 반영 — 이것도 이전엔 applySettings 안에서만
+                // 갱신되어 앱 화면 변경분이 세션에 전달되지 않았다.
+                applySettings(s)
             }
         }
     }
@@ -423,6 +497,9 @@ class TorrentEngine(
     }
 
     fun stop() {
+        // scope 미취소 시 addMagnet/restore/설정 collector 코루틴이 살아남아 파괴된 세션에
+        // JNI 호출(네이티브 크래시)을 시도한다. stop() 은 마지막 정리 지점이다.
+        scope.cancel()
         withGate {
             statusPollingJob?.cancel()
             session?.stop()
@@ -818,7 +895,7 @@ val th = withGate { session?.find(Sha1Hash.parseHex(expectedHash)) }
         }
     }
 
-    /** 전체 설정 동적 적용 (재시작 불필요) */
+    /** 전체 설정 동적 적용 (재시작 불필요) — 앱·웹 공통 진입점 */
     fun applySettings(s: AppSettings) {
         withGate {
             // stop()과 레이스 방지 — 게이트 안에서 null 체크 (T-934 S4)
@@ -828,33 +905,12 @@ val th = withGate { session?.find(Sha1Hash.parseHex(expectedHash)) }
                 .connectionsLimit(200)
                 .maxPeerlistSize(5000)
             session.applySettings(sp)
-            applyStallSessionSettings(s)
-            applyPexEnabled(s.torrentPexEnabled)
+            DebugLogger.i(TAG, "토렌트 활성 한도 적용 maxActive=${s.torrentMaxActive}")
 
             // 리슨 포트 변경은 재시작 필요 — 로그만 남김
             if (s.torrentListenPort != 6881) {
                 DebugLogger.w(TAG, "listenPort(${s.torrentListenPort}) 변경은 서버 재시작 후 반영됩니다")
             }
-
-            // 속도 제한도 함께 적용
-            val upBps = if (s.torrentUploadLimit <= 0) 1024 else (s.torrentUploadLimit * 1024).coerceIn(1, Int.MAX_VALUE.toLong()).toInt()
-            val downBps = if (s.torrentDownloadLimit <= 0) 0 else (s.torrentDownloadLimit * 1024).coerceIn(0, Int.MAX_VALUE.toLong()).toInt()
-            try {
-                session.uploadRateLimit(upBps)
-                session.downloadRateLimit(downBps)
-            } catch (e: Exception) { DebugLogger.e(TAG, "토렌트 속도 제한 적용 실패", e) }
-            DebugLogger.i(TAG, "토렌트 설정 적용 maxActive=${s.torrentMaxActive} up=${if(s.torrentUploadLimit<=0) "끔" else "${s.torrentUploadLimit}KB/s"} down=${if(s.torrentDownloadLimit<=0) "무제한" else "${s.torrentDownloadLimit}KB/s"}")
-
-            // 시더 부재 자동 중단 대기 시간 (0 = 꺼짐)
-            torrentMinSeedWaitSec = s.torrentMinSeedWaitSec
-            latestSeedRatio = s.torrentSeedRatio
-            latestDhtEnabled = s.torrentDhtEnabled
-            latestSavePath = s.torrentSavePath.ifBlank { StorageGuard.dlRoot.path }
-            latestStallEnabled = s.torrentStallEnabled
-            latestStallThresholdKbps = s.torrentStallThresholdKbps
-            latestStallTimeoutSec = s.torrentStallTimeoutSec
-            latestMaxActive = s.torrentMaxActive
-            applyDhtEnabled(s.torrentDhtEnabled)
         }
     }
 
@@ -1184,18 +1240,18 @@ val th = withGate { session?.find(Sha1Hash.parseHex(expectedHash)) }
         DebugLogger.i(TAG, "발표 강제 id=$id (tracker+DHT)")
     }
 
-    /** 조각 정보: (보유 조각 수, 전체 조각 수) */
+    /** 조각 정보: (보유 조각 수, 전체 조각 수) — /api/torrents 가 토렌트마다 호출 (1Hz 폴링) */
     fun pieceInfo(id: String): Pair<Int, Int> {
         val th = handleMap[id] ?: return 0 to 0
         return try {
-            withGate {
+            withGateRead {
                 val status = th.status()
                 val tf = try { th.torrentFile() } catch (_: Exception) { null }
                 val total = tf?.numPieces() ?: 0
                 val pieceLen = tf?.pieceLength()?.toLong() ?: 0L
                 val done = if (pieceLen > 0) (((status.totalDone() + pieceLen - 1) / pieceLen).toInt()) else 0
                 done.coerceAtMost(total) to total
-            }
+            } ?: (0 to 0)
         } catch (_: Exception) {
             0 to 0
         }
@@ -1204,7 +1260,8 @@ val th = withGate { session?.find(Sha1Hash.parseHex(expectedHash)) }
     fun getPeers(id: String): List<Map<String, Any?>> {
         val th = handleMap[id] ?: return emptyList()
         return try {
-            withGate {
+            // peerInfo() 는 최대 5000개 네이티브 객체를 물리므로 게이트 보유 시간이 길다
+            withGateRead {
                 th.peerInfo().map { pi ->
                     mapOf(
                         "ip" to pi.ip(),
@@ -1218,7 +1275,7 @@ val th = withGate { session?.find(Sha1Hash.parseHex(expectedHash)) }
                         "connectionType" to (pi.connectionType()?.name ?: "unknown"),
                     )
                 }
-            }
+            } ?: emptyList()
         } catch (_: Exception) {
             emptyList()
         }
@@ -1228,14 +1285,14 @@ val th = withGate { session?.find(Sha1Hash.parseHex(expectedHash)) }
         val job = TorrentRepository.get(id) ?: return emptyMap()
         val th = handleMap[id]
         val status = if (th != null) {
-            try { withGate { th.status() } } catch (_: Exception) { null }
+            try { withGateRead { th.status() } } catch (_: Exception) { null }
         } else null
         val peers = getPeers(id)
         val seeders = peers.count { it["flags"]?.let { f -> (f as? Int)?.and(0x1) != 0 } ?: false }
         val leechers = peers.size - seeders
 
         val fileProgress = if (th != null) {
-            try { withGate { th.fileProgress() } } catch (_: Exception) { null }
+            try { withGateRead { th.fileProgress() } } catch (_: Exception) { null }
         } else null
 
         return mapOf(

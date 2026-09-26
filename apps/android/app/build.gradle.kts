@@ -103,6 +103,7 @@ dependencies {
     implementation(libs.okhttp)
     implementation(libs.ktor.server.core)
     implementation(libs.ktor.server.netty)
+    implementation(libs.ktor.server.status.pages)
     implementation("io.ktor:ktor-io:3.5.2")
     implementation(libs.zxing.core)
     implementation(libs.libtorrent4j)

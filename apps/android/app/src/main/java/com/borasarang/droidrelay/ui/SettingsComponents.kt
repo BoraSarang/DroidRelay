@@ -30,6 +30,7 @@ import com.borasarang.droidrelay.relay.DebugLogger
 import com.borasarang.droidrelay.relay.RelayApp
 import com.borasarang.droidrelay.relay.SettingsConstraints
 import com.borasarang.droidrelay.relay.SettingsRepository
+import com.borasarang.droidrelay.relay.SettingsResetter
 import kotlinx.coroutines.launch
 
 @Composable
@@ -149,55 +150,10 @@ private fun <T> SpeedPresetDialog(
 
 internal fun resetSettings(ctx: android.content.Context, repo: SettingsRepository, category: String) {
     DebugLogger.w("Settings", "설정 기본값 복원 진행 category=$category")
-    val scope = kotlinx.coroutines.MainScope()
-    when (category) {
-        "download" -> scope.launch {
-            repo.setConcurrency(SettingsConstraints.DEFAULT_CONCURRENCY)
-            repo.setSpeedLimit(0)
-            repo.setNotifications(true)
-            repo.setSpeedSchedule(emptyList())
-            repo.setCompletionAction(SettingsConstraints.COMPLETION_ACTION_NONE)
-            RelayApp.get(ctx).applySettings(repo.firstBlocking())
-        }
-        "torrent" -> scope.launch {
-            repo.setTorrentUploadLimit(SettingsConstraints.DEFAULT_TORRENT_UPLOAD_KBPS)
-            repo.setTorrentDownloadLimit(SettingsConstraints.DEFAULT_TORRENT_DOWNLOAD_KBPS)
-            repo.setTorrentMaxActive(SettingsConstraints.DEFAULT_TORRENT_MAX_ACTIVE)
-            repo.setTorrentSeedRatio(2.0f)
-            repo.setTorrentDhtEnabled(true)
-            repo.setTorrentPexEnabled(true)
-            repo.setTorrentListenPort(SettingsConstraints.randomEphemeralPort())
-                repo.setTorrentSavePath(com.borasarang.droidrelay.relay.StorageGuard.dlRoot.path)
-            repo.setTorrentStallEnabled(SettingsConstraints.DEFAULT_TORRENT_STALL_ENABLED)
-            repo.setTorrentStallThresholdKbps(SettingsConstraints.DEFAULT_TORRENT_STALL_THRESHOLD_KBPS)
-            repo.setTorrentStallTimeoutSec(SettingsConstraints.DEFAULT_TORRENT_STALL_TIMEOUT_SEC)
-            RelayApp.getTorrent(ctx).applySettings(repo.firstBlocking())
-        }
-        "all" -> {
-            scope.launch {
-                repo.setConcurrency(SettingsConstraints.DEFAULT_CONCURRENCY)
-                repo.setSpeedLimit(0)
-                repo.setNotifications(true)
-                repo.setSpeedSchedule(emptyList())
-                repo.setCompletionAction(SettingsConstraints.COMPLETION_ACTION_NONE)
-                RelayApp.get(ctx).applySettings(repo.firstBlocking())
-            }
-            scope.launch {
-                repo.setTorrentUploadLimit(SettingsConstraints.DEFAULT_TORRENT_UPLOAD_KBPS)
-                repo.setTorrentDownloadLimit(SettingsConstraints.DEFAULT_TORRENT_DOWNLOAD_KBPS)
-                repo.setTorrentMaxActive(SettingsConstraints.DEFAULT_TORRENT_MAX_ACTIVE)
-                repo.setTorrentSeedRatio(2.0f)
-                repo.setTorrentDhtEnabled(true)
-                repo.setTorrentPexEnabled(true)
-                repo.setTorrentListenPort(SettingsConstraints.randomEphemeralPort())
-                repo.setTorrentSavePath(com.borasarang.droidrelay.relay.StorageGuard.dlRoot.path)
-                repo.setTorrentStallEnabled(SettingsConstraints.DEFAULT_TORRENT_STALL_ENABLED)
-                repo.setTorrentStallThresholdKbps(SettingsConstraints.DEFAULT_TORRENT_STALL_THRESHOLD_KBPS)
-                repo.setTorrentStallTimeoutSec(SettingsConstraints.DEFAULT_TORRENT_STALL_TIMEOUT_SEC)
-                RelayApp.getTorrent(ctx).applySettings(repo.firstBlocking())
-            }
-        }
-    }
+    // 호출부가 만든 MainScope 는 취소되지 않아 누수되고, firstBlocking() 이 메인 스레드에서
+    // DataStore 읽기를 블로킹했다. 단일 구현(SettingsResetter)으로 통합.
+    kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO)
+        .launch { SettingsResetter.reset(ctx, repo, category) }
 }
 
 /** 트래커 도달성 측정 행 (v0.26) */

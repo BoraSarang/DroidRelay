@@ -1784,23 +1784,48 @@ function torrentDelConfirm(id){
   });
 })();
 // ── 실시간 갱신: SSE 우선(T-701), 실패 시 1초 폴링 폴백 ──
+// 서버가 변경이 있을 때만 tick 을 보내므로 기본 폴링은 10초 백업으로 완화.
+// 탭이 백그라운드로 가면 EventSource 는 브라우저가 throttle 하지 않으므로
+// visibilitychange 에서 연결·타이머를 모두 정리해 서버 측 부하를 0 으로 만든다.
 var __pollTimer=null;
-function setPoll(ms){if(__pollTimer)clearInterval(__pollTimer);__pollTimer=setInterval(refresh,ms);}
+function setPoll(ms){
+  if(__pollTimer)clearInterval(__pollTimer);
+  __pollTimer=ms?setInterval(refresh,ms):null;
+}
+var __es=null,__rcTimer=null,__rcCount=0;
+function closeStream(){
+  if(__es){try{__es.close();}catch(e){}__es=null;}
+  if(__rcTimer){clearTimeout(__rcTimer);__rcTimer=null;}
+  setPoll(0);
+}
 (function(){
-  refresh();
-  if(!window.EventSource){setPoll(1000);return;}
-  var es=null;
+  if(!window.EventSource){if(!document.hidden)setPoll(1000);return;}
   function connect(){
-    try{es=new EventSource('/api/events');}catch(e){setPoll(1000);return;}
-    es.onopen=function(){setPoll(10000);};   // SSE 연결 시 백업 폴링 완화
-    es.onmessage=function(){refresh();};
-    es.onerror=function(){
-      if(es){es.close();es=null;}
+    if(document.hidden||__es)return;
+    try{__es=new EventSource('/api/events');}catch(e){scheduleReconnect();return;}
+    __es.onopen=function(){__rcCount=0;setPoll(10000);};   // SSE 연결 시 백업 폴링 완화
+    __es.onmessage=function(){refresh();};
+    __es.onerror=function(){
+      if(__es){try{__es.close();}catch(e){}__es=null;}
+      if(document.hidden)return;
       setPoll(1000);                          // 끊김 → 1초 폴링
-      setTimeout(connect,5000);               // 5초 후 재시도
+      scheduleReconnect();
     };
   }
-  connect();
+  // 지수 백오프 + 지터. 고정 5초 재시도였을 때 서버 재시작 순간 전 탭이 동시에 12회/분 시도했다.
+  // 이전 시도 타이머를 반드시 지우고 기존 es 를 닫아 고아 연결(서버 측 SSE 코루틴 누수)을 막는다.
+  function scheduleReconnect(){
+    if(__rcTimer)clearTimeout(__rcTimer);
+    var wait=Math.min(60000,1000*Math.pow(2,__rcCount))+Math.random()*500;
+    __rcCount=Math.min(__rcCount+1,6);
+    __rcTimer=setTimeout(function(){__rcTimer=null;connect();},wait);
+  }
+  document.addEventListener('visibilitychange',function(){
+    if(document.hidden){closeStream();}
+    else{refresh();connect();}
+  });
+  window.addEventListener('pagehide',closeStream);
+  if(!document.hidden)connect();
 })();
 
 // ── 헤더: 수동 새로고침 + 테마 (v0.27) ──
@@ -2139,7 +2164,9 @@ function toggleSpeedLimit(type){
   input.disabled=!enabled;
   if(enabled){
     var bps=speedInputBps(type,input);
-    saveSpeedLimit(type==='dl'?bps:0, type==='ul'?bps:0);
+    // 한쪽만 보낸다 — 이전엔 반대편에 0을 함께 보내서
+    // "다운로드 제한 켜기"가 업로드 제한까지 0(끔)으로 덮어썼다.
+    saveSpeedLimit(type==='dl'?bps:undefined, type==='ul'?bps:undefined);
   }else{
     saveSpeedLimit(type==='dl'?0:undefined, type==='ul'?0:undefined);
   }

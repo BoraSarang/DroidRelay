@@ -27,13 +27,25 @@ object CronParser {
     }
 
     fun matches(cron: String, minute: Int, hour: Int, dayOfMonth: Int, month: Int, dayOfWeek: Int): Boolean {
-        val parts = cron.trim().split("\\s+".toRegex())
-        if (parts.size != 5) return false
-        return matchesField(parts[0], minute, 0, 59)
-            && matchesField(parts[1], hour, 0, 23)
-            && matchesField(parts[2], dayOfMonth, 1, 31)
-            && matchesField(parts[3], month, 1, 12)
-            && matchesField(parts[4], dayOfWeek, 1, 7)
+        val fields = parse(cron) ?: return false
+        return matchesField(fields[0], minute, 0, 59)
+            && matchesField(fields[1], hour, 0, 23)
+            && matchesField(fields[2], dayOfMonth, 1, 31)
+            && matchesField(fields[3], month, 1, 12)
+            && matchesField(fields[4], dayOfWeek, 1, 7)
+    }
+
+    /**
+     * 5필드 분리 — 루프 밖에서 한 번만.
+     * 이전 구현은 matches() 가 호출될 때마다 `split("\\s+".toRegex())` 로
+     * 새 Regex 를 컴파일했다. msUntilNextMatch 는 최대 10,080회 matches 를 호출하므로
+     * 루프 안에서 10,080번의 정규식 컴파일 + split 이 발생했고,
+     * isValid() 가 앱 설정 화면의 onValueChange(키 입력마다)에서 호출되어
+     * 문자 한 글자마다 메인 스레드가 멈췄다.
+     */
+    private fun parse(cron: String): List<String>? {
+        val parts = cron.trim().split(WHITESPACE)
+        return if (parts.size == 5) parts else null
     }
 
     private fun matchesField(field: String, value: Int, min: Int, max: Int): Boolean {
@@ -59,8 +71,8 @@ object CronParser {
      * 크론이 유효하지 않으면 -1 반환.
      */
     fun msUntilNextMatch(cron: String): Long {
-        val parts = cron.trim().split("\\s+".toRegex())
-        if (parts.size != 5) return -1
+        // 필드 분리는 1회 — matches() 가 10,080회 호출되어도 다시 나누지 않는다
+        val fields = parse(cron) ?: return -1
 
         val now = Calendar.getInstance()
         val check = now.clone() as Calendar
@@ -70,9 +82,12 @@ object CronParser {
 
         // 최대 7일(10080분) 탐색
         for (i in 0 until 10080) {
-            if (matches(cron, check.get(Calendar.MINUTE), check.get(Calendar.HOUR_OF_DAY),
-                    check.get(Calendar.DAY_OF_MONTH), check.get(Calendar.MONTH) + 1,
-                    check.get(Calendar.DAY_OF_WEEK))) {
+            if (matchesField(fields[0], check.get(Calendar.MINUTE), 0, 59) &&
+                matchesField(fields[1], check.get(Calendar.HOUR_OF_DAY), 0, 23) &&
+                matchesField(fields[2], check.get(Calendar.DAY_OF_MONTH), 1, 31) &&
+                matchesField(fields[3], check.get(Calendar.MONTH) + 1, 1, 12) &&
+                matchesField(fields[4], check.get(Calendar.DAY_OF_WEEK), 1, 7)
+            ) {
                 return check.timeInMillis - now.timeInMillis
             }
             check.add(Calendar.MINUTE, 1)
@@ -81,7 +96,10 @@ object CronParser {
     }
 
     fun isValid(cron: String): Boolean {
-        val parts = cron.trim().split("\\s+".toRegex())
-        return parts.size == 5 && msUntilNextMatch(cron) >= 0
+        // 필드 수 검사를 먼저 — 5필드가 아니면 탐색 자체가 불필요하다
+        parse(cron) ?: return false
+        return msUntilNextMatch(cron) >= 0
     }
+
+    private val WHITESPACE = Regex("\\s+")
 }

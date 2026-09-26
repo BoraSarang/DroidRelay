@@ -17,7 +17,9 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import com.borasarang.droidrelay.relay.TorrentRepository
 import com.borasarang.droidrelay.relay.TorrentState
 import kotlinx.coroutines.launch
@@ -88,32 +90,34 @@ class RelayService : Service() {
         DebugLogger.i(TAG, "가드 데몬 시작 완료")
 
         // 가드 상태 변경 시 다운로드 일시정지/재개
+        // 이 콜백은 GuardDaemon 의 IO 스코프에서 호출되고 호출부에 예외 처리가 없다 —
+        // 항목 하나가 throw 하면 프로세스 사망이므로 항목별로 격리한다.
         guard.onThrottleChange = { throttled, reason ->
             DebugLogger.i(TAG, "가드 상태 변경 throttled=$throttled reason=$reason")
             if (throttled) {
                 // 실행 중인 다운로드 일시정지
                 JobsRepository.jobs.value.forEach { j ->
                     if (j.state == JobState.RUNNING) {
-                        engine.pause(j.id)
+                        runCatching { engine.pause(j.id) }
                     }
                 }
                 // 토렌트도 함께 스로틀 (결함 #5)
                 TorrentRepository.all().forEach { t ->
                     if (t.state == TorrentState.DOWNLOADING || t.state == TorrentState.SEEDING) {
-                        torrentEng.pause(t.id)
+                        runCatching { torrentEng.pause(t.id) }
                     }
                 }
             } else {
                 // 가드가 pause한 잡(PAUSED)과 실패 잡을 재개 — retryFailed만으로는 일시정지가 풀리지 않음
-                engine.retryFailed()
+                runCatching { engine.retryFailed() }
                 JobsRepository.jobs.value.forEach { j ->
                     if (j.state == JobState.PAUSED) {
-                        engine.resume(j.id)
+                        runCatching { engine.resume(j.id) }
                     }
                 }
                 TorrentRepository.all().forEach { t ->
                     if (t.state == TorrentState.PAUSED) {
-                        torrentEng.resume(t.id)
+                        runCatching { torrentEng.resume(t.id) }
                     }
                 }
             }
@@ -128,6 +132,29 @@ class RelayService : Service() {
         val tunnel = TunnelManager(applicationContext)
         tunnelManager = tunnel
         DebugLogger.i(TAG, "터널 매니저 시작 완료")
+
+        // ⓪ 터널 설정 감시 — 이전에는 TunnelManager.start() 호출이 어디에도 없어
+        // "터널 사용" 스위치와 프로바이더 선택이 저장만 되고 아무 일도 일어나지 않았다.
+        // 이제 설정을 실제로 구독해 켜면 시작·끄면 중지한다.
+        scope.launch {
+            settingsRepo.settings
+                .map { it.tunnelEnabled to it.tunnelProvider }
+                .distinctUntilChanged()
+                .collect { (enabled, provider) ->
+                    if (!enabled) {
+                        runCatching { tunnel.stop() }
+                        DebugLogger.i(TAG, "터널 비활성 — 중지됨")
+                    } else {
+                        val r = tunnel.start(settingsRepo.firstBlocking())
+                        if (r.success) {
+                            DebugLogger.i(TAG, "터널 시작 성공 provider=$provider ${r.message}")
+                        } else {
+                            // 바이너리 미설치 등으로 실패 — 스위치는 켜진 채 유지하고 사유를 로그로 남긴다
+                            DebugLogger.w(TAG, "터널 시작 실패 provider=$provider: ${r.message}")
+                        }
+                    }
+                }
+        }
 
         // 스케줄러 시작 (Phase 3)
         val scheduler = SchedulerManager(applicationContext)
@@ -256,7 +283,10 @@ class RelayService : Service() {
                         }
                         failStreak = 0
                         DebugLogger.w(TAG, "watchdog: 서버 무응답 ${WATCHDOG_FAIL_STREAK}회 연속 → 재시작")
-                        current.restart()
+                        // 재시작은 그 자체로 실패할 수 있다(FFmpeg 세션 cancel 등). 예외가 튀면
+                        // 이 while 루프 — 즉 재시작을 담당하는 watchdog 자체가 죽는다.
+                        runCatching { current.restart() }
+                            .onFailure { DebugLogger.e(TAG, "watchdog 재시작 실패: ${it.message}") }
                     }
                 }
             }
@@ -456,7 +486,7 @@ class RelayService : Service() {
         super.onDestroy()
     }
 
-    /** 강제종료 직전 상태 저장 (onTaskRemoved = 사용자가 앱 스와이프/終了 시) */
+    /** 강제종료 직전 상태 저장 (onTaskRemoved = 사용자가 앱 스와이프 종료 시) */
     override fun onTaskRemoved(rootIntent: Intent?) {
         DebugLogger.i(TAG, "onTaskRemoved → 즉시 영구 저장")
         val jobs = com.borasarang.droidrelay.relay.JobsRepository.all()

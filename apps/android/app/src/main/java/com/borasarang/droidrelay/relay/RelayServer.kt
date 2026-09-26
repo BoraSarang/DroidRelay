@@ -18,7 +18,9 @@ import io.ktor.server.engine.applicationEnvironment
 import io.ktor.server.engine.connector
 import io.ktor.server.engine.embeddedServer
 import io.ktor.server.engine.sslConnector
+import io.ktor.server.application.install
 import io.ktor.server.plugins.origin
+import io.ktor.server.plugins.statuspages.StatusPages
 import io.ktor.server.request.path
 import io.ktor.server.request.httpMethod
 import io.ktor.server.request.receiveText
@@ -239,6 +241,8 @@ class RelayServer(
     }
 
     @Volatile private var server: EmbeddedServer<NettyApplicationEngine, NettyApplicationEngine.Configuration>? = null
+    /** 기동 성공을 명시적으로 기록 — watchdog 헬스체크가 루프백 HTTP 없이 판정한다 */
+    @Volatile private var started = false
     @Volatile var settings: AppSettings = AppSettings()
 
     /** 실제 HTTPS 바인드 포트 — HTTP와 같으면 +1 회피 (v0.34, UI 충돌검사와 이중 방어) */
@@ -260,12 +264,14 @@ class RelayServer(
         return runCatching {
             s.start(wait = false)
             server = s
+            started = true
             val httpsPart = if (settings.httpsEnabled) " + https://0.0.0.0:$effectiveHttpsPort" else " (HTTPS 끔)"
             DebugLogger.i("Server", "[FEATURE] HTTPS 포트 기동 완료 http://0.0.0.0:$port$httpsPart (LAN=${lanAddress() ?: "?"})")
             true
         }.onFailure { e ->
             DebugLogger.e("Server", "서버 시작 실패 E-SRV-NET-1421 ${e.message}")
             server = null
+            started = false
             runCatching { s.stop(gracePeriodMillis = 0, timeoutMillis = 500) }
         }.getOrDefault(false)
     }
@@ -274,11 +280,22 @@ class RelayServer(
         RelayApp.video?.stopAll()
         runCatching { server?.stop(gracePeriodMillis = 500, timeoutMillis = 1500) }
         server = null
+        started = false
         DebugLogger.i("Server", "서버 정지")
     }
 
-    /** 서버가 실제로 요청을 응답하는지 루프백 헬스체크 (watchdog용) */
-    fun isHealthy(timeoutMs: Int = 1500): Boolean {
+    /**
+     * watchdog용 헬스체크.
+     * 서버가 기동 상태로 기록돼 있고 종료되지 않았는지만 확인한다 —
+     * 루프백 HTTP 요청은 Ktor 파이프라인 전체를 통과하며 /api/info 핸들러
+     * (PackageManager binder + StatFs + JSON 직렬화)까지 실행하므로
+     * 무활동 상태에서도 분당 1회 불필요한 왕복을 만든다.
+     * 전체 파이프라인을 실제로 확인해야 하는 경우 isHealthyHttp 을 쓴다(수동 점검용).
+     */
+    fun isHealthy(): Boolean = started
+
+    /** 실제 HTTP 왕복을 포함한 헬스체크 — 진단용 (watchdog 주기는 isHealthy 사용) */
+    fun isHealthyHttp(timeoutMs: Int = 1500): Boolean {
         if (server == null) return false
         return try {
             val conn = java.net.URL("http://127.0.0.1:$port/api/info").openConnection() as java.net.HttpURLConnection
@@ -297,13 +314,18 @@ class RelayServer(
     /** watchdog용 재시작 — 현재 서버를 내리고 새로 띄운다. */
     fun restart() {
         DebugLogger.i("Server", "watchdog 재시작 시작")
-        stop()
+        // stop() 은 FFmpeg 세션 cancel 등 네이티브 정리에서 throw 할 수 있다.
+        // 그 예외가 위로 새면 서버가 내리고도 다시 뜨지 않는 최악 상태가 된다.
+        runCatching { stop() }
+            .onFailure { DebugLogger.e("Server", "watchdog 재시작: stop 실패 ${it.message}") }
         runCatching {
             server = createServer().also { it.start(wait = false) }
+            started = true
             DebugLogger.i("Server", "watchdog 재시작 완료 http://0.0.0.0:$port")
         }.onFailure { e ->
             DebugLogger.e("Server", "watchdog 재시작 실패 ${e.message}")
             server = null
+            started = false
         }
     }
 
@@ -390,6 +412,25 @@ private fun sameSubnetAsLocal(host: String): Boolean {
 }
 
 private fun Application.relayRoutes(context: Context, serverRef: RelayServer) {
+    // ── 전역 예외 안전망 ──
+    // StatusPages 가 없으면 라우트에서 throw 한 예외가 Netty 기본 핸들러로 새어나가
+    // 클라이언트는 "응답 본문 없는 연결 끊김"을 받고 서버 로그에도 원인이 남지 않는다.
+    // (예: org.json.JSONException — 본문 "x" 로 POST /api/storage/mkdir 호출 시)
+    install(StatusPages) {
+        exception<Throwable> { call, cause ->
+            // 코루틴 취소는 오류가 아니다 — 그대로 재던져야 폴링/스트림 루프가 정지한다
+            if (cause is kotlinx.coroutines.CancellationException) throw cause
+            DebugLogger.e("Http", "미처리 예외 ${call.request.httpMethod.value} ${runCatching { call.request.path() }.getOrDefault("?")}: ${cause.javaClass.simpleName} ${cause.message}")
+            if (!call.response.isCommitted) {
+                call.respondText(
+                    """{"error":"server_error","detail":"${cause.javaClass.simpleName}"}""",
+                    ContentType.Application.Json,
+                    HttpStatusCode.InternalServerError,
+                )
+            }
+        }
+    }
+
     // 보안 파이프라인: HTTP→HTTPS → IP 게이트 → Basic Auth
     intercept(ApplicationCallPipeline.Plugins) {
         val s = serverRef.settings

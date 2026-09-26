@@ -16,13 +16,18 @@ import org.json.JSONObject
 
 /** 설정·RSS·Debrid·가드·웹훅·터널·MCP·스케줄 라우트 (T-936 D1 — RelayServer에서 분리) */
 internal fun Route.settingsRoutes(context: Context, serverRef: RelayServer) {
+    // 앱 버전은 실행 중 불변 — 대시보드가 폴링마다 /api/info 를 부르므로
+    // getPackageInfo(시스템 서버 binder 왕복)를 매번 할 필요가 없다.
+    val appVersionLazy = lazy {
+        runCatching {
+            context.packageManager.getPackageInfo(context.packageName, 0).versionName
+        }.getOrNull() ?: "0.5.0"
+    }
     get("/api/info") {
         val dir = RelayApp.get(context).workDir
         val stat = runCatching { StatFs(dir.path) }.getOrNull()
         val jobs = JobsRepository.all()
-        val appVersion = runCatching {
-            context.packageManager.getPackageInfo(context.packageName, 0).versionName
-        }.getOrNull() ?: "0.5.0"
+        val appVersion = appVersionLazy.value
         val info = JSONObject().apply {
             put("ip", lanAddress() ?: JSONObject.NULL)
             put("port", serverRef.port)
@@ -303,68 +308,13 @@ internal fun Route.settingsRoutes(context: Context, serverRef: RelayServer) {
     }
 
     // ── 설정 리셋 (기본값 복원) ──
+    // 앱(SettingsComponents.resetSettings)과 키 집합을 공유한다 — 두 구현이 어긋나 있었다.
     post("/api/settings/reset") {
         val body = call.receiveText()
         val json = try { JSONObject(body) } catch (_: Exception) { JSONObject() }
         val category = json.optString("category", "all")
         val repo = SettingsRepository.get(context)
-        val ctx = context
-        when (category) {
-            "download" -> {
-                repo.setConcurrency(SettingsConstraints.DEFAULT_CONCURRENCY)
-                repo.setSpeedLimit(0)
-                repo.setNotifications(true)
-                repo.setStorageQuotaGb(0)
-                repo.setAutoClassify(false)
-                repo.setSpeedSchedule(emptyList())
-                repo.setCompletionAction(SettingsConstraints.COMPLETION_ACTION_NONE)
-                RelayApp.get(ctx).applySettings(repo.firstBlocking())
-            }
-            "torrent" -> {
-                repo.setTorrentUploadLimit(SettingsConstraints.DEFAULT_TORRENT_UPLOAD_KBPS)
-                repo.setTorrentDownloadLimit(SettingsConstraints.DEFAULT_TORRENT_DOWNLOAD_KBPS)
-                repo.setTorrentMaxActive(SettingsConstraints.DEFAULT_TORRENT_MAX_ACTIVE)
-                repo.setTorrentSeedRatio(2.0f)
-                repo.setTorrentDhtEnabled(true)
-                repo.setTorrentPexEnabled(true)
-                repo.setTorrentListenPort(SettingsConstraints.randomEphemeralPort())
-                repo.setTorrentSavePath(StorageGuard.dlRoot.path)
-                repo.setTorrentTrackerSync(true)
-                repo.setTorrentStallEnabled(SettingsConstraints.DEFAULT_TORRENT_STALL_ENABLED)
-                repo.setTorrentStallThresholdKbps(SettingsConstraints.DEFAULT_TORRENT_STALL_THRESHOLD_KBPS)
-                repo.setTorrentStallTimeoutSec(SettingsConstraints.DEFAULT_TORRENT_STALL_TIMEOUT_SEC)
-                repo.setSearchEnabled(false)
-                repo.setSearchUrl("")
-                repo.setSearchApiKey("")
-                RelayApp.getTorrent(ctx).applySettings(repo.firstBlocking())
-            }
-            else -> {
-                repo.setConcurrency(SettingsConstraints.DEFAULT_CONCURRENCY)
-                repo.setSpeedLimit(0)
-                repo.setNotifications(true)
-                repo.setStorageQuotaGb(0)
-                repo.setAutoClassify(false)
-                repo.setSpeedSchedule(emptyList())
-                repo.setCompletionAction(SettingsConstraints.COMPLETION_ACTION_NONE)
-                repo.setTorrentUploadLimit(SettingsConstraints.DEFAULT_TORRENT_UPLOAD_KBPS)
-                repo.setTorrentDownloadLimit(SettingsConstraints.DEFAULT_TORRENT_DOWNLOAD_KBPS)
-                repo.setTorrentMaxActive(SettingsConstraints.DEFAULT_TORRENT_MAX_ACTIVE)
-                repo.setTorrentSeedRatio(2.0f)
-                repo.setTorrentDhtEnabled(true)
-                repo.setTorrentPexEnabled(true)
-                repo.setTorrentTrackerSync(true)
-                repo.setTorrentStallEnabled(SettingsConstraints.DEFAULT_TORRENT_STALL_ENABLED)
-                repo.setTorrentStallThresholdKbps(SettingsConstraints.DEFAULT_TORRENT_STALL_THRESHOLD_KBPS)
-                repo.setTorrentStallTimeoutSec(SettingsConstraints.DEFAULT_TORRENT_STALL_TIMEOUT_SEC)
-                repo.setTorrentListenPort(SettingsConstraints.randomEphemeralPort())
-                repo.setTorrentSavePath(StorageGuard.dlRoot.path)
-                repo.setSearchEnabled(false)
-                repo.setSearchUrl("")
-                repo.setSearchApiKey("")
-                RelayApp.get(ctx).applySettings(repo.firstBlocking())
-                RelayApp.getTorrent(ctx).applySettings(repo.firstBlocking())
-            }
-        }
+        SettingsResetter.reset(context, repo, category)
         serverRef.settings = repo.firstBlocking()
         call.respondText("""{"ok":true}""", ContentType.Application.Json)
     }
@@ -602,27 +552,19 @@ internal fun Route.settingsRoutes(context: Context, serverRef: RelayServer) {
 
     // ── 가드 데몬 상태 ──
     get("/api/guard/status") {
-        val ctx = context
-        val thermal = try {
-            val file = java.io.File("/sys/class/thermal/thermal_zone0/temp")
-            if (file.exists()) (file.readText().trim().toIntOrNull() ?: 0) / 1000 else 0
-        } catch (_: Exception) { 0 }
-
-        val batteryManager = ctx.getSystemService(android.content.Context.BATTERY_SERVICE) as? android.os.BatteryManager
-        val batteryLevel = batteryManager?.getIntProperty(android.os.BatteryManager.BATTERY_PROPERTY_CAPACITY) ?: -1
-
-        val storageDir = StorageGuard.dlRoot
-        val storageUsed = if (storageDir.exists()) {
-            val total = storageDir.totalSpace
-            val free = storageDir.freeSpace
-            if (total > 0) ((total - free) * 100 / total).toInt() else 0
-        } else 0
+        // 센서는 15초 공유 캐시를 쓴다 — 대시보드가 매 tick 호출하므로
+        // 매번 sysfs read + BatteryManager binder IPC + statfs64 2회를 하면 분당 60회 시스템콜.
+        // 임계치는 데몬의 5분 설정 캐시가 아니라 항상 최신 settings 로 계산한다.
+        val sensors = GuardSensorCache.read(context)
+        val thermal = sensors.thermal
+        val batteryLevel = sensors.batteryLevel
+        val storageUsed = sensors.storageUsed
 
         val s = serverRef.settings
         val throttled = s.guardEnabled && (
-            (thermal > s.guardThermalLimit) ||
-                (batteryLevel in 0..s.guardBatteryLimit) ||
-                (storageUsed > s.guardStorageLimit)
+            (s.guardThermalLimit > 0 && thermal > s.guardThermalLimit) ||
+                (s.guardBatteryLimit > 0 && batteryLevel in 0..s.guardBatteryLimit) ||
+                (s.guardStorageLimit > 0 && storageUsed > s.guardStorageLimit)
             )
 
         call.respondText(

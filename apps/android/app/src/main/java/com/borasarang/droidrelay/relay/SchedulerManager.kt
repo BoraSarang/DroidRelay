@@ -24,7 +24,11 @@ import kotlinx.coroutines.launch
 class SchedulerManager(private val context: Context) {
 
     private val TAG = "Scheduler"
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    // stop() 이 scope 를 cancel 하므로 start() 에서 다시 만들어야 한다.
+    // 생성자 소유 스코프를 그대로 재사용하면 stop() → start() 후
+    // launch 가 취소된 스코프에 들어가 루프가 한 번도 돌지 않고
+    // 예약 자체가 조용히 사라진다 (로그조차 없음).
+    @Volatile private var scope: CoroutineScope? = null
     @Volatile private var running = false
 
     private var settingsRepo: SettingsRepository? = null
@@ -33,9 +37,11 @@ class SchedulerManager(private val context: Context) {
         if (running) return
         this.settingsRepo = settingsRepo
         running = true
+        val sc = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        scope = sc
         DebugLogger.i(TAG, "스케줄러 시작")
 
-        scope.launch {
+        sc.launch {
             settingsRepo.settings.collect { s ->
                 if (s.scheduleEnabled && s.scheduleCron.isNotBlank()) {
                     scheduleNext(s)
@@ -49,7 +55,8 @@ class SchedulerManager(private val context: Context) {
     fun stop() {
         running = false
         cancelJob()
-        scope.cancel()
+        scope?.cancel()
+        scope = null
         DebugLogger.i(TAG, "스케줄러 중지")
     }
 

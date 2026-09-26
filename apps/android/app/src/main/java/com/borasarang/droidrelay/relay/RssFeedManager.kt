@@ -34,7 +34,9 @@ class RssFeedManager(
         pollingJob = scope.launch {
             DebugLogger.i(TAG, "RSS 폴링 시작 (15분 간격)")
             while (isRunning) {
-                checkAllFeeds()
+                // 한 번의 실패로 15분 폴링이 영구 정지하지 않도록 tick 단위로 방어
+                runCatching { checkAllFeeds() }
+                    .onFailure { DebugLogger.e(TAG, "RSS 폴링 tick 실패 (계속)", it) }
                 delay(15 * 60 * 1000L) // 15분
             }
         }
@@ -265,7 +267,12 @@ class RssFeedManager(
         if (regex.isNotBlank()) {
             try {
                 if (!Regex(regex).containsMatchIn(text)) return false
-            } catch (_: Exception) { }
+            } catch (e: Throwable) {
+                // StackOverflowError 는 Exception 이 아니라 Error — catch(Exception) 은 통과시킨다.
+                // 중첩 그룹이 깊은 사용자 정규식 하나가 RSS 폴링 스레드 전체를 죽이고,
+                // catastrophic backtracking("(a+)+b") 은 이 루프를 영구 정지시킨다.
+                DebugLogger.w(TAG, "필터 정규식 무효 (무시): ${e.javaClass.simpleName}")
+            }
         }
         return true
     }
