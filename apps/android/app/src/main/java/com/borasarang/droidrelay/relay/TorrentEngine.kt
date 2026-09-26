@@ -82,6 +82,45 @@ internal fun magnetInfoHash(magnet: String): String? {
 /** 동일 infohash의 .torrent 중복 추가 방지 (결함 #9) */
 class DuplicateTorrentException(val infoHash: String) : IllegalStateException("이미 다운로드 중인 토렌트입니다")
 
+/**
+ * **실제로 파일에 기록되는 필드만**으로 만든 영속화 서명.
+ *
+ * 기존 `lastSavedSnapshot != TorrentRepository.all()` 비교는 TorrentJob 이 data class
+ * 라 저장에 포함되지 않는 라이브 필드(seeds·peers·downloadSpeed·uploadSpeed·
+ * torrentFileBytes)까지 비교했다. 이 값들은 5초 폴링마다 갱신되므로
+ * "내용이 같다"는 가드가 영영 통과하지 못했고, 유휴 상태에서도 **바이트가 완전히
+ * 동일한 torrents.json 을 10초마다 다시 썼다**
+ * (실기기 로그로 확인 — `저장 완료 3건` 이 5~10초 간격으로 반복).
+ *
+ * TorrentPersistence.save 가 쓰는 필드와 1:1로 대응시켜야 한다.
+ */
+internal fun persistedSignature(torrents: List<TorrentJob>): String {
+    val sb = StringBuilder(64 + torrents.size * 48)
+    for (t in torrents) {
+        sb.append(t.id).append('|')
+            .append(t.infoHash).append('|')
+            .append(t.name).append('|')
+            .append(t.magnet).append('|')
+            .append(t.state.name).append('|')
+            .append(t.progress).append('|')
+            .append(t.totalSize).append('|')
+            .append(t.downloadedSize).append('|')
+            .append(t.order).append('|')
+            .append(t.uploadLimit).append('|')
+            .append(t.downloadLimit).append('|')
+            .append(t.savePath).append('|')
+            .append(t.startedAt).append('|')
+            .append(t.finishedAt).append('|')
+            .append(t.files.size)
+        for (f in t.files) {
+            sb.append('#').append(f.index).append(':').append(f.path).append(':')
+                .append(f.size).append(':').append(f.progress).append(':').append(f.selected)
+        }
+        sb.append(';')
+    }
+    return sb.toString()
+}
+
 class TorrentEngine(
     private val context: Context,
     private val settings: SettingsRepository,
@@ -299,16 +338,19 @@ class TorrentEngine(
     @Volatile private var latestMaxActive: Int = SettingsConstraints.DEFAULT_TORRENT_MAX_ACTIVE
     private val swigSettingCache = ConcurrentHashMap<String, Int>()
     private var lastPersistAt = 0L
-    private var lastSavedSnapshot: List<TorrentJob>? = null
+    /** 마지막 저장 시점의 "기록 대상 필드" 서명 (라이브 필드 제외) */
+    @Volatile private var lastSavedSnapshot: String? = null
     private fun persistNow() {
-        try { persistence.save(TorrentRepository.all()) } catch (_: Exception) {}
-        lastSavedSnapshot = TorrentRepository.all()
+        val all = TorrentRepository.all()
+        try { persistence.save(all) } catch (_: Exception) {}
+        lastSavedSnapshot = persistedSignature(all)
     }
     private fun persistDebounced() {
         val now = System.currentTimeMillis()
         if (now - lastPersistAt > 10_000) { // 10초 간격
-            // 내용이 마지막 저장본과 달라졌을 때만 저장 (T-845)
-            if (lastSavedSnapshot != TorrentRepository.all()) {
+            // 실제 기록 대상 필드가 달라졌을 때만 저장 (T-845 — 비교 기준이 잘못되어 무효였음)
+            val sig = persistedSignature(TorrentRepository.all())
+            if (lastSavedSnapshot != sig) {
                 lastPersistAt = now
                 persistNow()
             }
