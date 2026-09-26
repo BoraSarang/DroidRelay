@@ -4,7 +4,7 @@
 - **대상**: `apps/android/` (Kotlin + Compose Material 3 + Ktor 3.5.2 + libtorrent4j 2.1.0-39, targetSdk 36)
 - **방식**: 3개 축 병렬 정적 분석 (CPU/전력 · 크래시/안정성 · 설정 적용) + 전 항목 실코드 대조 검증
 - **점검 규모**: Kotlin 79파일 / 19,546행
-- **결과**: **45건 수정** (크래시 12 · CPU 11 · 설정 8 · 안정성 14) · 테스트 184 → 204건
+- **결과**: **46건 수정** (크래시 12 · CPU 11 · 설정 8 · 안정성 14 · 실기기 발견 1) · 테스트 184 → 213건
 - **커밋**: `fix/torrent-audit-2026-09-26` → `refactor/stability-cpu-settings`
 
 > ⚠️ 이 리포트의 모든 결함은 서브에이전트 분석 결과를 **원본 코드로 1:1 대조 검증**한 뒤에만 반영했다.
@@ -172,6 +172,28 @@ alert 스레드: withGateAlert → registerMapping → applyExtraTrackers
 
 ---
 
+## 6-1. 실기기 검증에서 추가 발견 (수정 완료)
+
+`f554000` — 자동 분석이 아니라 **설치 후 로그 관찰로 발견**한 항목.
+
+| 증상 | 원인 | 조치 |
+|---|---|---|
+| 토렌트 3건 전부 QUEUED(무활동)인데 `[TorrentPersist] 저장 완료 3건` 이 5~10초 간격 반복 | `persistDebounced()` 의 "변경 없으면 스킵" 가드(T-845)가 **처음부터 무효** | `persistedSignature()` 도입 |
+
+원인은 비교 기준이었다. `lastSavedSnapshot != TorrentRepository.all()` 은
+`TorrentJob`(data class) 전체를 비교하는데, 그중 `seeds`·`peers`·`downloadSpeed`·
+`uploadSpeed`·`torrentFileBytes` 는 **`TorrentPersistence.save` 에 기록되지 않는
+라이브 필드**이며 5초 폴링마다 갱신된다. 따라서 "내용이 같다"는 조건이 영영 참이 되지
+못했고, **바이트가 완전히 동일한 파일을 계속 다시 썼다.**
+
+`persistedSignature()` 는 저장기가 실제로 쓰는 필드만으로 서명을 만든다.
+테스트 9건 추가 (204 → 213).
+
+> 이 항목은 "타이머가 존재한다는 이유만으로 반복"되는 CPU 문제와 **같은 패턴**이었다.
+> 비교/캐시 대상이 실제 저장 대상과 어긋난 경우다.
+
+---
+
 ## 7. 미수정 (의도적 판단)
 
 | 항목 | 이유 |
@@ -198,6 +220,22 @@ alert 스레드: withGateAlert → registerMapping → applyExtraTrackers
 - [ ] 웹 인증 암호 미설정 상태로 스위치 ON → 거부 메시지
 - [ ] 대용량 업로드 → 스트리밍 로그 + 메모리 사용량 안정
 - [ ] 토렌트 목록에서 pause 를 빠르게 연타 → UI 멈춤 없는지
+
+### 2026-09-26 실기기 검증 결과 (설치 후 수행)
+
+무선 adb (SM-S901N) + `adb forward tcp:3100 tcp:3000` 로 API 직접 호출.
+
+| 항목 | 결과 |
+|---|---|
+| 앱 기동·크래시 | ✅ 없음. 터널/가드/토렌트 초기화 로그 정상 |
+| 루트 rename 차단 (P1 #18) | ✅ `{"error":"이름 없음 또는 루트 경로 금지"}` + 루트 보존 확인 |
+| MCP `file_list` 경로 탈출 (P1 #16) | ✅ `경로 탈출 차단` / 정상 경로는 정상 응답 |
+| StatusPages 안전망 (P1 #19) | ✅ `500 {"error":"server_error","detail":"JSONException"}` |
+| 속도 제한 단독 토글 (P3 #5) | ✅ dl=5MB/s 설정 시 ul=3MB/s **유지** (이전엔 0으로 덮어써짐) |
+| 가드 임계치 즉시 반영 (P3 #4) | ✅ thermalLimit=52 즉시 반영 (이전 최대 5분 지연) |
+| 값 상한 (P3 #7) | ✅ `Long.MAX_VALUE` → 10GiB/s 클램프 |
+| `peers.json` 유휴 시 쓰기 (P2 #1) | ✅ 70초 관찰 중 쓰기 0회 (이전 분당 12회) |
+| **토렌트 영속화 가드 (신규 발견)** | ✅ 저장 11회 중 10회가 실제 전이에 대응 |
 
 ---
 
