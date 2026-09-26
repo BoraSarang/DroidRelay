@@ -124,6 +124,12 @@ internal object WebDashboardHtml {
   .file-row .acts{margin-left:auto;display:flex;gap:6px;flex-shrink:0}
   .toolbar{display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap}
   .toolbar button{font-size:13px;padding:8px 14px}
+  #storageSort{-webkit-appearance:none;appearance:none;flex-shrink:0;background-color:var(--surface2);border:1px solid var(--line2);color:var(--text);border-radius:10px;
+    padding:8px 26px 8px 10px;font-size:13px;line-height:1.4;outline:none;cursor:pointer;
+    background-image:url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%239AA7BD' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E");
+    background-repeat:no-repeat;background-position:right 9px center}
+  #storageSort:focus{border-color:var(--accent)}
+  #storageSort option{background-color:var(--surface2);color:var(--text)}
   .drop-zone{border:2px dashed var(--line2);border-radius:12px;padding:24px;text-align:center;color:var(--dim);margin-top:12px;transition:all .2s}
   .drop-zone.dragover{border-color:var(--accent);background:var(--surface2);color:var(--accent2)}
   .modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:1000;justify-content:center;align-items:flex-start;padding:60px 20px;overflow-y:auto}
@@ -343,6 +349,12 @@ internal object WebDashboardHtml {
             <span class="sb" id="uploadProgressLabel" style="flex-shrink:0;color:var(--accent2)"></span>
             <input type="file" id="uploadFile" multiple onchange="uploadFiles(this)">
             <button class="ghost" onclick="deleteSelected()" id="deleteBtn" style="display:none">🗑 삭제</button>
+            <select id="storageSort" onchange="setStorageSort(this.value)" title="정렬 기준">
+              <option value="dir">📁 디렉토리순</option>
+              <option value="recent">🕐 최신순</option>
+              <option value="name">🔤 이름순</option>
+              <option value="size">💾 용량순</option>
+            </select>
             <button class="ghost" onclick="toggleTrash()" style="margin-left:auto">🗑️ 휴지통</button>
           </div>
           <div class="toolbar" id="trashToolbar" style="display:none">
@@ -520,7 +532,7 @@ internal object WebDashboardHtml {
             <div class="ck"><input type="checkbox" id="torrentSequentialDownload"><label for="torrentSequentialDownload">시퀀셜 다운로드 (스트리밍 프리뷰)</label></div>
           </div>
           <div class="sb" style="margin-top:4px">시퀀셜: 첫 번째 조각부터 순서대로 다운로드하여 재생 미리보기 지원</div>
-          <div class="sb" style="margin-top:4px">PEX: libtorrent에 on/off API가 없어 항상 켜짐. 피어 탐색용으로 트래픽은 미미합니다</div>
+          <div class="sb" style="margin-top:4px">PEX: 피어 탐색용으로 트래픽은 미미합니다. 끄면 DHT·트래커로만 피어를 찾습니다</div>
           <div class="ti">시더 부재 자동 중단</div>
           <div class="si">
             <div class="sl">시더 부재 시 대기 (초)</div>
@@ -874,6 +886,7 @@ var curPath='';
 var selItem=null;
 var curTab='dl';
 var trashMode=false;
+var storageSort='dir';
 window.__dragActiveAt=0;
 function dragActive(){return window.__dragActive&&(Date.now()-window.__dragActiveAt)<5000;}
 window.onerror=function(msg,src,line){var t=document.createElement('div');t.textContent='⚠ JS 오류: '+msg+' @'+line;t.style.cssText='position:fixed;top:10px;left:50%;transform:translateX(-50%);background:#5c1a1a;color:var(--err);padding:8px 14px;border-radius:8px;font-size:12px;z-index:99999';document.body.appendChild(t);setTimeout(function(){t.remove()},6000);};
@@ -1182,7 +1195,7 @@ function renderTorrents(ts){
     }
     var err=t.errorMessage?'<div class="err">'+esc(t.errorMessage)+'</div>':'';
     var st=t.state||'UNKNOWN';
-    var badgeClass={DOWNLOADING:'RUNNING',SEEDING:'DONE',PAUSED:'PAUSED',STALLED:'STALLED',ERROR:'FAILED',FETCHING_METADATA:'QUEUED',METADATA:'QUEUED',ADDING:'QUEUED'}[st]||'QUEUED';
+    var badgeClass={DOWNLOADING:'RUNNING',SEEDING:'DONE',DONE:'DONE',PAUSED:'PAUSED',STALLED:'STALLED',ERROR:'FAILED',FAILED:'FAILED',FETCHING_METADATA:'QUEUED',METADATA:'QUEUED',ADDING:'QUEUED'}[st]||'QUEUED';
     var pause='';
     if(st==='DOWNLOADING'||st==='FETCHING_METADATA')pause='<button class="ghost" onclick="torrentAct(\''+t.id+'\',\'pause\')">일시정지</button>';
     if(st==='PAUSED'||st==='FAILED'||st==='STALLED'||st==='QUEUED')pause='<button class="ghost" onclick="torrentAct(\''+t.id+'\',\'resume\')">재개</button>';
@@ -1244,7 +1257,27 @@ function shareFile(key){
   };
 }
 function isThumbable(name){return /\.(mp4|mkv|webm|mov|avi|m4v|ogv|ts)$/i.test(name||'');}
+// 보관함 정렬 (클라이언트 사이드) — 이름순만 폴더/파일 혼합, 나머지는 폴더 위 분리
+function sortStorageItems(items){
+  var arr=items.slice();
+  function byName(a,b){var x=a.name||'',y=b.name||'';return x<y?-1:(x>y?1:0);}
+  if(storageSort==='name')return arr.sort(byName);
+  var dirs=arr.filter(function(f){return f.type==='dir';});
+  var files=arr.filter(function(f){return f.type!=='dir';});
+  if(storageSort==='recent'){
+    dirs.sort(function(a,b){return (b.modified||0)-(a.modified||0);});
+    files.sort(function(a,b){return (b.modified||0)-(a.modified||0);});
+  }else if(storageSort==='size'){
+    dirs.sort(function(a,b){return (b.size||0)-(a.size||0);});
+    files.sort(function(a,b){return (b.size||0)-(a.size||0);});
+  }else{
+    dirs.sort(byName);files.sort(byName);
+  }
+  return dirs.concat(files);
+}
+function setStorageSort(v){storageSort=v||'dir';refreshStorage();}
 function renderStorage(items){  if(dragActive())return;
+  items=sortStorageItems(items);
   var el=document.getElementById('fileList');document.getElementById('fileEmpty').style.display=items.length?'none':'block';
   document.getElementById('storageListTitle').textContent='📄 폴더 내용';
   var h='';
@@ -1863,6 +1896,8 @@ function loadTorrentDetail(id){
       h+='<div class="modal-stat-item"><div class="modal-stat-label">업로드</div><div class="modal-stat-value" style="color:#f96">'+spd(d.uploadSpeed||0)+'</div></div>';
       h+='<div class="modal-stat-item"><div class="modal-stat-label">피스</div><div class="modal-stat-value">'+(d.numPieces||0)+'</div></div>';
       h+='</div>';
+      // 오류 사유 (필드 없으면 표시 없음)
+      if(d.errorMessage)h+='<div class="err">'+esc(d.errorMessage)+'</div>';
       // 시드/피어 스웜 정보
       h+='<div class="modal-section"><div class="modal-section-title">스웜 정보</div>';
       h+='<div class="modal-stat">';

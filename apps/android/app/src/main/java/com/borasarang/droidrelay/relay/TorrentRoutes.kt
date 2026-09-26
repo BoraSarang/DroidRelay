@@ -33,6 +33,7 @@ internal fun Route.torrentRoutes(context: Context, serverRef: RelayServer) {
                 put("seeds", t.seeds)
                 put("peers", t.peers)
                 put("maxDownBps", t.downloadLimit)
+                put("errorMessage", t.errorMessage ?: "")
                 put("piecesDone", piecesDone)
                 put("piecesTotal", piecesTotal)
                 put("files", JSONArray().apply {
@@ -106,8 +107,17 @@ internal fun Route.torrentRoutes(context: Context, serverRef: RelayServer) {
                 }
             }
         } catch (e: Exception) {
-            DebugLogger.e("Http", "토렌트 추가 실패", e)
-            call.respondErr("토렌트 추가 실패: ${e.message}")
+            if (e is DuplicateTorrentException) {
+                DebugLogger.w("Http", "torrent 중복 파일 추가 시도 → 거부 hash=${e.infoHash}")
+                call.respondText(
+                    JSONObject().put("error", "이미 다운로드 중인 토렌트입니다").toString(),
+                    ContentType.Application.Json,
+                    HttpStatusCode.Conflict,
+                )
+            } else {
+                DebugLogger.e("Http", "토렌트 추가 실패", e)
+                call.respondErr("토렌트 추가 실패: ${e.message}")
+            }
         }
     }
 
