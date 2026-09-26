@@ -139,7 +139,18 @@ function exportLogs(){
   a.download='droidrelay-debug-'+new Date().toISOString().slice(0,19).replace(/:/g,'-')+'.txt';
   a.click();
 }
-function poll(){fetchLogs();timer=setTimeout(poll,1000);}
+// 폴링은 1초 간격으로 무한 반복되던 것을 페이지가 보이는 동안에만 유지한다.
+// 이전에는 hidden 탭에서도 분당 60회 요청 + 300줄 로그 렌더가 계속됐다.
+function poll(){
+  if(document.hidden){timer=null;return;}
+  fetchLogs();
+  timer=setTimeout(poll,1000);
+}
+document.addEventListener('visibilitychange',function(){
+  if(document.hidden){if(timer){clearTimeout(timer);timer=null;}}
+  else if(!timer)poll();
+});
+window.addEventListener('pagehide',function(){if(timer){clearTimeout(timer);timer=null;}});
 poll();
 </script></body></html>"""
     }

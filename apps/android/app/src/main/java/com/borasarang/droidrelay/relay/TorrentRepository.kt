@@ -53,6 +53,10 @@ object TorrentRepository {
     private val _torrents = MutableStateFlow<List<TorrentJob>>(emptyList())
     val torrents: StateFlow<List<TorrentJob>> = _torrents
     private val map = ConcurrentHashMap<String, TorrentJob>()
+    // 진행 틱 방출 스로틀 — 500ms / 0.5% 미만 변동은 Flow 미방출 (JobsRepository 와 동일 정책)
+    @Volatile private var lastEmitAt = 0L
+    private const val PROGRESS_EMIT_MS = 500L
+    private const val PROGRESS_EMIT_DELTA = 0.005f
 
     fun all(): List<TorrentJob> = _torrents.value
     fun get(id: String): TorrentJob? = map[id]
@@ -66,6 +70,7 @@ object TorrentRepository {
 
     fun update(id: String, transform: (TorrentJob) -> TorrentJob) {
         var changed = false
+        var suppressEmit = false
         map.computeIfPresent(id) { _, before ->
             val after = transform(before)
             changed = after != before
@@ -76,10 +81,29 @@ object TorrentRepository {
                         " (${after.downloadedSize}/${if (after.totalSize > 0) after.totalSize else "?"})",
                 )
             }
+            // 진행 틱은 map 만 갱신하고 Flow 방출은 스로틀.
+            // 5초 폴링이 torrent 마다 update 를 호출하므로 이게 없으면
+            // 토렌트 N 개 = 5초마다 N 회 정렬 + N 회 리스트 리컴포지션이 된다.
+            // JobsRepository 의 PROGRESS_EMIT_* 와 동일한 정책.
+            if (changed && before.state == after.state && isProgressOnly(after)) {
+                val dProgress = kotlin.math.abs(after.progress - before.progress)
+                val now = System.currentTimeMillis()
+                if (dProgress < PROGRESS_EMIT_DELTA && now - lastEmitAt < PROGRESS_EMIT_MS) {
+                    suppressEmit = true
+                }
+            }
             after
         }
-        if (changed) refresh()
+        if (changed && !suppressEmit) {
+            lastEmitAt = System.currentTimeMillis()
+            refresh()
+        }
     }
+
+    /** 진행률·속도만 바뀌고 상태/이름/크기는 그대로인지 — 방출 스로틀 적용 대상 */
+    private fun isProgressOnly(after: TorrentJob): Boolean =
+        after.state == TorrentState.DOWNLOADING || after.state == TorrentState.SEEDING ||
+            after.state == TorrentState.FETCHING_METADATA
 
     fun remove(id: String): Boolean {
         val removed = map.remove(id)

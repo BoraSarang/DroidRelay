@@ -241,6 +241,8 @@ class RelayServer(
     }
 
     @Volatile private var server: EmbeddedServer<NettyApplicationEngine, NettyApplicationEngine.Configuration>? = null
+    /** 기동 성공을 명시적으로 기록 — watchdog 헬스체크가 루프백 HTTP 없이 판정한다 */
+    @Volatile private var started = false
     @Volatile var settings: AppSettings = AppSettings()
 
     /** 실제 HTTPS 바인드 포트 — HTTP와 같으면 +1 회피 (v0.34, UI 충돌검사와 이중 방어) */
@@ -262,12 +264,14 @@ class RelayServer(
         return runCatching {
             s.start(wait = false)
             server = s
+            started = true
             val httpsPart = if (settings.httpsEnabled) " + https://0.0.0.0:$effectiveHttpsPort" else " (HTTPS 끔)"
             DebugLogger.i("Server", "[FEATURE] HTTPS 포트 기동 완료 http://0.0.0.0:$port$httpsPart (LAN=${lanAddress() ?: "?"})")
             true
         }.onFailure { e ->
             DebugLogger.e("Server", "서버 시작 실패 E-SRV-NET-1421 ${e.message}")
             server = null
+            started = false
             runCatching { s.stop(gracePeriodMillis = 0, timeoutMillis = 500) }
         }.getOrDefault(false)
     }
@@ -276,11 +280,22 @@ class RelayServer(
         RelayApp.video?.stopAll()
         runCatching { server?.stop(gracePeriodMillis = 500, timeoutMillis = 1500) }
         server = null
+        started = false
         DebugLogger.i("Server", "서버 정지")
     }
 
-    /** 서버가 실제로 요청을 응답하는지 루프백 헬스체크 (watchdog용) */
-    fun isHealthy(timeoutMs: Int = 1500): Boolean {
+    /**
+     * watchdog용 헬스체크.
+     * 서버가 기동 상태로 기록돼 있고 종료되지 않았는지만 확인한다 —
+     * 루프백 HTTP 요청은 Ktor 파이프라인 전체를 통과하며 /api/info 핸들러
+     * (PackageManager binder + StatFs + JSON 직렬화)까지 실행하므로
+     * 무활동 상태에서도 분당 1회 불필요한 왕복을 만든다.
+     * 전체 파이프라인을 실제로 확인해야 하는 경우 isHealthyHttp 을 쓴다(수동 점검용).
+     */
+    fun isHealthy(): Boolean = started
+
+    /** 실제 HTTP 왕복을 포함한 헬스체크 — 진단용 (watchdog 주기는 isHealthy 사용) */
+    fun isHealthyHttp(timeoutMs: Int = 1500): Boolean {
         if (server == null) return false
         return try {
             val conn = java.net.URL("http://127.0.0.1:$port/api/info").openConnection() as java.net.HttpURLConnection
@@ -305,10 +320,12 @@ class RelayServer(
             .onFailure { DebugLogger.e("Server", "watchdog 재시작: stop 실패 ${it.message}") }
         runCatching {
             server = createServer().also { it.start(wait = false) }
+            started = true
             DebugLogger.i("Server", "watchdog 재시작 완료 http://0.0.0.0:$port")
         }.onFailure { e ->
             DebugLogger.e("Server", "watchdog 재시작 실패 ${e.message}")
             server = null
+            started = false
         }
     }
 

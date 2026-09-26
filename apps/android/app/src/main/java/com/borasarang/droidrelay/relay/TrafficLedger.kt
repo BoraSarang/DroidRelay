@@ -79,13 +79,18 @@ object TrafficLedger {
         loadFrom(file)
     }
 
+    // SimpleDateFormat 생성은 패턴 파싱 + DateFormatSymbols 테이블 구축 비용이 있어
+    // daily(400) 은 호출 1회당 포매터 400개를 새로 만들었다 (통계 탭 5초 폴링 = 분당 4,800개).
+    // ThreadLocal 로 스레드당 1개를 재사용한다 (DebugLogger 와 동일 패턴).
+    // SimpleDateFormat 은 스레드 안전하지 않으므로 공유 단일 인스턴스는 금지.
+    private val dayFmt = ThreadLocal.withInitial { SimpleDateFormat("yyyy-MM-dd", Locale.US) }
+    private val monthFmt = ThreadLocal.withInitial { SimpleDateFormat("yyyy-MM", Locale.US) }
+
     /** 일자 키 (기기 기본 TZ, yyyy-MM-dd) — 순수함수 */
-    fun dayKey(timeMs: Long): String =
-        SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(timeMs))
+    fun dayKey(timeMs: Long): String = dayFmt.get().format(Date(timeMs))
 
     /** 월 prefix (yyyy-MM) — 순수함수 */
-    fun monthKey(timeMs: Long): String =
-        SimpleDateFormat("yyyy-MM", Locale.US).format(Date(timeMs))
+    fun monthKey(timeMs: Long): String = monthFmt.get().format(Date(timeMs))
 
     @Synchronized
     fun addDownHttp(bytes: Long, nowMs: Long = System.currentTimeMillis()) = add(nowMs) { it.copy(downHttp = it.downHttp + bytes) }

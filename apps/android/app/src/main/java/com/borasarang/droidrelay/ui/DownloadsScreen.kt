@@ -86,6 +86,7 @@ import com.borasarang.droidrelay.relay.VideoApi
 import com.borasarang.droidrelay.relay.VideoException
 import com.borasarang.droidrelay.relay.currentNetworkType
 import com.borasarang.droidrelay.relay.lanAddress
+import com.borasarang.droidrelay.relay.networkTypeFlow
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.EncodeHintType
 import com.google.zxing.qrcode.QRCodeWriter
@@ -205,15 +206,9 @@ private fun ServerCard(httpPort: Int, httpsPort: Int, onCopyAddress: (String) ->
     val httpAddr = "http://$ip:$httpPort"
     val httpsAddr = "https://$ip:$httpsPort"
     val cs = MaterialTheme.colorScheme
-    val netType = remember { mutableStateOf(currentNetworkType(ctx)) }
-
-    // 네트워크 변화 실시간 반영 (5초 폴링)
-    LaunchedEffect(Unit) {
-        while (true) {
-            netType.value = currentNetworkType(ctx)
-            kotlinx.coroutines.delay(5000)
-        }
-    }
+    // 네트워크 변화 실시간 반영 — 5초 폴링 대신 ConnectivityManager 콜백 구독.
+    // 폴링이던 동안엔 메인 스레드에서 통신사 서비스 binder 호출이 분당 12회씩 났다.
+    val netType by networkTypeFlow(ctx).collectAsState(initial = currentNetworkType(ctx))
 
     val storage = remember {
         runCatching {
@@ -286,7 +281,7 @@ private fun ServerCard(httpPort: Int, httpsPort: Int, onCopyAddress: (String) ->
                         )
                     }
                     Spacer(Modifier.height(4.dp))
-                    val nt = netType.value
+                    val nt = netType
                     Text(
                         "${nt.icon} 네트워크: ${nt.label}",
                         color = if (nt.label == "오프라인") cs.error else cs.onSurfaceVariant,

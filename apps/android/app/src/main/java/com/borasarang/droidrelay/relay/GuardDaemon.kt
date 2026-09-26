@@ -73,9 +73,7 @@ class GuardDaemon(
     fun getStatus(): GuardStatus {
         val now = System.currentTimeMillis()
         cachedStatus?.let { if (now - cachedStatusAt < statusTtlMs) return it }
-        val thermal = readThermal()
-        val battery = readBattery()
-        val storage = readStorage()
+        val (thermal, battery, storage) = GuardSensorCache.read(context, now)
         val s = settingsNow()
 
         val throttled = s.guardEnabled && (
@@ -119,9 +117,7 @@ class GuardDaemon(
             return
         }
 
-        val thermal = readThermal()
-        val battery = readBattery()
-        val storage = readStorage()
+        val (thermal, battery, storage) = GuardSensorCache.read(context)
         DebugLogger.d(TAG, "센서 체크 thermal=${thermal}°C battery=${battery}% storage=${storage}% (임계: ${s.guardThermalLimit}/${s.guardBatteryLimit}/${s.guardStorageLimit}%)")
 
         val reasons = mutableListOf<String>()
@@ -159,40 +155,8 @@ class GuardDaemon(
         }
     }
 
-    /**
-     * 온도 읽기 (°C).
-     */
-    private fun readThermal(): Int {
-        return try {
-            val file = File("/sys/class/thermal/thermal_zone0/temp")
-            if (file.exists()) {
-                (file.readText().trim().toIntOrNull() ?: 0) / 1000
-            } else 0
-        } catch (_: Exception) { 0 }
-    }
-
-    /**
-     * 배터리 잔량 (%).
-     */
-    private fun readBattery(): Int {
-        return try {
-            val bm = context.getSystemService(Context.BATTERY_SERVICE) as? BatteryManager
-            bm?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY) ?: -1
-        } catch (_: Exception) { -1 }
-    }
-
-    /**
-     * 스토리지 사용량 (%).
-     */
-    private fun readStorage(): Int {
-        return try {
-            val dir = StorageGuard.dlRoot
-            if (!dir.exists()) return 0
-            val total = dir.totalSpace
-            val free = dir.freeSpace
-            if (total > 0) ((total - free) * 100 / total).toInt() else 0
-        } catch (_: Exception) { 0 }
-    }
+    // 온도·배터리·스토리지 실측은 GuardSensorCache 가 15초 TTL 로 공유한다.
+    // (라우트와 데몬이 각각 읽으면 폴링 1회당 sysfs+binder+statfs 가 중복된다)
 }
 
 data class GuardStatus(
@@ -206,3 +170,46 @@ data class GuardStatus(
     val guardEnabled: Boolean,
     val reason: String,
 )
+
+/** 실측 센서 3종 (임계치 미포함) */
+data class GuardSensors(val thermal: Int, val batteryLevel: Int, val storageUsed: Int)
+
+/**
+ * 센서 읽기 공유 캐시.
+ * /api/guard/status 가 대시보드 폴링마다 호출되므로 sysfs read + BatteryManager binder IPC
+ * + statfs64 2회를 매번 하면 분당 60회씩 시스템콜이 튄다. 데몬과 라우트가 같은 캐시를 쓴다.
+ */
+object GuardSensorCache {
+    private const val TTL_MS = 15_000L
+
+    @Volatile private var cached: GuardSensors? = null
+    @Volatile private var cachedAt = 0L
+
+    fun read(context: Context, now: Long = System.currentTimeMillis()): GuardSensors {
+        cached?.let { if (now - cachedAt < TTL_MS) return it }
+        return runCatching {
+            val thermal = try {
+                val f = File("/sys/class/thermal/thermal_zone0/temp")
+                if (f.exists()) (f.readText().trim().toIntOrNull() ?: 0) / 1000 else 0
+            } catch (_: Exception) { 0 }
+            val battery = try {
+                val bm = context.applicationContext.getSystemService(Context.BATTERY_SERVICE) as? BatteryManager
+                bm?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY) ?: -1
+            } catch (_: Exception) { -1 }
+            val storage = try {
+                val dir = StorageGuard.dlRoot
+                if (!dir.exists()) {
+                    0
+                } else {
+                    val total = dir.totalSpace
+                    val free = dir.freeSpace
+                    if (total > 0) ((total - free) * 100 / total).toInt() else 0
+                }
+            } catch (_: Exception) { 0 }
+            GuardSensors(thermal, battery, storage)
+        }.getOrDefault(GuardSensors(0, -1, 0)).also {
+            cached = it
+            cachedAt = now
+        }
+    }
+}

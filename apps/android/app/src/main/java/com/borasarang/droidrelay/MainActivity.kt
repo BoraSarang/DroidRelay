@@ -117,6 +117,7 @@ class MainActivity : ComponentActivity() {
             DebugLogger.i("UI", "[FEATURE] 공유 받기 url=${match.take(90)}")
             pendingSharedUrl = match
         }
+        signalPending()
     }
 
     @Deprecated("Deprecated in Java")
@@ -132,6 +133,7 @@ class MainActivity : ComponentActivity() {
             lastOfferedUrl = text
             DebugLogger.d("UI", "클립보드 URL 감지: $text")
             pendingClipUrl = text
+            signalPending()
         }
     }
 
@@ -167,6 +169,21 @@ class MainActivity : ComponentActivity() {
         @Volatile var pendingSharedUrl: String? = null
         @Volatile var pendingSharedMagnet: String? = null
         @Volatile var pendingOpenTab: Int? = null
+
+        /**
+         * 위 pending* 필드가 채워졌음을 알리는 신호.
+         * 이전 구현은 RootApp 에서 1.5초 주기 while 루프가 이 네 필드를 폴링했다 —
+         * 사용자 이벤트로만 채워지는 값을 분당 40회 메인 스레드 웨이크업으로 감시했다.
+         * 이제 작성 측이 직접 emit 하고 UI 는 collect 한다.
+         */
+        val pendingSignal = kotlinx.coroutines.flow.MutableSharedFlow<Unit>(
+            replay = 1,
+            extraBufferCapacity = 8,
+        )
+
+        private fun signalPending() {
+            pendingSignal.tryEmit(Unit)
+        }
     }
 
     /** 알림 탭 → 지정 탭으로 이동 (v0.24, singleTop이므로 onNewIntent 경유) */
@@ -175,6 +192,7 @@ class MainActivity : ComponentActivity() {
         val tab = intent.getIntExtra(EXTRA_TAB, -1)
         if (tab in 0..4) {
             pendingOpenTab = tab
+            signalPending()
             DebugLogger.i("UI", "[FEATURE] 알림 탭 이동 tab=$tab")
         }
     }
@@ -193,9 +211,9 @@ fun RootApp() {
     val tabTitles = listOf("다운로드", "토렌트", "보관함", "설정", "통계")
 
     // 클립보드 URL 감지 제안 (T-110) + 공유 받기 (T-941) + 알림 탭 이동 (v0.24)
+    // 1.5초 폴링 대신 이벤트 구독 — pending* 가 채워질 때만 깨어난다.
     LaunchedEffect(Unit) {
-        while (true) {
-            kotlinx.coroutines.delay(1500)
+        MainActivity.pendingSignal.collect {
             MainActivity.pendingOpenTab?.let { target ->
                 MainActivity.pendingOpenTab = null
                 tab = target
@@ -213,7 +231,8 @@ fun RootApp() {
                     if (com.borasarang.droidrelay.relay.JobsRepository.findDuplicateUrl(url) != null) {
                         scope.launch { snackbar.showSnackbar("이미 등록된 다운로드입니다") }
                     } else {
-                        engine.enqueue(url)
+                        runCatching { engine.enqueue(url) }
+                            .onFailure { scope.launch { snackbar.showSnackbar("다운로드 추가 실패: ${it.message}") } }
                     }
                 }
             }
@@ -222,8 +241,9 @@ fun RootApp() {
                 if (com.borasarang.droidrelay.relay.JobsRepository.findDuplicateUrl(url) != null) {
                     scope.launch { snackbar.showSnackbar("이미 등록된 다운로드입니다") }
                 } else {
-                    engine.enqueue(url)
-                    scope.launch { snackbar.showSnackbar("공유받은 URL을 다운로드에 추가했습니다") }
+                    runCatching { engine.enqueue(url) }
+                        .onSuccess { scope.launch { snackbar.showSnackbar("공유받은 URL을 다운로드에 추가했습니다") } }
+                        .onFailure { scope.launch { snackbar.showSnackbar("다운로드 추가 실패: ${it.message}") } }
                 }
             }
             MainActivity.pendingSharedMagnet?.let { magnet ->
