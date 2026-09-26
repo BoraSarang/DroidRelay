@@ -10,6 +10,12 @@ class TorrentPersistence(private val context: Context) {
     private val file: File
         get() = File(context.filesDir, "torrents.json")
 
+    /**
+     * 알림 스레드·5초 폴러·Netty 이벤트루프·onDestroy 스레드가 동시에 호출한다.
+     * 동기화 없이는 공유 .tmp 경로에 교차 쓰기가 생겨 부분 쓰기가 rename 되어
+     * torrents.json 이 통째로 손상된다 (JobsPersistence 와 동일한 이유).
+     */
+    @Synchronized
     fun save(torrents: List<TorrentJob>) {
         try {
             val arr = JSONArray()

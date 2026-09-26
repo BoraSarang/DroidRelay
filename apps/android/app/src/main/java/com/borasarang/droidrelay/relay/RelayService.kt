@@ -88,32 +88,34 @@ class RelayService : Service() {
         DebugLogger.i(TAG, "가드 데몬 시작 완료")
 
         // 가드 상태 변경 시 다운로드 일시정지/재개
+        // 이 콜백은 GuardDaemon 의 IO 스코프에서 호출되고 호출부에 예외 처리가 없다 —
+        // 항목 하나가 throw 하면 프로세스 사망이므로 항목별로 격리한다.
         guard.onThrottleChange = { throttled, reason ->
             DebugLogger.i(TAG, "가드 상태 변경 throttled=$throttled reason=$reason")
             if (throttled) {
                 // 실행 중인 다운로드 일시정지
                 JobsRepository.jobs.value.forEach { j ->
                     if (j.state == JobState.RUNNING) {
-                        engine.pause(j.id)
+                        runCatching { engine.pause(j.id) }
                     }
                 }
                 // 토렌트도 함께 스로틀 (결함 #5)
                 TorrentRepository.all().forEach { t ->
                     if (t.state == TorrentState.DOWNLOADING || t.state == TorrentState.SEEDING) {
-                        torrentEng.pause(t.id)
+                        runCatching { torrentEng.pause(t.id) }
                     }
                 }
             } else {
                 // 가드가 pause한 잡(PAUSED)과 실패 잡을 재개 — retryFailed만으로는 일시정지가 풀리지 않음
-                engine.retryFailed()
+                runCatching { engine.retryFailed() }
                 JobsRepository.jobs.value.forEach { j ->
                     if (j.state == JobState.PAUSED) {
-                        engine.resume(j.id)
+                        runCatching { engine.resume(j.id) }
                     }
                 }
                 TorrentRepository.all().forEach { t ->
                     if (t.state == TorrentState.PAUSED) {
-                        torrentEng.resume(t.id)
+                        runCatching { torrentEng.resume(t.id) }
                     }
                 }
             }
@@ -256,7 +258,10 @@ class RelayService : Service() {
                         }
                         failStreak = 0
                         DebugLogger.w(TAG, "watchdog: 서버 무응답 ${WATCHDOG_FAIL_STREAK}회 연속 → 재시작")
-                        current.restart()
+                        // 재시작은 그 자체로 실패할 수 있다(FFmpeg 세션 cancel 등). 예외가 튀면
+                        // 이 while 루프 — 즉 재시작을 담당하는 watchdog 자체가 죽는다.
+                        runCatching { current.restart() }
+                            .onFailure { DebugLogger.e(TAG, "watchdog 재시작 실패: ${it.message}") }
                     }
                 }
             }

@@ -134,7 +134,11 @@ class DownloadEngine(
 
     fun enqueue(url: String): Job {
         val name = JobsRepository.filenameFromUrl(url)
-        val job = JobsRepository.add(url, URLDecoder.decode(name, "UTF-8"))
+        // 이중 디코딩: filenameFromUrl 은 자체 디코딩을 runCatching 으로 감싸지만 sanitizeLeaf 가
+        // '%' 를 남긴 채 통과시키므로 두 번째 디코딩이 IllegalArgumentException 을 던진다
+        // (LAN POST /api/jobs, 안드로이드 공유시트 모두 도달). 방어적으로 감싼다.
+        val decoded = runCatching { URLDecoder.decode(name, "UTF-8") }.getOrDefault(name)
+        val job = JobsRepository.add(url, decoded)
         DebugLogger.i(TAG, "큐 진입 id=${job.id} url=$url")
         enqueuePending(job.id)
         tryStart()

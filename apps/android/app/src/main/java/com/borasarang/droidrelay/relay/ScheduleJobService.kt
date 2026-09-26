@@ -29,16 +29,23 @@ class ScheduleJobService : JobService() {
         val scheduler = SchedulerManager(applicationContext)
 
         scope.launch {
-            val settings = settingsRepo.settings.first()
-            val constraints = scheduler.checkConstraints(settings)
-            DebugLogger.d("ScheduleJob", "제약 조건 결과=$constraints wifi=${settings.scheduleWifiOnly} charging=${settings.scheduleChargingOnly} batteryMin=${settings.scheduleBatteryMin}")
-            if (constraints) {
-                DebugLogger.i("ScheduleJob", "조건 충족 — 대기 중인 다운로드 재개")
-                RelayApp.get(applicationContext).retryFailed()
-            } else {
-                DebugLogger.i("ScheduleJob", "조건 미충족 — 건너뜀")
+            // 예외가 튀면 jobFinished 가 호출되지 않아 시스템이 "jobFinished 미호출" 을 기록하고
+            // onStopJob=true 로 재스케줄 → 크래시 루프가 된다. 반드시 finally 에서 종료 통보.
+            try {
+                val settings = settingsRepo.settings.first()
+                val constraints = scheduler.checkConstraints(settings)
+                DebugLogger.d("ScheduleJob", "제약 조건 결과=$constraints wifi=${settings.scheduleWifiOnly} charging=${settings.scheduleChargingOnly} batteryMin=${settings.scheduleBatteryMin}")
+                if (constraints) {
+                    DebugLogger.i("ScheduleJob", "조건 충족 — 대기 중인 다운로드 재개")
+                    RelayApp.get(applicationContext).retryFailed()
+                } else {
+                    DebugLogger.i("ScheduleJob", "조건 미충족 — 건너뜀")
+                }
+            } catch (e: Throwable) {
+                DebugLogger.e("ScheduleJob", "스케줄 작업 실패 jobId=$jobId", e)
+            } finally {
+                jobFinished(params, false)
             }
-            jobFinished(params, false)
         }
 
         return true // 비동기 완료

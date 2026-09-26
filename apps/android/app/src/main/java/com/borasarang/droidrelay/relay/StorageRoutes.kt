@@ -35,6 +35,14 @@ internal object StorageGuard {
         return if (c.path == root || c.path.startsWith(root + java.io.File.separator)) c else null
     }
 
+    /**
+     * 파괴적 연산(rename/delete)용 — dlRoot 자체를 거부한다.
+     * storageFile("") 은 루트를 반환하므로 그 그대로 쓰면
+     * {"from":"","to":"x"} 가 보관함 전체를 /sdcard/Download 로 rename 해 버린다.
+     */
+    fun storageChild(vararg parts: String): java.io.File? =
+        storageFile(*parts)?.takeIf { it.canonicalFile.path != dlRootCanonical.path }
+
     /** 파일·폴더 이름 1개 — 경로 구분자/상대경로 금지 */
     fun safeLeafName(name: String): String? = name.takeIf {
         it.isNotBlank() && !it.contains('/') && !it.contains('\\') && it != "." && it != ".."
@@ -115,10 +123,10 @@ internal fun Route.storageRoutes(context: Context, serverRef: RelayServer) {
     post("/api/storage/rename") {
         val body = call.receiveText()
         val json = org.json.JSONObject(body)
-        val fromFile = StorageGuard.storageFile(json.optString("from", ""))
+        val fromFile = StorageGuard.storageChild(json.optString("from", ""))
         val toName = StorageGuard.safeLeafName(json.optString("to", ""))
         if (fromFile == null || toName == null) {
-            call.respondErr("이름 없음")
+            call.respondErr("이름 없음 또는 루트 경로 금지")
             return@post
         }
         val toFile = java.io.File(fromFile.parentFile, toName)
@@ -137,7 +145,8 @@ internal fun Route.storageRoutes(context: Context, serverRef: RelayServer) {
         val body = call.receiveText()
         val json = org.json.JSONObject(body)
         val path = json.optString("path", "")
-        val target = StorageGuard.storageFile(path)
+        // 루트 자체 삭제 방지
+        val target = StorageGuard.storageChild(path)
         if (target == null) {
             DebugLogger.w("Http", "삭제 경로 탈출 차단 path=$path")
             call.respondErr("잘못된 경로")
@@ -148,7 +157,7 @@ internal fun Route.storageRoutes(context: Context, serverRef: RelayServer) {
             return@post
         }
         // 휴지통 내부 대상은 즉시 영구삭제 (웹에서 별도 API 사용 권장)
-        if (target.canonicalFile.path.startsWith(StorageGuard.trashDir.canonicalFile.path)) {
+        if (target.canonicalFile.path.startsWith(StorageGuard.trashDir.canonicalFile.path + java.io.File.separator)) {
             DebugLogger.i("Http", "영구삭제 ${target.name}")
             target.deleteRecursively()
             call.respondOk()
@@ -253,7 +262,7 @@ internal fun Route.storageRoutes(context: Context, serverRef: RelayServer) {
             call.respondErr("원본 없음")
             return@post
         }
-        val src = StorageGuard.storageFile(fromName)
+        val src = StorageGuard.storageChild(fromName)
         val dstDir = StorageGuard.storageFile(toDir)
         if (src == null || dstDir == null) {
             DebugLogger.w("Http", "이동 경로 탈출 차단 from=$fromName to=$toDir")

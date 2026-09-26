@@ -227,8 +227,12 @@ object McpServer {
 
     private fun fileList(args: JSONObject): JSONArray {
         val subPath = args.optString("path", "")
-        val dlRoot = StorageGuard.dlRoot
-        val dir = if (subPath.isNotBlank()) File(dlRoot, subPath) else dlRoot
+        // 경로 탈출 차단 — StorageGuard 미사용 시 "../../.." 로 루트 전체 목록이 노출된다
+        val dir = StorageGuard.storageFile(subPath)
+        if (dir == null) {
+            DebugLogger.w(TAG, "fileList: 경로 탈출 차단 path=$subPath")
+            error("경로 탈출 차단")
+        }
 
         if (!dir.exists() || !dir.isDirectory) {
             DebugLogger.d(TAG, "fileList: 디렉토리 없음 path=$subPath")
@@ -258,7 +262,9 @@ object McpServer {
         val dlRoot = StorageGuard.dlRoot
         val file = File(dlRoot, path)
         val canonical = file.canonicalFile
-        if (!canonical.path.startsWith(dlRoot.canonicalPath)) error("경로 탈출 차단")
+        // 경로 구분자 없이 startsWith 만 쓰면 "DroidRelay.bak" 같은 접두 동명이 통과한다 (StorageGuard 와 불일치)
+        val root = StorageGuard.dlRootCanonical.path
+        if (canonical.path != root && !canonical.path.startsWith(root + File.separator)) error("경로 탈출 차단")
 
         if (!file.exists()) error("파일 없음: $path")
         if (!file.isFile) error("파일이 아님: $path")

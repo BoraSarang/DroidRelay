@@ -50,7 +50,13 @@ class NetworkMonitor(
         val req = NetworkRequest.Builder()
             .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
             .build()
-        cm.registerNetworkCallback(req, callback)
+        // Service.onCreate 에서 throw 하면 치명적. uid 당 콜백 등록 수 상한 초과(SecurityException) 등 방어.
+        runCatching { cm.registerNetworkCallback(req, callback) }
+            .onFailure {
+                registered = false
+                DebugLogger.w(TAG, "네트워크 모니터 등록 실패 — 복구 시 재시도 재개 생략: ${it.message}")
+                return
+            }
         registered = true
         DebugLogger.d(TAG, "네트워크 모니터 등록 완료")
     }

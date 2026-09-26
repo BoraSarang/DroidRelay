@@ -9,6 +9,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.concurrent.TimeUnit
@@ -423,6 +424,9 @@ class TorrentEngine(
     }
 
     fun stop() {
+        // scope 미취소 시 addMagnet/restore/설정 collector 코루틴이 살아남아 파괴된 세션에
+        // JNI 호출(네이티브 크래시)을 시도한다. stop() 은 마지막 정리 지점이다.
+        scope.cancel()
         withGate {
             statusPollingJob?.cancel()
             session?.stop()

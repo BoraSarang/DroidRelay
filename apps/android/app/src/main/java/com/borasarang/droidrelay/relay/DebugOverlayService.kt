@@ -27,6 +27,7 @@ class DebugOverlayService : Service() {
     private var overlayView: TextView? = null
     private var scrollView: ScrollView? = null
     private var timerJob: kotlinx.coroutines.Job? = null
+    @Volatile private var isForeground = false
     private var paused = false
     private var lastText = ""
 
@@ -127,25 +128,38 @@ class DebugOverlayService : Service() {
 
     /** 포그라운드 등록 (RelayService의 relay_status 채널·아이콘 재사용) */
     private fun startInForeground() {
-        val notif = Notification.Builder(this, "relay_status")
-            .setSmallIcon(android.R.drawable.stat_sys_download_done)
-            .setContentTitle(getString(R.string.notif_running_title))
-            .setContentText("디버그 오버레이 로그 표시 중")
-            .setOngoing(true)
-            .build()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            startForeground(NOTIF_ID, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
-        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(NOTIF_ID, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
-        } else {
-            startForeground(NOTIF_ID, notif)
+        try {
+            val notif = Notification.Builder(this, "relay_status")
+                .setSmallIcon(android.R.drawable.stat_sys_download_done)
+                .setContentTitle(getString(R.string.notif_running_title))
+                .setContentText("디버그 오버레이 로그 표시 중")
+                .setOngoing(true)
+                .build()
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                startForeground(NOTIF_ID, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(NOTIF_ID, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+            } else {
+                startForeground(NOTIF_ID, notif)
+            }
+            isForeground = true
+        } catch (e: Exception) {
+            // onCreate 안에서 FGS 시작 실패는 호출측 runCatching 으로 잡을 수 없다 → 프로세스 사망.
+            // 호출측(RelayService.startInForeground)과 동일한 방어 (E-AND-SRV-0101).
+            DebugLogger.w("DebugOverlay", "FGS 시작 거부 — 백그라운드 모드로 계속: ${e.message}")
         }
     }
 
     override fun onDestroy() {
         isRunning = false
         timerJob?.cancel()
+        scope.cancel()
         runCatching { wm?.removeView(scrollView) }
+        // stopForeground 누락 시 시스템이 ForegroundServiceDidNotStopInTimeException 을 낸다 (E-AND-SRV-0110)
+        if (isForeground) {
+            runCatching { stopForeground(STOP_FOREGROUND_REMOVE) }
+            isForeground = false
+        }
         DebugLogger.i("DebugOverlay", "오버레이 서비스 중지")
         super.onDestroy()
     }

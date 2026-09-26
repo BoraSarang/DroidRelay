@@ -7,6 +7,7 @@ import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -39,6 +40,14 @@ class WebhookManager(private val context: Context) {
     ) = withContext(Dispatchers.IO) {
         if (!settings.webhookEnabled || settings.webhookUrl.isBlank()) return@withContext
 
+        // 스킴 없는 URL은 Request.Builder.url() 이 IllegalArgumentException → send() 밖 try/catch 밖이라
+        // 다운로드 완료마다 프로세스 사망. 파싱 실패 시 데드레터 없이 조용히 폐기.
+        val httpUrl = runCatching { settings.webhookUrl.toHttpUrl() }
+            .getOrElse {
+                DebugLogger.w(TAG, "웹훅 URL 형식 오류 — 전송 폐기: ${it.message}")
+                return@withContext
+            }
+
         val body = JSONObject().apply {
             put("event", event)
             put("timestamp", System.currentTimeMillis())
@@ -54,7 +63,7 @@ class WebhookManager(private val context: Context) {
             .toRequestBody("application/json".toMediaTypeOrNull())
 
         val requestBuilder = Request.Builder()
-            .url(settings.webhookUrl)
+            .url(httpUrl)
             .post(requestBody)
             .header("User-Agent", "DroidRelay/0.9 Webhook")
             .header("X-DroidRelay-Event", event)
@@ -177,6 +186,7 @@ class WebhookManager(private val context: Context) {
         val mac = Mac.getInstance("HmacSHA256")
         mac.init(SecretKeySpec(secret.toByteArray(), "HmacSHA256"))
         val hash = mac.doFinal(data.toByteArray())
-        return hash.joinToString("") { "%02x".format(it) }
+        // Byte는 %02x 에서 부호 확장되어 0xFF 가 "ffffffffffffffff" 가 된다 → and 0xFF 필수
+        return hash.joinToString("") { "%02x".format(it.toInt() and 0xFF) }
     }
 }

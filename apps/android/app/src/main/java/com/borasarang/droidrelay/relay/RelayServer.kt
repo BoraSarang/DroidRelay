@@ -18,7 +18,9 @@ import io.ktor.server.engine.applicationEnvironment
 import io.ktor.server.engine.connector
 import io.ktor.server.engine.embeddedServer
 import io.ktor.server.engine.sslConnector
+import io.ktor.server.application.install
 import io.ktor.server.plugins.origin
+import io.ktor.server.plugins.statuspages.StatusPages
 import io.ktor.server.request.path
 import io.ktor.server.request.httpMethod
 import io.ktor.server.request.receiveText
@@ -297,7 +299,10 @@ class RelayServer(
     /** watchdog용 재시작 — 현재 서버를 내리고 새로 띄운다. */
     fun restart() {
         DebugLogger.i("Server", "watchdog 재시작 시작")
-        stop()
+        // stop() 은 FFmpeg 세션 cancel 등 네이티브 정리에서 throw 할 수 있다.
+        // 그 예외가 위로 새면 서버가 내리고도 다시 뜨지 않는 최악 상태가 된다.
+        runCatching { stop() }
+            .onFailure { DebugLogger.e("Server", "watchdog 재시작: stop 실패 ${it.message}") }
         runCatching {
             server = createServer().also { it.start(wait = false) }
             DebugLogger.i("Server", "watchdog 재시작 완료 http://0.0.0.0:$port")
@@ -390,6 +395,25 @@ private fun sameSubnetAsLocal(host: String): Boolean {
 }
 
 private fun Application.relayRoutes(context: Context, serverRef: RelayServer) {
+    // ── 전역 예외 안전망 ──
+    // StatusPages 가 없으면 라우트에서 throw 한 예외가 Netty 기본 핸들러로 새어나가
+    // 클라이언트는 "응답 본문 없는 연결 끊김"을 받고 서버 로그에도 원인이 남지 않는다.
+    // (예: org.json.JSONException — 본문 "x" 로 POST /api/storage/mkdir 호출 시)
+    install(StatusPages) {
+        exception<Throwable> { call, cause ->
+            // 코루틴 취소는 오류가 아니다 — 그대로 재던져야 폴링/스트림 루프가 정지한다
+            if (cause is kotlinx.coroutines.CancellationException) throw cause
+            DebugLogger.e("Http", "미처리 예외 ${call.request.httpMethod.value} ${runCatching { call.request.path() }.getOrDefault("?")}: ${cause.javaClass.simpleName} ${cause.message}")
+            if (!call.response.isCommitted) {
+                call.respondText(
+                    """{"error":"server_error","detail":"${cause.javaClass.simpleName}"}""",
+                    ContentType.Application.Json,
+                    HttpStatusCode.InternalServerError,
+                )
+            }
+        }
+    }
+
     // 보안 파이프라인: HTTP→HTTPS → IP 게이트 → Basic Auth
     intercept(ApplicationCallPipeline.Plugins) {
         val s = serverRef.settings

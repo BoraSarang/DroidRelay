@@ -70,7 +70,8 @@ internal fun Route.debugRoutes(context: Context, serverRef: RelayServer) {
         }
         val level = call.request.queryParameters["level"]
         val tag = call.request.queryParameters["tag"]
-        val limit = call.request.queryParameters["limit"]?.toIntOrNull() ?: 300
+        // 하한 없으면 ?limit=-1 이 takeLast 에서 IllegalArgumentException → 라우트 전체 실패
+        val limit = (call.request.queryParameters["limit"]?.toIntOrNull() ?: 300).coerceIn(1, 5000)
         val since = call.request.queryParameters["since"]
         var lines = DebugLogger.lines()
         if (level != null) lines = lines.filter { it.contains("[$level]") }
@@ -92,7 +93,7 @@ internal fun Route.debugRoutes(context: Context, serverRef: RelayServer) {
             call.respondText("""{"error":"forbidden"}""", ContentType.Application.Json, HttpStatusCode.Forbidden)
             return@get
         }
-        val limit = call.request.queryParameters["limit"]?.toIntOrNull() ?: 100
+        val limit = (call.request.queryParameters["limit"]?.toIntOrNull() ?: 100).coerceIn(1, 5000)
         val lines = DebugLogger.apiLines().takeLast(limit)
         call.respondText(
             JSONObject().apply {

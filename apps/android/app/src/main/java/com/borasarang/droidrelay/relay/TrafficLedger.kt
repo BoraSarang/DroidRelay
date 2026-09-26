@@ -207,7 +207,7 @@ object TrafficLedger {
             sb.append("]}")
             val tmp = File(f.parentFile, "${f.name}.tmp")
             tmp.writeText(sb.toString())
-            if (f.exists()) f.delete()
+            // delete 선행 금지 (JobsPersistence 동일) — 두 문장 사이 크래시 시 전체 트래픽 이력 소실
             tmp.renameTo(f) || run { tmp.copyTo(f, overwrite = true); tmp.delete() }
         } catch (e: Exception) {
             DebugLogger.e("Traffic", "원장 저장 실패(무시 가능)", e)
