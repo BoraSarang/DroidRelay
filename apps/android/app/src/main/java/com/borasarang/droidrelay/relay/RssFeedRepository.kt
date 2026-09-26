@@ -82,6 +82,13 @@ object RssFeedRepository {
         _feeds.value = map.values.sortedBy { it.name }
     }
 
+    /**
+     * RSS 폴링 스레드와 Netty 이벤트루프가 동시에 save() 를 부른다 —
+     * 동기화 없이는 공유 .tmp 경로에 교차 쓰기가 되고,
+     * delete 선행 때문에 두 문장 사이 크래시 시 피드 목록 전체가 사라진다.
+     * JobsPersistence / TorrentPersistence 와 동일 패턴으로 맞춘다.
+     */
+    @Synchronized
     private fun save() {
         try {
             val arr = JSONArray()
@@ -102,8 +109,8 @@ object RssFeedRepository {
             }
             val tmp = File(file.parentFile, file.name + ".tmp")
             tmp.writeText(arr.toString())
-            if (file.exists()) file.delete()
-            tmp.renameTo(file)
+            // delete 선행 금지 — rename 은 원자적 교체 (그 사이 크래시 시 전체 소실)
+            tmp.renameTo(file) || run { tmp.copyTo(file, overwrite = true); tmp.delete() }
             DebugLogger.d(TAG, "피드 저장 ${map.size}건")
         } catch (e: Exception) {
             DebugLogger.e(TAG, "피드 저장 실패", e)

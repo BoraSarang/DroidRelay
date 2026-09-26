@@ -20,17 +20,22 @@ class SpeedScheduleManager(
     private val isThrottled: () -> Boolean = { false },
 ) {
     private val TAG = "SpeedSched"
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    // stop() 이 scope 를 cancel 하므로 start() 에서 재생성해야 stop→start 후
+    // 취소된 스코프에 launch 되어 틱이 영영 돌지 않는 문제를 피한다 (SchedulerManager 동일).
+    @Volatile private var scope: CoroutineScope? = null
     @Volatile private var running = false
     @Volatile private var lastAppliedId: String? = null
 
     fun start() {
         if (running) return
         running = true
-        scope.launch {
+        val sc = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        scope = sc
+        sc.launch {
             DebugLogger.i(TAG, "속도 스케줄 시작 (60초 틱)")
             while (running) {
-                tick()
+                runCatching { tick() }
+                    .onFailure { DebugLogger.e(TAG, "속도 스케줄 틱 실패 (계속)", it) }
                 delay(60_000)
             }
         }
@@ -38,13 +43,14 @@ class SpeedScheduleManager(
 
     fun stop() {
         running = false
-        scope.cancel()
+        scope?.cancel()
+        scope = null
         DebugLogger.i(TAG, "속도 스케줄 중지")
     }
 
     /** 수동 트리거 (설정 변경 직후) */
     fun checkNow() {
-        scope.launch { tick() }
+        scope?.launch { runCatching { tick() } }
     }
 
     internal suspend fun tick() {

@@ -97,6 +97,21 @@ class TorrentEngine(
         return try { block() } finally { sessionGate.unlock() }
     }
 
+    /**
+     * 읽기 전용 경로용 게이트 — 타임아웃 후 null 반환.
+     * withGate 는 무제한 대기라, /api/torrents 폴링이나 앱 UI 의 pause 버튼처럼
+     * 다른 스레드가 게이트를 쥔 상태에서 호출되면 호출자가 그만큼 붙잡힌다.
+     * UI(onClick) 에서 호출되면 메인 스레드가 멈춰 ANR 이 된다.
+     * 조회를 기다리는 것보다 최신 값을 덜 보여주는 편이 나으므로 탈락시킨다.
+     */
+    private inline fun <T> withGateRead(timeoutMs: Long = 2_000, block: () -> T): T? {
+        if (!sessionGate.tryLock(timeoutMs, TimeUnit.MILLISECONDS)) {
+            DebugLogger.w(TAG, "읽기 게이트 대기 초과(${timeoutMs}ms) — 스킵")
+            return null
+        }
+        return try { block() } finally { sessionGate.unlock() }
+    }
+
     /** alert 콜백 전용: stop()가 alert 스레드를 join하며 게이트를 잡고 있으면 데드락 → 타임아웃 후 스킵 */
     private inline fun withGateAlert(block: () -> Unit): Boolean {
         if (!sessionGate.tryLock(300, TimeUnit.MILLISECONDS)) {
@@ -134,7 +149,12 @@ class TorrentEngine(
     /** 동기된 트래커를 핸들에 추가 — 도달 우선 최대 20개. 전체 try-catch (T-931 교훈). */
     internal fun applyExtraTrackers(id: String) {
         try {
-            if (!settings.firstBlocking().torrentTrackerSync) return
+            // 설정은 init 의 Flow 구독이 유지하는 스냅샷을 쓴다.
+            // 여기서 settings.firstBlocking() (runBlocking → DataStore 디스크 읽기) 을 부르면
+            // registerMapping → handleAlert → withGateAlert 경로에서
+            // sessionGate 를 쥔 채 alert 스레드가 블로킹되어
+            // 5초 폴러·모든 /api/torrents 라우트·UI 스레드가 그 동안 전부 대기한다.
+            if (!latestTrackerSync) return
             val extra = TrackerListProvider.getCached(context)
             if (extra.isEmpty()) return
             val th = handleMap[id] ?: return
@@ -266,6 +286,8 @@ class TorrentEngine(
     @Volatile private var latestSeedRatio: Float = 2.0f
     @Volatile private var latestDhtEnabled: Boolean = true
     @Volatile private var latestPexEnabled: Boolean = true
+    /** 트래커 동기 여부 — 게이트를 쥔 채 디스크를 읽지 않기 위해 스냅샷으로 유지 */
+    @Volatile private var latestTrackerSync: Boolean = true
     @Volatile private var latestSavePath: String = StorageGuard.dlRoot.path
     /** id → 시더 부재 대기 시작 시각(ms). 0이면 미측정 */
     private val seedWaitSince = ConcurrentHashMap<String, Long>()
@@ -304,6 +326,7 @@ class TorrentEngine(
                 latestSeedRatio = s.torrentSeedRatio
                 latestDhtEnabled = s.torrentDhtEnabled
                 latestPexEnabled = s.torrentPexEnabled
+                latestTrackerSync = s.torrentTrackerSync
                 latestSavePath = s.torrentSavePath.ifBlank { StorageGuard.dlRoot.path }
                 latestStallEnabled = s.torrentStallEnabled
                 latestStallThresholdKbps = s.torrentStallThresholdKbps
@@ -1175,18 +1198,18 @@ val th = withGate { session?.find(Sha1Hash.parseHex(expectedHash)) }
         DebugLogger.i(TAG, "발표 강제 id=$id (tracker+DHT)")
     }
 
-    /** 조각 정보: (보유 조각 수, 전체 조각 수) */
+    /** 조각 정보: (보유 조각 수, 전체 조각 수) — /api/torrents 가 토렌트마다 호출 (1Hz 폴링) */
     fun pieceInfo(id: String): Pair<Int, Int> {
         val th = handleMap[id] ?: return 0 to 0
         return try {
-            withGate {
+            withGateRead {
                 val status = th.status()
                 val tf = try { th.torrentFile() } catch (_: Exception) { null }
                 val total = tf?.numPieces() ?: 0
                 val pieceLen = tf?.pieceLength()?.toLong() ?: 0L
                 val done = if (pieceLen > 0) (((status.totalDone() + pieceLen - 1) / pieceLen).toInt()) else 0
                 done.coerceAtMost(total) to total
-            }
+            } ?: (0 to 0)
         } catch (_: Exception) {
             0 to 0
         }
@@ -1195,7 +1218,8 @@ val th = withGate { session?.find(Sha1Hash.parseHex(expectedHash)) }
     fun getPeers(id: String): List<Map<String, Any?>> {
         val th = handleMap[id] ?: return emptyList()
         return try {
-            withGate {
+            // peerInfo() 는 최대 5000개 네이티브 객체를 물리므로 게이트 보유 시간이 길다
+            withGateRead {
                 th.peerInfo().map { pi ->
                     mapOf(
                         "ip" to pi.ip(),
@@ -1209,7 +1233,7 @@ val th = withGate { session?.find(Sha1Hash.parseHex(expectedHash)) }
                         "connectionType" to (pi.connectionType()?.name ?: "unknown"),
                     )
                 }
-            }
+            } ?: emptyList()
         } catch (_: Exception) {
             emptyList()
         }
@@ -1219,14 +1243,14 @@ val th = withGate { session?.find(Sha1Hash.parseHex(expectedHash)) }
         val job = TorrentRepository.get(id) ?: return emptyMap()
         val th = handleMap[id]
         val status = if (th != null) {
-            try { withGate { th.status() } } catch (_: Exception) { null }
+            try { withGateRead { th.status() } } catch (_: Exception) { null }
         } else null
         val peers = getPeers(id)
         val seeders = peers.count { it["flags"]?.let { f -> (f as? Int)?.and(0x1) != 0 } ?: false }
         val leechers = peers.size - seeders
 
         val fileProgress = if (th != null) {
-            try { withGate { th.fileProgress() } } catch (_: Exception) { null }
+            try { withGateRead { th.fileProgress() } } catch (_: Exception) { null }
         } else null
 
         return mapOf(

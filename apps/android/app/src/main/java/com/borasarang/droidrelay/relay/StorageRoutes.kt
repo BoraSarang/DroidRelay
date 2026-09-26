@@ -51,6 +51,8 @@ internal object StorageGuard {
 
 /** 보관함·외장스토리지·업로드·다운로드 라우트 (T-936 D1 — RelayServer에서 분리) */
 internal fun Route.storageRoutes(context: Context, serverRef: RelayServer) {
+    // 업로드 상한 (2 GiB) — 스트리밍하므로 힙 소모는 무관하지만 디스크 고갈·장시간 점유는 막아야 한다
+    val MAX_UPLOAD_BYTES = 2L * 1024 * 1024 * 1024
     // ── 외장 스토리지 감지 (Phase 3 확장) ──
     get("/api/storage/external") {
         val storages = StorageDetector.detectExternal(context)
@@ -341,16 +343,34 @@ internal fun Route.storageRoutes(context: Context, serverRef: RelayServer) {
         }
     }
 
+    /**
+     * 업로드 — 대용량 대응.
+     * 이전 구현은 multipart 파트 전체를 `toByteArray()` 로, base64 경로는
+     * JSON String + 디코딩된 ByteArray 를 동시에 힙에 올렸다(최대 약 3.3배).
+     * 크기 제한이 전혀 없어 승인된 LAN 클라이언트 하나가 1.5GB multipart 를 보내면
+     * OutOfMemoryError 로 프로세스가 죽었다.
+     * 이제 /api/storage/raw-upload 과 동일하게 64KB 청크로 스트리밍하고,
+     * Content-Length 로 상한을 먼저 확인한다.
+     */
     post("/api/storage/upload") {
         try {
             val isMultipart = call.request.headers["Content-Type"]?.contains("multipart/form-data") == true
             var subPath = ""
             var fileName = ""
-            var fileBytes: ByteArray? = null
 
             if (isMultipart) {
+                // Content-Length 사전 검증 — 스트리밍 전에 거절할 수 있는 유일한 기회
+                call.request.headers["Content-Length"]?.toLongOrNull()?.let { len ->
+                    if (len > MAX_UPLOAD_BYTES) {
+                        DebugLogger.w("Http", "업로드 크기 초과 ${len}B (상한 ${MAX_UPLOAD_BYTES}B) — 거절")
+                        call.respondErr("파일이 너무 큽니다 (최대 ${MAX_UPLOAD_BYTES / (1024 * 1024)}MB)")
+                        return@post
+                    }
+                }
                 val multipart = call.receiveMultipart()
                 var part: PartData? = multipart.readPart()
+                var wrote = false
+                var written = 0L
                 while (part != null) {
                     when (part) {
                         is PartData.FormItem -> {
@@ -362,38 +382,72 @@ internal fun Route.storageRoutes(context: Context, serverRef: RelayServer) {
                         }
                         is PartData.FileItem -> {
                             fileName = fileName.ifEmpty { part.originalFileName ?: "upload" }
-                            fileBytes = part.provider().toByteArray()
+                            val safeName = StorageGuard.safeLeafName(fileName)
+                            val dir = StorageGuard.storageFile(subPath)
+                            if (safeName == null || dir == null) {
+                                part.dispose()
+                                call.respondErr("잘못된 경로 또는 이름")
+                                return@post
+                            }
+                            dir.mkdirs()
+                            val file = java.io.File(dir, safeName)
+                            val provider = part.provider()
+                            val buf = ByteArray(65536)
+                            java.io.FileOutputStream(file).use { fos ->
+                                while (true) {
+                                    val n = provider.readAvailable(buf, 0, buf.size)
+                                    if (n == -1) break
+                                    written += n
+                                    if (written > MAX_UPLOAD_BYTES) {
+                                        DebugLogger.w("Http", "업로드 스트리밍 중 상한 초과 — 중단 ${file.name}")
+                                        throw IllegalStateException("파일이 너무 큽니다")
+                                    }
+                                    fos.write(buf, 0, n)
+                                }
+                            }
+                            DebugLogger.i("Http", "업로드 ${file.name} (${written}B, 스트리밍)")
+                            wrote = true
                         }
                         else -> {}
                     }
                     part.dispose()
                     part = multipart.readPart()
                 }
+                if (!wrote) {
+                    call.respondErr("파일 없음")
+                    return@post
+                }
             } else {
+                // base64 JSON 경로 — 본문 자체가 상한을 넘어가면 거절
                 val body = call.receiveText()
-                val json = org.json.JSONObject(body)
+                val json = try { org.json.JSONObject(body) } catch (_: Exception) { null }
+                if (json == null) {
+                    call.respondErr("잘못된 요청")
+                    return@post
+                }
                 subPath = json.optString("path", "")
                 fileName = StorageGuard.safeLeafName(json.optString("name", "")) ?: ""
                 val data = json.optString("data", "")
-                if (data.isNotEmpty()) {
-                    fileBytes = java.util.Base64.getDecoder().decode(data)
+                if (data.isEmpty()) {
+                    call.respondErr("파일 없음")
+                    return@post
                 }
+                // base64 는 원본의 약 4/3 — 문자열 길이로 상한을 먼저 판단한다
+                if (data.length > (MAX_UPLOAD_BYTES / 3) * 4) {
+                    call.respondErr("파일이 너무 큽니다 (최대 ${MAX_UPLOAD_BYTES / (1024 * 1024)}MB)")
+                    return@post
+                }
+                val fileBytes = java.util.Base64.getDecoder().decode(data)
+                val dir = StorageGuard.storageFile(subPath)
+                if (fileBytes.isEmpty() || fileName.isEmpty() || dir == null) {
+                    call.respondErr("잘못된 경로 또는 이름")
+                    return@post
+                }
+                dir.mkdirs()
+                val file = java.io.File(dir, fileName)
+                DebugLogger.i("Http", "업로드 ${file.name} (${fileBytes.size}B)")
+                file.writeBytes(fileBytes)
             }
-
-            val safeName = StorageGuard.safeLeafName(fileName)
-            if (safeName == null || fileBytes == null || fileBytes.isEmpty()) {
-                call.respondErr("파일 없음")
-                return@post
-            }
-            val dir = StorageGuard.storageFile(subPath)
-            if (dir == null) {
-                call.respondErr("잘못된 경로")
-                return@post
-            }
-            dir.mkdirs()
-            val file = java.io.File(dir, safeName)
-            DebugLogger.i("Http", "업로드 ${file.name} (${fileBytes.size}B)")
-            file.writeBytes(fileBytes)
             call.respondOk()
         } catch (e: Exception) {
             DebugLogger.e("Http", "업로드 실패", e)

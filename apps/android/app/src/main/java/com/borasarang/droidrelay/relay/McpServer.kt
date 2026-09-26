@@ -202,7 +202,7 @@ object McpServer {
         }
     }
 
-    private fun executeTool(context: Context, name: String, args: JSONObject, serverRef: RelayServer): Any {
+    private suspend fun executeTool(context: Context, name: String, args: JSONObject, serverRef: RelayServer): Any {
         // 권한 체크 (Phase 2.1 확장)
         val settings = serverRef.settings
         if (name in settings.mcpToolsDisabled) {
@@ -273,7 +273,7 @@ object McpServer {
         return file.readText()
     }
 
-    private fun downloadAdd(context: Context, args: JSONObject, serverRef: RelayServer): JSONObject {
+    private suspend fun downloadAdd(context: Context, args: JSONObject, serverRef: RelayServer): JSONObject {
         val url = args.optString("url", "")
         if (url.isBlank()) error("url 필요")
 
@@ -285,9 +285,9 @@ object McpServer {
                 val provider = runCatching { DebridProvider.valueOf(s.debridProvider) }.getOrNull()
                 if (provider != null) {
                     val client = DebridClient(context)
-                    val link = kotlinx.coroutines.runBlocking {
-                        client.unrestrict(url, provider, s.debridApiKey)
-                    }
+                    // runBlocking 으로 감싸면 DebridClient 의 suspend/IO 설계가 무의미해지고
+                    // Netty 이벤트루프가 40초(접속 15 + 읽기 30) 동안 블로킹된다.
+                    val link = client.unrestrict(url, provider, s.debridApiKey)
                     link.directUrl
                 } else url
             } catch (_: Exception) { url }
