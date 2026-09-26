@@ -1,5 +1,109 @@
 # Changelog
 
+## [v0.40.0] — 종합 안정성 4단계 (46건) + 토렌트 결함 #1~#9
+
+> 상세: `docs/STABILITY_AUDIT_2026-09-26.md` (5축 점검 리포트) · `docs/TORRENT_AUDIT_2026-09-26.md`
+> 검증: 테스트 184 → 222건 0 failures · 실기기(SM-S901N) 13/13 통과
+
+### Fixed [android] — 프로세스 사망 경로 12건
+
+`SupervisorJob` 는 형제 상쇄만 막고 예외는 기본 핸들러로 전달되므로 아래 각 항목이 독립적으로 앱을 종료시켰다.
+
+- `WebhookManager` — 스킴 없는 URL 이 `Request.Builder.url()` 에서 `IllegalArgumentException` (`try/catch` 밖). **다운로드 완료마다 사망**
+- `WebhookManager` — `"%02x".format(Byte)` 부호 확장 → `0xFF` 가 `ffffffffffffffff` 로 HMAC 서명되던 문제
+- `DownloadEngine.enqueue` — 이중 `URLDecoder.decode` 미가드. LAN `POST /api/jobs`(`?filename=a%.txt`)·안드로이드 공유시트에서 도달
+- `DebugOverlayService` — `onCreate` 내 `startForeground` 무방어(호출측 `runCatching` 은 다른 스레드 예외를 못 잡음) + `onDestroy` 에 `stopForeground` 누락
+- `ScheduleJobService` — 예외 시 `jobFinished` 미호출 → `onStopJob=true` 재스케줄 **크래시 루프**
+- `RssFeedManager` — `catch(Exception)` 이 `StackOverflowError` 통과 (사용자 정규식 1개로 폴링 스레드 사망)
+- `NetworkMonitor.register` / 가드 스로콜백 항목별 격리 / watchdog 재시작 방어 / `TorrentEngine.stop` 스코프 취소
+- `DebugRoutes` — `?limit=-1` 이 `takeLast` 에서 throw (하한 없음)
+
+### Fixed [android] — 데이터 손상·보안 6건
+
+- `TorrentPersistence.save` `@Synchronized` — 알림 스레드·폴러·이벤트루프가 공유 `.tmp` 에 교차 쓰기해 **토렌트 전체 손상**
+- `TrafficLedger.save` — `rename` **앞에** `delete()` → 두 문장 사이 크래시 시 **트래픽 이력 전체 소실**
+- `VideoDownloadManager` — `publishToDownloads` 반환값 무시, 게시 실패 시에도 원본 삭제 → **영상 영구 소실**
+- `McpServer.file_list` — `StorageGuard` 미사용 → `"path":"../../.."` 로 **루트 전체 목록 노출**
+- `StorageGuard.storageChild` 추가 — `storageFile("")` 이 루트를 반환해 `{"from":""}` 로 **보관함 전체 이름 변경**
+- `RelayServer` 에 **StatusPages 전역 안전망** (`ktor-server-status-pages` 신규) — 미처리 예외가 "본문 없는 연결 끊김" 이 되던 문제. 라우트 9곳 개별 패치 대신 전역 해결
+
+### Performance [android] — 유휴 상태 비용 11건
+
+| | 이전 | 이후 |
+|---|---|---|
+| `peers.json` 디스크 쓰기 (무활동) | 분당 12회 | **0회** |
+| 대시보드 탭 1개 HTTP | 분당 264회 | 유휴 시 **0회** |
+| `/api/guard/status` 시스템콜 | 분당 60 sysfs + 60 binder + 120 statfs | 15초 공유 캐시 |
+| `/api/info` binder IPC | 분당 60회 | 1회 |
+| watchdog | 분당 1회 왕복 HTTP | 인프로세스 판정 |
+| 메인 스레드 웨이크업 | 분당 52회 | **0회** |
+| `SimpleDateFormat` 할당 | `daily(400)` = 400개/호출 | 스레드당 1개 |
+
+- `recordPeers` 의 5분 데번스가 **디스크 쓰기를 막지 못하고 있었음**(구간 안에서도 `savePeers()` 호출)
+- `/api/events` 무조건 1Hz tick → **상태 서명 기반 변경 감지** + 15초 beat
+- 대시보드·디버그 `visibilitychange`/`pagehide` 가드 — 브라우저는 백그라운드 탭의 `setInterval` 만 throttle 하고 `EventSource` 는 throttle 하지 않음
+- SSE 재연결 지수 백오프 + 고아 `EventSource` 제거(서버 측 SSE 코루틴 누수)
+- `MainActivity` 1.5초 폴링 → `MutableSharedFlow` / `DownloadsScreen` 5초 폴링 → `ConnectivityManager.NetworkCallback`
+- `TorrentRepository` 진행 틱 스로틀(`JobsRepository` 정책 이식) / `TorrentRepository.update` 가 토렌트마다 정렬하던 구조 개선
+
+### Fixed [android] — "저장만 되고 적용되지 않던" 설정 8건
+
+**근본 원인: 정의만 있고 호출이 없는 함수가 4개** — `TunnelManager.start()`, `RelayApp.applySettings()`, `GuardDaemon.checkNow()`, `SpeedScheduleManager.checkNow()`
+
+- **터널 설정 완전 no-op** — `TunnelManager.start()` 호출이 코드베이스 전체에 없었음. `RelayService` 에 Flow 구독 추가
+- 앱 화면의 "최대 활성 torrent"·"시드 부재 대기" **미적용** — 핫 적용 루프가 해당 필드를 갱신하지 않음
+- 가드 임계치 **최대 5분 지연** — UI 는 최신값으로 계산해 대시보드와 실제 동작이 불일치. 5분 캐시를 Flow 푸시로 대체
+- 웹 속도 제한 토글 — "다운로드 제한" 켜면 **업로드 제한까지 0(끔)으로 덮어씀**
+- 웹 인증 스위치 — 암호 미설정 상태로 켜면 **인증이 전혀 적용되지 않음**. 거절 반환 + UI 안내
+- 속도 4·토렌트 속도 3종 상한 부재 → 토큰 버킷 `limit*2` Long 오버플로로 **제한이 조용히 무력화**. `SettingsConstraints.MAX_BPS` 도입
+- `SettingsResetter` 신규 — 앱/웹 "기본값 복원" 키 집합 불일치 해소 + 단일 팬아웃
+- `RssFeedRepository`/`ShareRepository` 원자 쓰기, 공유 토큰 `SecureRandom`(토큰이 곧 권한)
+
+### Fixed [android] — 토렌트 JNI·영속 14건
+
+- 게이트(`sessionGate`) 보유 중 `runBlocking`(alert 스레드가 디스크 I/O 대기 → 폴러·모든 라우트·UI 교차 대기) → Flow 스냅샷으로 대체
+- `withGateRead(2초)` 도입 — 읽기 전용 경로가 무제한 대기하던 것. `/api/torrents` 가 토렌트마다 JNI 2회 × 1Hz 폴링
+- `TorrentScreen` 의 pause/resume/reorder/파일선택/속도제한이 `onClick`(메인 스레드)에서 동기 호출 → 전부 `Dispatchers.IO` (ANR 방지)
+- MCP `runBlocking` 이 이벤트루프를 최대 40초 블로킹 → `suspend` 로 전환
+- `/api/storage/upload` 가 크기 제한 없이 전체를 힙에 → OOM. 64KB 스트리밍 + 사전 거절
+- 스케줄러 `stop`→`start` 후 **취소된 스코프**에 launch 되어 예약이 조용히 소멸하던 문제
+- `BootReceiver` `goAsync()` ANR 방지 / `CronParser` 가 `matches` 10,080회마다 Regex 컴파일(키 입력마다 메인 스레드 freeze) → 1회
+
+### Fixed [android] — 기기 검증에서 발견
+
+`persistDebounced()` 의 "변경 없으면 스킵" 가드(T-845)가 **처음부터 무효**였다.
+`lastSavedSnapshot != TorrentRepository.all()` 은 `TorrentJob`(data class) 전체를 비교하는데
+`seeds`·`peers`·`downloadSpeed`·`uploadSpeed` 는 **`TorrentPersistence.save` 에 기록되지 않는
+라이브 필드**이고 5초 폴링마다 갱신된다 → **바이트가 동일한 파일을 유휴 상태에서도 10초마다
+다시 썼다.** 실제 기록 필드만으로 서명을 만드는 `persistedSignature()` 로 교체.
+
+### Added [android] — 토렌트 (T-1055~T-1063)
+
+- magnet base32 infohash 지원(32자 → hex 40자) / `.torrent` 중복 가드(409)
+- PEX 세션 핫 적용(`enable_pex`) / 가드 스로틀 시 토렌트 pause·resume 연동
+- 보관함 이동을 5초 폴링의 완료 전이로 일원화(알림 유실 무관) + 전이 시 시딩 중단
+- 보관함 정렬 4종(앱 + 웹) + 재귀 용량 표시 / 배지 `DONE`·`FAILED` + 상세 모달 `errorMessage`
+
+### Added [test] — 회귀 테스트 38건 (184 → 222)
+
+- `DashboardRealtimeContractTest` (9) — 배포 HTML 이 가시성 게어·백오프 계약을 포함하는지 정적 검증
+- `TorrentPersistSignatureTest` (9) — 저장 대상 필드만 비교, 구분자 경계 충돌 없음
+- `SseSignatureTest` (7) — 유휴 시 서명 불변 = tick 정지의 근거
+- `CronParserPerfTest` (7) — 절대 매칭 불가 표현식, 필드 수 조기 거부
+- `SettingsClampTest` (6) — 상한 / Long 오버플로 방지
+- `scripts/verify_dashboard_realtime.js` — 배포 JS 를 DOM 스텁으로 실행하는 행동 검증(20/20)
+
+### Known Issues
+
+- `ktlintCheck` 가 **`.kts` 스크립트만 검사**하고 Kotlin 소스셋은 검사하지 않는다
+  (실행 태스크가 `runKtlintCheckOverKotlinScripts` 뿐). 활성화 시 기존 위반이 대량 surfaced 하므로 별도 과제
+- `ktor-server-core` 기본 **multipart 파트 제한 50MB** 로 대용량 업로드 실패.
+  대용량은 `/api/storage/raw-upload`(스트리밍, 제한 없음) 경로 사용
+- 웹훅 API 는 동작하나 **UI 가 없음** (앱/웹 어디에도 설정 화면 부재)
+- `torrentListenPort` vs 서버 포트 충돌 미검사 — 충돌 시 토렌트 세션이 조용히 기동 실패
+- `torrentSavePath` 경로 검증 없음 — 웹에서 임의 경로 지정 가능
+- `firstBlocking()`(`runBlocking`)이 Ktor 라우트 25곳에서 호출 — 이벤트루프 블로킹 여지
+
 ## [Unreleased] — 안정성 19건 (Phase A~D) + Phase E 분할·권한 + 종합 정리
 
 ### Changed [android] — 서버 기본값
