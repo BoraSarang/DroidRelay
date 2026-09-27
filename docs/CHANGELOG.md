@@ -41,15 +41,46 @@
   44px 버튼 래퍼를 앵커로 쓰면 드롭다운이 좌측으로 넘쳤다(390px 뷰포트 실측 `left = -155px`)
   → `.hd-acts{margin-left:auto}` + 액션 그룹 전체를 앵커로 사용
 
-### Tests [android] — 대시보드 통합 메뉴 계약 18건
+### Changed [web] — 순서변경 드롭 표시를 보관함과 같은 시각 언어로
 
-`DashboardInfoMenuContractTest` (신규) — 탭 4개, 통계 패널 제거, 드롭다운 DOM 배치, **앵커 위치**,
+보관함은 "이 폴더로 이동"이라 행 전체가 목적지라 사각 점선만으로 충분했다. 다운로드·토렌트는
+"순서 변경"이라 **어느 카드로**, **위/아래 어디에** 들어가는지가 둘 다 필요해 점선만으론 부족했다.
+
+- 사각 점선 태두리(`outline:2px dashed`) + 선택 배경으로 **어느 카드**인지 표시 — 보관함과 동일
+- 굵은 삽입선(`::before`, 3px, accent2 + 글로우)으로 **위/아래 삽입 위치** 표시
+- 카드 바깥 빈 공간에 떨궈도 순서변경이 안 되는 사실을 목록 테두리(`drop-empty`)로 안내
+- 구식 `box-shadow` 3px 선 제거
+
+### Fixed [web] — 헤더 버튼 어긋남 + 브레드크럼 인라인 핸들러 SyntaxError
+
+- **📊 통합 버튼만 10px 컸다** — `min-height:44px` 를 base 규칙에 넣었는데 기존 컨트롤의 터치 타깃
+  44px 은 모바일 쿼리에만 존재. 데스크톱에서 📊 44px vs ⟳ 34px 로 헤더가 어긋났다
+  (실측 top/bottom 각 5px 삐침). padding·line-height 를 `#btnRefresh` 와 동일하게 맞추고
+  `display:flex` + center 로 이모지 정렬을 엔진 비의존으로 변경
+- **보관함 브레드크럼 이동 불가** — `onclick="openDir(' + JSON.stringify(path) + ')"` 에서
+  `JSON.stringify` 의 큰따옴표가 큰따옴표 속성을 중간에서 닫아 핸들러 소스가 `openDir(` 로 잘림
+  → 상위 폴더 클릭 시 `SyntaxError: Unexpected token '}'`. 루트를 제외한 **브레드크럼 전체가 죽어 있었음**.
+  인라인 onclick 을 위임 리스너 + `data-path` 로 대체, drop 후 잔여 click 억제 추가
+- **동종 잠재 버그 2건** — `createVideo(<사용자 URL>)` / `retryVideo(<잡 URL>)` 가 `" < >` 를
+  이스케이프하지 않아 속성 조작 가능. `jsArg()` 헬퍼로 교체
+
+### Tests [android] — 대시보드 계약 25건 (통합 메뉴 19 + 인라인 핸들러 6)
+
+`DashboardInfoMenuContractTest` (신규 19건) — 탭 4개, 통계 패널 제거, 드롭다운 DOM 배치, **앵커 위치**,
+버튼 metrics 형제 일치, **드롭 표시 4축**(점선 태두리/삽입선/drop-empty/두 목록 바인딩),
 닫기 4종, 배지 분기, 닫힘 시 통계 0건 게이트, `__infoHtml` 캐시, 기존 `.info` 클래스 재사용(비디오 진행 박스 6곳) 보존.
+`DashboardInlineHandlerContractTest` (신규 6건) — 배포 HTML 전수 스캔으로 **홀수따옴표 / JSON.stringify 인라인 /
+자유텍스트 변수 인라인** 3축 차단.
 `scripts/verify_dashboard_info_menu.js` (신규) — 배포 HTML 에서 실제 블록을 뽑아 Node vm 으로 실행, **35/35**.
 `scripts/extract_dashboard_html.js` (신규) — 배포용 HTML 추출기.
 
-> **기억해 둘 것**: 이 화면의 두 위치 버그는 정적 grep·단위 테스트로 잡히지 않았고, **브라우저 실측으로만**
-> 발견됐다. 드롭다운·포털·absolute 배치는 반드시 렌더 박스를 재는 단계가 필요하다.
+> **기억해 둘 것**: 이 화면의 위치 버그 2건과 인라인 핸들러 버그는 정적 grep·단위 테스트로 잡히지 않았고,
+> **브라우저 실측으로만** 발견됐다. 드롭다운·absolute 배치·인라인 속성 값 삽입은 반드시
+> 렌더 박스 계측 또는 실행 검증을 거칠 것.
+
+> **검증 결과**: 테스트 222 → **251건 0 failures** · `verify_dashboard_info_menu.js` 35/35 ·
+> `verify_dashboard_realtime.js` 20/20 · 실기기(0.41.0) 데스크톱 1100px / 모바일 390px /
+> synthetic DragEvent 드롭 4단계 / 따옴표 포함 경로 왕복 / 3개 테마 토큰 검증.
 
 ## [v0.40.0] — 종합 안정성 4단계 (46건) + 토렌트 결함 #1~#9
 

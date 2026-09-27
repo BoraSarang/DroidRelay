@@ -32,6 +32,16 @@
 | 배지 | 유휴 숨김 / 활성 노출 / 스로틀 적색 (title 요약 포함) |
 | `assembleDebug` | 성공 |
 
-## 5. 남김
-- 실기기 설치·관찰(닫힘 60초간 서버 로그 `/api/stats/*` 0건 실증)은 미수행 — adb 기기 대기
+## 5. 사용자 보고 결함 3건 (모두 실기기 브라우저 실측으로 재현 → 수정)
+| # | 보고 | 근본 | 검증 |
+|---|---|---|---|
+| 1 | 사파리에서 통계 버튼 디자인 깨짐 | `min-height:44px` 를 base 에 넣음. 기존 컨트롤 터치 타깃 44px 은 모바일 쿼리 안에만 → 데스크톱에서 📊 44px vs ⟳ 34px | 실측 hDelta 0 / topDelta 0 (1100px·390px) |
+| 2 | 보관함 상위 폴더 클릭 시 `SyntaxError: Unexpected token '}'` | `onclick="openDir(" + JSON.stringify(path) + ")"` → 큰따옴표가 속성을 닫아 핸들러 소스가 `openDir(` 로 잘림. **루트 외 브레드크럼 전체가 죽어 있었음** | 실기기 `M` 클릭 → curPath="M", 오류 0 |
+| 3 | 순서변경 드롭 표시를 보관함처럼 | `.drop-before/.drop-after` 가 3px box-shadow 뿐 | synthetic DragEvent 4단계 + 3테마 |
+
+- 2번의 동종 잠재 버그 2곳(`createVideo(<URL>)`, `retryVideo(<URL>)`) 은 `jsArg()` 로 함께 수정
+- 검증 계층을 3단으로: 정적 계약 25건 · Node vm 실행 35/35 · 브라우저 실측(1100px/390px/드롭/테마)
+
+## 6. 남김
+- 브라우저 손 드래그는 미검증 — 합성 DragEvent 로 핸들러·CSS 만 확인. 실포인터는 사람 손이 필요
 - 통계 30일 차트는 좁은 화면에서 가로스크롤 유지(기존 동작, 520px → 420px/380px로 축소만)

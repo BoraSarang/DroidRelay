@@ -74,6 +74,52 @@ class DashboardInfoMenuContractTest {
         )
     }
 
+    // ── 드롭 대상 표시 (v0.41) ─────────────────────────────
+
+    @Test
+    fun `다운로드와 토렌트에도 사각 점선 드롭 태두리가 있다`() {
+        // 보관함(.file-row.drop-target) 과 같은 시각 언어를 순서변경 카드에도 준다
+        assertTrue(
+            "카드에 사각 점선 태두리가 없다",
+            html.contains(".card.drop-before,.card.drop-after{outline:2px dashed var(--accent);outline-offset:-2px;background:var(--sel)}"),
+        )
+        assertFalse("구식 box-shadow 만의 표시가 남아 있다", html.contains(".card.drop-before{box-shadow:"))
+    }
+
+    @Test
+    fun `순서변경은 삽입 위치까지 구분해 보여준다`() {
+        // 점선만으로는 위/아래 어디에 끼는지 알 수 없다 — 삽입선이 있어야 한다
+        assertTrue("삽입선(before) 이 없다", html.contains(".card.drop-before::before{top:-2px}"))
+        assertTrue("삽입선(after) 이 없다", html.contains(".card.drop-after::before{bottom:-2px}"))
+        assertTrue(
+            "삽입선 pseudo 요소가 없다",
+            html.contains(".card.drop-before::before,.card.drop-after::before{content:'';position:absolute;"),
+        )
+        assertTrue("삽입선의 위치 기준이 없다", html.contains(".card{position:relative}"))
+    }
+
+    @Test
+    fun `빈 공간 드롭은 목록 테두리로 안내한다`() {
+        assertTrue(
+            "빈 공간 표시 CSS 가 없다",
+            html.contains("#list.drop-empty,#torrentList.drop-empty{outline:2px dashed var(--line2)"),
+        )
+        assertTrue(
+            "dragover 가 drop-empty 를 토글하지 않는다",
+            html.contains("el.classList.toggle('drop-empty',!over||over===window.__dragSrc)"),
+        )
+        assertTrue("정리 시 drop-empty 가 남는다", html.contains("el.classList.remove('drop-empty')"))
+    }
+
+    @Test
+    fun `다운로드와 토렌트 목록이 모두 재바인딩된다`() {
+        assertTrue("재바인딩 대상 목록이 아니다", html.contains("['list','torrentList'].forEach(function(cid){"))
+        assertTrue(
+            "다운로드 reorder API 가 없다",
+            html.contains("cid==='list'?'/api/jobs/reorder':'/api/torrents/reorder'"),
+        )
+    }
+
     @Test
     fun `드롭다운은 헤더 액션 그룹 안에 앵커되어 있다`() {
         // v0.41 실제 결함 2건 (둘 다 브라우저 실측으로 발견 — 정적 grep 으로는 안 잡힌다):

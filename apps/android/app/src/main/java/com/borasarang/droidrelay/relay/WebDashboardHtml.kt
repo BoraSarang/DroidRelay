@@ -153,9 +153,19 @@ internal object WebDashboardHtml {
   .file-row.dragging{opacity:.45}
   .file-row.drop-target{outline:2px dashed var(--accent);outline-offset:-2px;background:var(--sel)}
   .card,.file-row{user-select:none;-webkit-user-select:none}
+  .card{position:relative}
   .card.dragging{opacity:.4}
-  .card.drop-before{box-shadow:0 -3px 0 0 var(--accent)}
-  .card.drop-after{box-shadow:0 3px 0 0 var(--accent)}
+  /* ── 드롭 대상 표시 (v0.41) ──
+     보관함은 "이 폴더로 이동"이라 행 전체가 목적지 → 사각 점선만으로 충분했다.
+     다운로드·토렌트는 "순서 변경"이라 위/아래 어디에 끼워 넣는지까지 알려야 해서
+     사각 점선(어느 카드) + 굵은 삽입선(어느 위치) 을 함께 쓴다. */
+  .card.drop-before,.card.drop-after{outline:2px dashed var(--accent);outline-offset:-2px;background:var(--sel)}
+  .card.drop-before::before,.card.drop-after::before{content:'';position:absolute;left:8px;right:8px;height:3px;
+    border-radius:99px;background:var(--accent2);box-shadow:0 0 8px var(--accent2)}
+  .card.drop-before::before{top:-2px}
+  .card.drop-after::before{bottom:-2px}
+  /* 카드 바깥 빈 공간에 떨궈면 순서변경이 안 된다 — 그 사실을 미리 보여준다 */
+  #list.drop-empty,#torrentList.drop-empty{outline:2px dashed var(--line2);outline-offset:-4px;border-radius:16px}
   .file-row .acts{margin-left:auto;display:flex;gap:6px;flex-shrink:0}
   .toolbar{display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap}
   .toolbar button{font-size:13px;padding:8px 14px}
@@ -1845,7 +1855,7 @@ function torrentDelConfirm(id){
     if(!el||el.__reorderBound)return;el.__reorderBound=true;
     var api=cid==='list'?'/api/jobs/reorder':'/api/torrents/reorder';
     function cards(){return [].slice.call(el.querySelectorAll('.card'));}
-    function clear(){cards().forEach(function(c){c.classList.remove('dragging','drop-before','drop-after')});}
+    function clear(){cards().forEach(function(c){c.classList.remove('dragging','drop-before','drop-after')});el.classList.remove('drop-empty');}
     el.addEventListener('dragstart',function(e){
       var c=e.target.closest?e.target.closest('.card'):null;if(!c)return;
       window.__dragActive=true;window.__dragActiveAt=Date.now();window.__dragId=c.dataset.id;window.__dragSrc=c;window.__dropInfo=null;
@@ -1860,6 +1870,8 @@ function torrentDelConfirm(id){
       e.dataTransfer.dropEffect='move';
       var over=e.target.closest?e.target.closest('.card'):null;
       cards().forEach(function(c){c.classList.remove('drop-before','drop-after')});
+      // 카드가 없는 빈 공간 위면 순서변경이 불가능 — 목록 테두리로 그 사실을 알린다
+      el.classList.toggle('drop-empty',!over||over===window.__dragSrc);
       if(!over||over===window.__dragSrc)return;
       var rc=over.getBoundingClientRect();
       var before=(e.clientY-rc.top)<rc.height/2;

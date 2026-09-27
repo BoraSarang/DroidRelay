@@ -545,4 +545,8 @@ T-001~T-008 전부 완료 (커밋 7574486).
 | T-1064 | PLAN 작성 + TODO 등록 + 0.41.0/32 버전 bump | ✅ |
 | T-1065 | 서버 설명 바(`.info`) + 통계 탭을 헤더 우측 `📊` 단일 아이콘 드롭다운으로 통합 (4탭) | ✅ |
 | T-1066 | 닫기 UX 4종(토글/외부 클릭/Esc/S) + 상태 배지 + 15초 스로틀 (닫힘 시 통계 API 0건) + `__infoHtml` 캐시 가드 | ✅ |
-| T-1067 | 검증 (DashboardInfoMenuContractTest 10건 + verify_dashboard_info_menu.js + 실기기 설치·관찰) | ✅ |
+| T-1067 | 검증 (DashboardInfoMenuContractTest 19건 + verify_dashboard_info_menu.js 35/35 + 실기기 0.41.0 실측) | ✅ |
+| T-1068 | 사파리 보고 결함 — 📊 버튼 44px vs 형제 34px 헤더 어긋남 수정 (metrics 일치 + flex center) | ✅ |
+| T-1069 | 보관함 브레드크럼 인라인 onclick SyntaxError — 위임 + data-path 대체, jsArg 헬퍼 신설 | ✅ |
+| T-1070 | DashboardInlineHandlerContractTest 6건 (홀수따옴표/JSON.stringify 인라인/자유텍스트 인라인 전수 스캔) | ✅ |
+| T-1071 | 순서변경 드롭 표시 통일 — 사각 점선 태두리 + 삽입선 + drop-empty (보관함과 동일 시각 언어) | ✅ |
