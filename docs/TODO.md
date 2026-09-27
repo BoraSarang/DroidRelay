@@ -550,3 +550,4 @@ T-001~T-008 전부 완료 (커밋 7574486).
 | T-1069 | 보관함 브레드크럼 인라인 onclick SyntaxError — 위임 + data-path 대체, jsArg 헬퍼 신설 | ✅ |
 | T-1070 | DashboardInlineHandlerContractTest 6건 (홀수따옴표/JSON.stringify 인라인/자유텍스트 인라인 전수 스캔) | ✅ |
 | T-1071 | 순서변경 드롭 표시 통일 — 사각 점선 태두리 + 삽입선 + drop-empty (보관함과 동일 시각 언어) | ✅ |
+| T-1072 | **데이터 손실** — `/api/storage/move` 이름 충돌 가드(StorageMove) + 덮어쓰기 확인 UI + 실패 정리 분기 사용자 파일 보호 | ✅ |

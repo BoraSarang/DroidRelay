@@ -1485,14 +1485,38 @@ function updateBreadcrumb(){
     if(srcDir===targetPath)return;
     var name=src.slice(src.lastIndexOf('/')+1);
     if(targetPath===src||targetPath.indexOf(src+'/')===0)return;
-    fetch('/api/storage/move',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({from:src,to:targetPath})})
-      .then(function(res){return res.json()}).then(function(d){
-        if(d.error){alert(d.error)}else{showDlToast('이동했습니다 → '+(targetPath||'📱 보관함'))}
-        openDir(targetPath)})
-      .catch(function(err){alert(err)});
+    // v0.41: 이름 충돌 확인은 storageMove 가 담당 (직접 fetch 하면 가드를 우회한다)
+    storageMove(src,targetPath,function(){openDir(targetPath)});
   });
 })();
+// ── 보관함 이동 (v0.41, T-1072) ──
+// 서버는 renameTo(2) 로 이동하므로 대상이 있으면 조용히 덮어쓴다. overwrite 가 없으면
+// conflict 로 보고하고, 여기서 사용자에게 확인받은 뒤 overwrite=true 로 재요청한다.
+// 브레드크럼 드롭 · 목록 드롭 두 곳이 이 함수를 공유한다 (가드 우회 경로 차단).
+function storageMove(from,to,onDone){
+  function post(overwrite){
+    return fetch('/api/storage/move',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({from:from,to:to,overwrite:!!overwrite})})
+      .then(function(res){return res.json()})
+      .then(function(d){
+        if(d&&d.conflict){
+          var what=d.isDir?'폴더':'파일';
+          // fmt() 는 1KB 미만을 "0 KB" 로 만들므로 이 자리에선 바이트를 보여준다
+          var sizeTxt=d.isDir?'':' · '+(d.size<1024?d.size+' B':fmt(d.size));
+          confirmPopup('같은 이름이 이미 있습니다',
+            '목적지에 「'+d.name+'」'+sizeTxt+'\n('+what+' · '+new Date(d.modified||Date.now()).toLocaleString('ko-KR')+' 수정)\n\n'+
+            '덮어쓰면 이 '+what+'은 사라지고 되돌릴 수 없습니다.',
+            function(){post(true);},true,'덮어쓰기');
+          return;   // 확인 전에는 목록을 다시 그리지 않는다 (아직 아무것도 안 바뀌었음)
+        }
+        if(d&&d.error){alert(d.error)}
+        else{showDlToast('이동했습니다 → '+(to||'📱 보관함'))}
+        if(onDone)onDone();
+      })
+      .catch(function(err){alert(err)});
+  }
+  post(false);
+}
 function updateToolbar(){
   document.getElementById('deleteBtn').style.display=selItem?'inline-block':'none';
 }
@@ -1553,12 +1577,8 @@ function openDir(path){curPath=path;selItem=null;window.__lastStorageH=null;refr
     var k=r.dataset.key;
     if(k===src){showDlToast('같은 위치입니다');return;}
     if(k.indexOf(src+'/')===0){showDlToast('자기 하위 폴더로는 이동할 수 없습니다');return;}
-    fetch('/api/storage/move',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({from:src,to:k})})
-      .then(function(res){return res.json()}).then(function(d){
-        if(d.error){alert(d.error)}else{showDlToast('이동했습니다 → '+r.dataset.name)}
-        refreshStorage()})
-      .catch(function(err){alert(err)});
+    // v0.41: 이름 충돌 확인은 storageMove 가 담당 (직접 fetch 하면 가드를 우회한다)
+    storageMove(src,k,refreshStorage);
   });
   list.addEventListener('dragend',function(){
     window.__dragActive=false;window.__dragKey=null;
@@ -1644,10 +1664,11 @@ document.addEventListener('keydown',function(e){
   if(e.key==='Enter'&&__popupOk){e.preventDefault();e.stopPropagation();var f=__popupOk;__popupOk=null;f();}
   else if(e.key==='Escape')closePopup();
 });
-function confirmPopup(title,msg,onOk,danger){
+// v0.41 (T-1072): okLabel — 파괴적 동작의 확인 버튼은 "확인" 이 아니라 행동을 말해야 한다
+function confirmPopup(title,msg,onOk,danger,okLabel){
   makeOverlay().innerHTML='<div class="popup"><h3>'+esc(title)+'</h3><p class="msg">'+esc(msg)+'</p><div class="pbtns">'
     +'<button type="button" onclick="closePopup()">취소</button>'
-    +'<button type="button" class="'+(danger?'danger':'ok')+'" id="popupOk" autofocus>확인</button></div></div>';
+    +'<button type="button" class="'+(danger?'danger':'ok')+'" id="popupOk" autofocus>'+esc(okLabel||'확인')+'</button></div></div>';
   document.getElementById('popupOk').onclick=function(){closePopup();if(onOk)onOk();};
   __popupOk=function(){closePopup();if(onOk)onOk();};
   return false;

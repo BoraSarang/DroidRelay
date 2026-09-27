@@ -64,7 +64,35 @@
 - **동종 잠재 버그 2건** — `createVideo(<사용자 URL>)` / `retryVideo(<잡 URL>)` 가 `" < >` 를
   이스케이프하지 않아 속성 조작 가능. `jsArg()` 헬퍼로 교체
 
-### Tests [android] — 대시보드 계약 25건 (통합 메뉴 19 + 인라인 핸들러 6)
+### Fixed [web] — 보관함 드래그 이동이 같은 이름 파일을 조용히 덮어썼다 (데이터 손실)
+
+**보고**: 보관함에서 드래그로 이동할 때 목적지에 같은 이름이 있으면 확인 없이 덮어써진다.
+
+**근본 1 — 서버에 충돌 검사가 아예 없었다.** `/api/storage/move` 는 이동을 `File.renameTo()` 로
+수행하는데, 이것은 POSIX `rename(2)` 래퍼라 **대상 파일이 이미 있어도 실패 없이 그 파일을 대체한다.**
+`copyTo(overwrite = true)` 폴백도 마찬가지였다. 같은 저장소의 다른 경로는 모두 가드가 있던 상태였다.
+
+| 경로 | 충돌 처리 (v0.41 이전) |
+|---|---|
+| `POST /api/storage/rename` | `toFile.exists()` → 거부 |
+| `POST /api/storage/delete` (휴지통) | 접미사 `-2`, `-3` 자동 부여 |
+| `POST /api/storage/trash/restore` | 접미사 `-2`, `-3` 자동 부여 |
+| `POST /api/storage/move` | **없음 → 조용히 덮어씀** |
+
+**근본 2 — 덮어쓰기 허용 후 실패 정리 분기가 사용자 파일을 파괴했다.** 이동 검증 실패·예외 시
+`dst.deleteRecursively()` 를 무조건 호출하는데, 대상이 원래부터 있었으면 그것은 **우리 가 아니라
+사용자의 파일**이다. `hadExisting` 플래그로 갈라 해결.
+
+**수정**
+- `StorageMove` (신규) — 순수 판정 객체. `overwrite=true` 가 명시된 경우에만 덮어쓴다.
+  Ktor route 테스트 하네스가 없어 판정 로직을 분리해 단위 테스트 (판정 + 응답 필드)
+- `conflict:true` + 대상 이름·크기·수정시각을 돌려주고, 웹 UI 가 `confirmPopup` 으로 확인받는다
+- 브레드크럼 드롭 · 목록 드롭 두 경로가 `storageMove()` 헬퍼를 공유 (직접 fetch 우회 차단)
+- 확인 버튼 라벨을 `확인` → `덮어쓰기` 로 (파괴적 동작은 행동을 말해야 한다)
+- 1KB 미만 파일은 `fmt()` 이 `0 KB` 로 뭉개므로 바이트 표기
+- 오류 코드 `E-AND-STOR-1004` 추가
+
+### Tests [android] — 대시보드 계약 25건 + StorageMoveTest 13건
 
 `DashboardInfoMenuContractTest` (신규 19건) — 탭 4개, 통계 패널 제거, 드롭다운 DOM 배치, **앵커 위치**,
 버튼 metrics 형제 일치, **드롭 표시 4축**(점선 태두리/삽입선/drop-empty/두 목록 바인딩),
@@ -78,7 +106,7 @@
 > **브라우저 실측으로만** 발견됐다. 드롭다운·absolute 배치·인라인 속성 값 삽입은 반드시
 > 렌더 박스 계측 또는 실행 검증을 거칠 것.
 
-> **검증 결과**: 테스트 222 → **251건 0 failures** · `verify_dashboard_info_menu.js` 35/35 ·
+> **검증 결과**: 테스트 222 → **264건 0 failures** · `verify_dashboard_info_menu.js` 35/35 ·
 > `verify_dashboard_realtime.js` 20/20 · 실기기(0.41.0) 데스크톱 1100px / 모바일 390px /
 > synthetic DragEvent 드롭 4단계 / 따옴표 포함 경로 왕복 / 3개 테마 토큰 검증.
 
