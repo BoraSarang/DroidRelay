@@ -30,7 +30,12 @@ internal object WebDashboardHtml {
   .wrap{max-width:1080px;margin:0 auto;padding:20px;min-width:480px}
   h1{font-size:20px;margin:0}
   .hd{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:14px}
-  .hd-acts{display:flex;align-items:center;gap:8px}
+  /* margin-left:auto — v0.41: 모바일에서 .hd 가 줄바꿈되면 두 번째 줄에 .hd-acts 혼자
+     남고 space-between 은 한 줄짜리 flex line 을 오른쪽으로 밀지 않는다(좌측 정렬).
+     그러면 우측 정렬 드롭다운이 화면 왼쪽 밖으로 넘친다.
+     position:relative — 드롭다운(.mm) 의 위치 기준. 버튼만 감싸는 44px 래퍼를 쓰면
+     좁은 화면에서 좌측으로 넘치므로 액션 그룹 전체를 앵커로 삼는다. */
+  .hd-acts{display:flex;align-items:center;gap:8px;margin-left:auto;position:relative}
   #btnRefresh{font-size:16px;padding:8px 13px;line-height:1}
   #btnRefresh.spin{animation:spin .8s linear}
   @keyframes spin{to{transform:rotate(360deg)}}
@@ -58,6 +63,36 @@ internal object WebDashboardHtml {
   .info-item.temp-ok b{color:var(--ok)}.info-item.temp-warn b{color:var(--err)}
   .info-item.temp-off{color:var(--dim)}
   .info-item .throttle-badge{color:var(--err);font-weight:700}
+  /* ── 헤더 통합 메뉴 (v0.41): 서버 설명 + 통계를 📊 아이콘 1개로 접는다 ── */
+  .mm{position:absolute;top:calc(100% + 8px);right:0;z-index:60;box-sizing:border-box;
+    width:min(520px,calc(100vw - 24px));max-height:min(78vh,720px);overflow-y:auto;overscroll-behavior:contain;
+    background:var(--surface);border:1px solid var(--line2);border-radius:14px;
+    box-shadow:0 16px 48px rgba(0,0,0,.55);padding:12px 14px;text-align:left}
+  .mm[hidden]{display:none}
+  .mm-h{font-size:11px;font-weight:700;color:var(--dim);text-transform:uppercase;
+    letter-spacing:.5px;margin:2px 0 8px;display:flex;align-items:center;gap:6px}
+  .mm-h .mm-hint{margin-left:auto;font-weight:500;text-transform:none;letter-spacing:0;font-size:11px}
+  .mm-sec+.mm-sec{margin-top:14px;padding-top:12px;border-top:1px solid var(--line)}
+  .mm-sec .info{margin-bottom:0}
+  .mm-sg{background:var(--surface2);border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-top:8px}
+  .mm-sg .sh{font-size:13px;padding-left:8px;margin-bottom:6px}
+  .mm-sg .sb{font-size:11px}
+  .mm-sg .hint{font-size:11px;color:var(--dim);line-height:1.5;margin-top:2px}
+  /* v0.41: #btnRefresh 와 **똑같은 metrics** 로 맞춘다 (padding 8px 13px · line-height 1).
+     min-height:44px 를 base 에 두면 데스크톱에서 이 버튼만 34px 형제보다 10px 커져
+     헤더가 어긋난다(사파리에서 더 두드러짐) — 터치 타깃 44px 은 모바일 쿼리로만 준다.
+     display:flex + center 로 이모지 세로 정렬을 엔진에 의존하지 않게 한다
+     (Safari 는 Apple Color Emoji 의 line box 가 텍스트 글리프와 달라 ⊙ 리듬이 어긋난다). */
+  #btnInfoMenu{position:relative;display:flex;align-items:center;justify-content:center;
+    min-width:40px;padding:8px 13px;font-size:16px;line-height:1}
+  #btnInfoMenu.on{background:var(--accentbg);border-color:var(--accent);color:var(--accent2)}
+  .mm-dot{position:absolute;top:5px;right:5px;width:7px;height:7px;border-radius:99px;background:var(--ok);
+    box-shadow:0 0 0 2px var(--surface);pointer-events:none}
+  .mm-dot.warn{background:var(--err)}
+  .mm-dot[hidden]{display:none}
+  /* 드롭다운 폭(520px)에 맞춘 통계 밀도 — 3열 고정 해제 후 auto-fit */
+  #infoMenu #statsCards{grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px}
+  #infoMenu #statsChart svg{min-width:420px}
   .row{display:flex;gap:8px}
   .row-torrent{display:flex;gap:8px;align-items:stretch}
   input[type=text],input[type=url]{flex:1;padding:11px 14px;border-radius:10px;border:1px solid var(--line2);background:var(--surface2);color:var(--text);font-size:14px}
@@ -118,9 +153,19 @@ internal object WebDashboardHtml {
   .file-row.dragging{opacity:.45}
   .file-row.drop-target{outline:2px dashed var(--accent);outline-offset:-2px;background:var(--sel)}
   .card,.file-row{user-select:none;-webkit-user-select:none}
+  .card{position:relative}
   .card.dragging{opacity:.4}
-  .card.drop-before{box-shadow:0 -3px 0 0 var(--accent)}
-  .card.drop-after{box-shadow:0 3px 0 0 var(--accent)}
+  /* ── 드롭 대상 표시 (v0.41) ──
+     보관함은 "이 폴더로 이동"이라 행 전체가 목적지 → 사각 점선만으로 충분했다.
+     다운로드·토렌트는 "순서 변경"이라 위/아래 어디에 끼워 넣는지까지 알려야 해서
+     사각 점선(어느 카드) + 굵은 삽입선(어느 위치) 을 함께 쓴다. */
+  .card.drop-before,.card.drop-after{outline:2px dashed var(--accent);outline-offset:-2px;background:var(--sel)}
+  .card.drop-before::before,.card.drop-after::before{content:'';position:absolute;left:8px;right:8px;height:3px;
+    border-radius:99px;background:var(--accent2);box-shadow:0 0 8px var(--accent2)}
+  .card.drop-before::before{top:-2px}
+  .card.drop-after::before{bottom:-2px}
+  /* 카드 바깥 빈 공간에 떨궈면 순서변경이 안 된다 — 그 사실을 미리 보여준다 */
+  #list.drop-empty,#torrentList.drop-empty{outline:2px dashed var(--line2);outline-offset:-4px;border-radius:16px}
   .file-row .acts{margin-left:auto;display:flex;gap:6px;flex-shrink:0}
   .toolbar{display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap}
   .toolbar button{font-size:13px;padding:8px 14px}
@@ -251,6 +296,7 @@ internal object WebDashboardHtml {
     .tabs .tab{padding:9px 2px;font-size:13px}
     .hd{flex-wrap:wrap;margin-bottom:12px}
     #btnRefresh{padding:12px 16px;min-height:44px}
+    #btnInfoMenu{padding:12px 16px;min-height:44px;min-width:44px}
     #themeSel{min-height:44px;max-width:130px}
     body[data-theme=toxic] h1,body[data-theme=midnight] h1{text-shadow:none}
     body[data-theme=toxic] .card,body[data-theme=toxic] .file-row,
@@ -263,6 +309,10 @@ internal object WebDashboardHtml {
     .ck{flex-wrap:wrap}
     .modal-stat{grid-template-columns:repeat(2,1fr)}
     #statsCards{grid-template-columns:repeat(3,1fr);gap:6px}
+    #infoMenu #statsCards{grid-template-columns:repeat(auto-fit,minmax(118px,1fr));gap:6px}
+    .mm{width:calc(100vw - 24px);max-height:72vh;padding:10px 12px}
+    #infoMenu #statsChart svg{min-width:380px}
+    .mm-sec+.mm-sec{margin-top:12px;padding-top:10px}
     .stats-card{padding:8px}
     .stats-card .s-title{font-size:12px}
     .stats-card .s-total{font-size:12px}
@@ -271,15 +321,48 @@ internal object WebDashboardHtml {
   }
 </style></head><body>
 <div class="wrap">
-  <div class="hd"><h1>📡 DroidRelay</h1><div class="hd-acts"><button id="btnRefresh" class="ghost" onclick="manualRefresh()" title="새로고침 (R)">⟳</button><select id="themeSel" onchange="setTheme(this.value)" title="테마"><option value="toxic">⚡ Toxic</option><option value="midnight">🌌 Midnight</option><option value="navy">🌊 Navy</option></select></div></div>
-  <div class="info" id="info">서버 정보 로딩 중…</div>
+  <div class="hd"><h1>📡 DroidRelay</h1><div class="hd-acts">
+    <button id="btnInfoMenu" class="ghost" onclick="toggleInfoMenu()" title="서버 상태 · 통계 (S)" aria-haspopup="true" aria-expanded="false" aria-controls="infoMenu">📊<i class="mm-dot" id="infoMenuDot" hidden></i></button>
+    <!-- v0.41: 헤더 통합 메뉴 — 서버 설명(#info) + 트래픽 통계를 📊 아이콘 드롭다운으로.
+         앵커는 `.hd-acts` 다.
+         (1) `.wrap` 하단에 두면 position:absolute 가 초기 포함 블록(문서)을 잡아 화면 아래로 튀어나간다.
+         (2) 버튼 44px짜리 래퍼에 두면 좁은 화면에서 좌측으로 넘친다(실측 390px 뷰포트 → left -155px).
+             `right:0` 이 앵커의 우측 끝(=버튼 우측)에 걸리므로 화면 우측 끝에 붙여야 한다. -->
+  <div class="mm" id="infoMenu" hidden>
+    <div class="mm-sec">
+      <div class="mm-h">📡 서버 상태<span class="mm-hint" id="infoMenuAt"></span></div>
+      <div class="info" id="info">서버 정보 로딩 중…</div>
+    </div>
+    <div class="mm-sec">
+      <div class="mm-h">📊 트래픽 통계</div>
+      <div class="mm-sg">
+        <div class="hint">일별 · 이번달 · 누적 업/다운로드 (서빙+토렌트 업로드 포함)</div>
+        <div id="statsCards"></div>
+      </div>
+      <div class="mm-sg">
+        <div class="sh">✨ 하이라이트</div>
+        <div class="hint">최고 기록 · 평균 · 예측 · 비율 (400일 기준 연산)</div>
+        <div id="statsHighlights" style="display:grid;grid-template-columns:repeat(2,1fr);gap:6px;margin-top:8px"></div>
+      </div>
+      <div class="mm-sg">
+        <div class="sh">📈 최고속도 · 완료 · 기기</div>
+        <div class="hint">일별 peak · 완료/실패 건수 · 피어 · 가동 · 저장공간 · 단절/스로틀</div>
+        <div id="statsRecords" style="display:grid;grid-template-columns:repeat(2,1fr);gap:6px;margin-top:8px"></div>
+      </div>
+      <div class="mm-sg">
+        <div class="sh">최근 30일 일별 그래프 <span class="hint" style="display:inline">■다운 ■업</span></div>
+        <div id="statsChart"></div>
+        <div class="hint" id="statsBreakdown" style="margin-top:8px"></div>
+      </div>
+    </div>
+  </div>
+    <button id="btnRefresh" class="ghost" onclick="manualRefresh()" title="새로고침 (R)">⟳</button><select id="themeSel" onchange="setTheme(this.value)" title="테마"><option value="toxic">⚡ Toxic</option><option value="midnight">🌌 Midnight</option><option value="navy">🌊 Navy</option></select></div></div>
 
   <div class="tabs">
     <div class="tab active" onclick="switchTab('dl')">다운로드</div>
     <div class="tab" onclick="switchTab('torrent')">토렌트</div>
     <div class="tab" onclick="switchTab('storage')">보관함</div>
     <div class="tab" onclick="switchTab('settings')">설정</div>
-    <div class="tab" onclick="switchTab('stats')">📊 통계</div>
   </div>
 
     <!-- 다운로드 탭 -->
@@ -844,30 +927,6 @@ internal object WebDashboardHtml {
       </div>
     </div>
   </div>
-
-    <!-- 통계 탭 -->
-  <div class="panel" id="panel-stats">
-    <div class="sg" style="margin-bottom:12px">
-      <div class="sh">📊 트래픽 통계</div>
-      <div class="sb">일별 · 이번달 · 누적 업/다운로드 (서빙+토렌트 업로드 포함)</div>
-      <div id="statsCards"></div>
-    </div>
-    <div class="sg" style="margin-bottom:12px">
-      <div class="sh">✨ 하이라이트</div>
-      <div class="sb">최고 기록 · 평균 · 예측 · 비율 (400일 기준 연산)</div>
-      <div id="statsHighlights" style="display:grid;grid-template-columns:repeat(2,1fr);gap:6px;margin-top:10px"></div>
-    </div>
-    <div class="sg" style="margin-bottom:12px">
-      <div class="sh">📈 최고속도 · 완료 · 기기</div>
-      <div class="sb">일별 peak · 완료/실패 건수 · 피어 · 가동 · 저장공간 · 단절/스로틀</div>
-      <div id="statsRecords" style="display:grid;grid-template-columns:repeat(2,1fr);gap:6px;margin-top:10px"></div>
-    </div>
-    <div class="sg">
-      <div class="sh">최근 30일 일별 그래프 <span class="sb" style="display:inline">■다운 ■업</span></div>
-      <div id="statsChart"></div>
-      <div class="sb" id="statsBreakdown" style="margin-top:8px"></div>
-    </div>
-  </div>
 </div>
 <div class="modal-overlay" id="torrentModal">
   <div class="modal">
@@ -892,6 +951,14 @@ function dragActive(){return window.__dragActive&&(Date.now()-window.__dragActiv
 window.onerror=function(msg,src,line){var t=document.createElement('div');t.textContent='⚠ JS 오류: '+msg+' @'+line;t.style.cssText='position:fixed;top:10px;left:50%;transform:translateX(-50%);background:#5c1a1a;color:var(--err);padding:8px 14px;border-radius:8px;font-size:12px;z-index:99999';document.body.appendChild(t);setTimeout(function(){t.remove()},6000);};
 
 function esc(s){return (s||'').replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+// 인라인 핸들러용 — 큰따옴표 속성 안에 넣을 단일따옴표 JS 문자열 리터럴.
+// \ ' 는 JS 이스케이프하고 " < > & 는 엔티티로 바꿔 HTML 속성 파서가 잘리지 않게 한다.
+// (브레드크럼 버그: 값을 속성 안에 그대로 끼우면 `onclick="openDir("` 까지 잘려
+//  SyntaxError 가 났다 — 사용자 값은 반드시 이 헬퍼로만 인라인에 넣는다)
+function jsArg(s){
+  return String(s==null?'':s).replace(/\\/g,'\\\\').replace(/'/g,"\\'")
+    .replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
 function num(v,d){v=parseFloat(v);return isFinite(v)?v:d;}
 function kblabel(v,d,zero){v=(v!=null?v:d);return v===0?zero:v+' KB/s';}
 // ── 속도 제한 프리셋 (T-1050) — 앱 SpeedLimits.KBPS와 같은 목록이 단일 진실 ──
@@ -990,7 +1057,7 @@ function analyzeVideo(){
       +'<button class="ghost sm" onclick="copyVideoUrl()" style="flex:0 0 auto">📋 주소 복사</button>';
     var baseName=(j.direct?((j.streamUrl||v).split('/').pop().split('?')[0].split('#')[0].replace(/\.[^.]+$/,'')||'video'):((j.title||'video').replace(/[\\/:*?"<>|]/g,'_'))).slice(0,60)||'video';
     h+='<input id="vname" type="text" value="'+esc(baseName)+'.mp4" style="flex:1 1 160px;min-width:140px;box-sizing:border-box">'
-      +'<button onclick="createVideo(\''+v.replace(/\\/g,'\\\\').replace(/'/g,"\\'")+'\')" style="flex:0 0 auto">▶ 다운로드</button>'
+      +'<button onclick="createVideo(\''+jsArg(v)+'\')" style="flex:0 0 auto">▶ 다운로드</button>'
       +'</div></div>';
     area.innerHTML=h;
     refresh();
@@ -1109,7 +1176,7 @@ function render(jobs){
     if(j.type!=='video'&&j.state==='RUNNING')pause='<button class="ghost" onclick="act(\''+j.id+'\',\'pause\')">일시정지</button>';
     if(j.type==='video'&&j.state==='RUNNING')pause='<span class="eta" style="align-self:center">FFmpeg → 삭제로 취소</span>';
     if(j.type!=='video'&&(j.state==='PAUSED'||j.state==='FAILED'))pause='<button class="ghost" onclick="act(\''+j.id+'\',\'resume\')">재개</button>';
-    if(j.type==='video'&&j.state==='FAILED')pause='<button class="ghost" onclick="retryVideo(\''+esc(j.url).replace(/\\/g,'\\\\').replace(/'/g,"\\'")+'\')">재시도</button>';
+    if(j.type==='video'&&j.state==='FAILED')pause='<button class="ghost" onclick="retryVideo(\''+jsArg(j.url)+'\')">재시도</button>';
     var cancel='<button class="ghost" onclick="delJobConfirm(\''+j.id+'\')">삭제</button>';
     var limit='';
     if(j.type!=='video'&&j.state!=='DONE'&&j.state!=='CANCELED'){
@@ -1164,8 +1231,66 @@ function updateInfoBar(){
   }
   if(info&&info.version)right+='<span class="info-item" style="color:var(--dim)">v'+info.version+'</span>';
   right+='</div>';
-  document.getElementById('info').innerHTML=left+right;
+  // v0.41: 드롭다운이 닫혀 있어도 매 tick innerHTML 을 쓰면 유휴 DOM 쓰기가 된다.
+  // 조립 결과가 이전과 같으면 건너뛴다.
+  var html=left+right;
+  if(window.__infoHtml!==html){
+    window.__infoHtml=html;
+    var el=document.getElementById('info');
+    if(el)el.innerHTML=html;
+  }
+  updateInfoBadge(running.length,tActive.length,gs,spd(totalSpeed+tDown));
 }
+// ── 상태 배지 (v0.41) — 📊 버튼 우상단 도트 + 툴팁 요약 ──
+function updateInfoBadge(running,tActive,gs,downSpd){
+  var dot=document.getElementById('infoMenuDot');
+  var btn=document.getElementById('btnInfoMenu');
+  var busy=running>0||tActive>0;
+  var throttled=!!(gs&&gs.guardEnabled&&gs.throttled);
+  if(dot){
+    dot.hidden=!busy&&!throttled;
+    dot.classList.toggle('warn',throttled);
+  }
+  if(btn){
+    var tip='서버 상태 · 통계 (S)';
+    if(throttled)tip='⚠ 스로틀링 — 서버 상태 · 통계 (S)';
+    else if(busy)tip='진행 '+running+' · 토렌트 '+tActive+' · '+downSpd+' — 서버 상태 · 통계 (S)';
+    else tip='대기중 — 서버 상태 · 통계 (S)';
+    btn.title=tip;
+  }
+  var at=document.getElementById('infoMenuAt');
+  if(at&&window.__infoMenuOpen){
+    var d=new Date();
+    at.textContent=('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2)+':'+('0'+d.getSeconds()).slice(-2);
+  }
+}
+// ── 헤더 통합 메뉴 (v0.41) — 서버 설명 + 통계를 📊 드롭다운 1개로 ──
+var __infoMenuOpen=false,__statsAt=0;
+function openInfoMenu(){
+  var m=document.getElementById('infoMenu');if(!m)return;
+  m.hidden=false;window.__infoMenuOpen=true;
+  var b=document.getElementById('btnInfoMenu');
+  if(b){b.classList.add('on');b.setAttribute('aria-expanded','true');}
+  updateInfoBar();
+  refreshStats();
+}
+function closeInfoMenu(){
+  var m=document.getElementById('infoMenu');if(!m||!window.__infoMenuOpen)return;
+  m.hidden=true;window.__infoMenuOpen=false;
+  var b=document.getElementById('btnInfoMenu');
+  if(b){b.classList.remove('on');b.setAttribute('aria-expanded','false');}
+  var at=document.getElementById('infoMenuAt');if(at)at.textContent='';
+}
+function toggleInfoMenu(){if(window.__infoMenuOpen)closeInfoMenu();else openInfoMenu();}
+// 바깥 클릭 시 닫기 — 버튼/패널 내부는 contains 로 판정해 토글과 충돌하지 않는다
+document.addEventListener('click',function(e){
+  if(!window.__infoMenuOpen)return;
+  var m=document.getElementById('infoMenu');
+  if(m&&m.contains(e.target))return;
+  var b=document.getElementById('btnInfoMenu');
+  if(b&&b.contains(e.target))return;
+  closeInfoMenu();
+});
 function renderTorrents(ts){
   if(dragActive())return;
   window.__torrents=ts;
@@ -1313,19 +1438,31 @@ var dlBase=location.protocol+'//'+location.hostname+':'+location.port;
 }
 function updateBreadcrumb(){
   var parts=curPath?curPath.split('/'):[];
-  var h='<span data-path="" onclick="openDir(\'\')">📱 보관함</span>';
+  // v0.41: onclick 인라인 핸들러를 쓰면 안 된다. 경로를 JSON.stringify 로 큰따옴표 속성에
+  // 끼워 넣는 순간 HTML 파서가 `onclick="openDir("` 까지 잘라 버려
+  // SyntaxError: Unexpected token '}' 가 나고, 남은 조각이 새 액자처럼 붙어 보인다.
+  // data-path 만 심고 아래 위임 리스너가 처리한다 (따옴표 포함 경로도 안전).
+  var h='<span data-path="">📱 보관함</span>';
   var p='';
   parts.forEach(function(part){
     if(!part)return;
     p+=(p?'/':'')+part;
-    (function(path){h+=' / <span data-path="'+esc(path)+'" onclick="openDir('+JSON.stringify(path)+')">'+esc(part)+'</span>'})(p);
+    h+=' / <span data-path="'+esc(p)+'">'+esc(part)+'</span>';
   });
   document.getElementById('breadcrumb').innerHTML=h;
 }
 (function(){
   var bc=document.getElementById('breadcrumb');
   if(!bc||bc.__delegated)return;bc.__delegated=true;
+  var suppressClickUntil=0;
   function clearMarks(){document.querySelectorAll('#breadcrumb .drop-target').forEach(function(s){s.classList.remove('drop-target')});}
+  // 상위 폴더 이동 — v0.41: 인라인 onclick 대신 위임 (따옴표 포함 경로까지 안전)
+  bc.addEventListener('click',function(e){
+    if(Date.now()<suppressClickUntil)return;
+    var span=e.target.closest('[data-path]');
+    if(!span||!bc.contains(span))return;
+    openDir(span.dataset.path||'');
+  });
   bc.addEventListener('dragover',function(e){
     if(!window.__dragKey)return;
     var span=e.target.closest('[data-path]');if(!span)return;
@@ -1338,6 +1475,7 @@ function updateBreadcrumb(){
   });
   bc.addEventListener('drop',function(e){
     e.preventDefault();
+    suppressClickUntil=Date.now()+400;   // 드롭 직후 잔여 click 이 위임 이동을 중복 실행하지 않게
     var src=window.__dragKey;
     var span=e.target.closest('[data-path]');
     clearMarks();
@@ -1347,14 +1485,38 @@ function updateBreadcrumb(){
     if(srcDir===targetPath)return;
     var name=src.slice(src.lastIndexOf('/')+1);
     if(targetPath===src||targetPath.indexOf(src+'/')===0)return;
-    fetch('/api/storage/move',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({from:src,to:targetPath})})
-      .then(function(res){return res.json()}).then(function(d){
-        if(d.error){alert(d.error)}else{showDlToast('이동했습니다 → '+(targetPath||'📱 보관함'))}
-        openDir(targetPath)})
-      .catch(function(err){alert(err)});
+    // v0.41: 이름 충돌 확인은 storageMove 가 담당 (직접 fetch 하면 가드를 우회한다)
+    storageMove(src,targetPath,function(){openDir(targetPath)});
   });
 })();
+// ── 보관함 이동 (v0.41, T-1072) ──
+// 서버는 renameTo(2) 로 이동하므로 대상이 있으면 조용히 덮어쓴다. overwrite 가 없으면
+// conflict 로 보고하고, 여기서 사용자에게 확인받은 뒤 overwrite=true 로 재요청한다.
+// 브레드크럼 드롭 · 목록 드롭 두 곳이 이 함수를 공유한다 (가드 우회 경로 차단).
+function storageMove(from,to,onDone){
+  function post(overwrite){
+    return fetch('/api/storage/move',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({from:from,to:to,overwrite:!!overwrite})})
+      .then(function(res){return res.json()})
+      .then(function(d){
+        if(d&&d.conflict){
+          var what=d.isDir?'폴더':'파일';
+          // fmt() 는 1KB 미만을 "0 KB" 로 만들므로 이 자리에선 바이트를 보여준다
+          var sizeTxt=d.isDir?'':' · '+(d.size<1024?d.size+' B':fmt(d.size));
+          confirmPopup('같은 이름이 이미 있습니다',
+            '목적지에 「'+d.name+'」'+sizeTxt+'\n('+what+' · '+new Date(d.modified||Date.now()).toLocaleString('ko-KR')+' 수정)\n\n'+
+            '덮어쓰면 이 '+what+'은 사라지고 되돌릴 수 없습니다.',
+            function(){post(true);},true,'덮어쓰기');
+          return;   // 확인 전에는 목록을 다시 그리지 않는다 (아직 아무것도 안 바뀌었음)
+        }
+        if(d&&d.error){alert(d.error)}
+        else{showDlToast('이동했습니다 → '+(to||'📱 보관함'))}
+        if(onDone)onDone();
+      })
+      .catch(function(err){alert(err)});
+  }
+  post(false);
+}
 function updateToolbar(){
   document.getElementById('deleteBtn').style.display=selItem?'inline-block':'none';
 }
@@ -1415,12 +1577,8 @@ function openDir(path){curPath=path;selItem=null;window.__lastStorageH=null;refr
     var k=r.dataset.key;
     if(k===src){showDlToast('같은 위치입니다');return;}
     if(k.indexOf(src+'/')===0){showDlToast('자기 하위 폴더로는 이동할 수 없습니다');return;}
-    fetch('/api/storage/move',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({from:src,to:k})})
-      .then(function(res){return res.json()}).then(function(d){
-        if(d.error){alert(d.error)}else{showDlToast('이동했습니다 → '+r.dataset.name)}
-        refreshStorage()})
-      .catch(function(err){alert(err)});
+    // v0.41: 이름 충돌 확인은 storageMove 가 담당 (직접 fetch 하면 가드를 우회한다)
+    storageMove(src,k,refreshStorage);
   });
   list.addEventListener('dragend',function(){
     window.__dragActive=false;window.__dragKey=null;
@@ -1506,10 +1664,11 @@ document.addEventListener('keydown',function(e){
   if(e.key==='Enter'&&__popupOk){e.preventDefault();e.stopPropagation();var f=__popupOk;__popupOk=null;f();}
   else if(e.key==='Escape')closePopup();
 });
-function confirmPopup(title,msg,onOk,danger){
+// v0.41 (T-1072): okLabel — 파괴적 동작의 확인 버튼은 "확인" 이 아니라 행동을 말해야 한다
+function confirmPopup(title,msg,onOk,danger,okLabel){
   makeOverlay().innerHTML='<div class="popup"><h3>'+esc(title)+'</h3><p class="msg">'+esc(msg)+'</p><div class="pbtns">'
     +'<button type="button" onclick="closePopup()">취소</button>'
-    +'<button type="button" class="'+(danger?'danger':'ok')+'" id="popupOk" autofocus>확인</button></div></div>';
+    +'<button type="button" class="'+(danger?'danger':'ok')+'" id="popupOk" autofocus>'+esc(okLabel||'확인')+'</button></div></div>';
   document.getElementById('popupOk').onclick=function(){closePopup();if(onOk)onOk();};
   __popupOk=function(){closePopup();if(onOk)onOk();};
   return false;
@@ -1620,7 +1779,9 @@ function refresh(){
     if(window.__wantsRenderInfo){window.__wantsRenderInfo=false;updateInfoBar();}
   }).catch(function(){window.__guardStatus=null;window.__wantsRenderInfo=false;updateInfoBar();});
   if(curTab==='storage')refreshStorage();
-  if(curTab==='stats')refreshStats();
+  // v0.41: 통계는 드롭다운을 열어둔 동안에만 갱신 (닫힘 = 통계 API 0건).
+  // SSE 는 변화 있을 때만 tick + 15초 beat 이므로 여기도 15초로 스로틀해 배수를 막는다.
+  if(window.__infoMenuOpen&&Date.now()-__statsAt>15000)refreshStats();
 }
 function add(){
   var raw=document.getElementById('url').value.trim();if(!raw)return;
@@ -1715,7 +1876,7 @@ function torrentDelConfirm(id){
     if(!el||el.__reorderBound)return;el.__reorderBound=true;
     var api=cid==='list'?'/api/jobs/reorder':'/api/torrents/reorder';
     function cards(){return [].slice.call(el.querySelectorAll('.card'));}
-    function clear(){cards().forEach(function(c){c.classList.remove('dragging','drop-before','drop-after')});}
+    function clear(){cards().forEach(function(c){c.classList.remove('dragging','drop-before','drop-after')});el.classList.remove('drop-empty');}
     el.addEventListener('dragstart',function(e){
       var c=e.target.closest?e.target.closest('.card'):null;if(!c)return;
       window.__dragActive=true;window.__dragActiveAt=Date.now();window.__dragId=c.dataset.id;window.__dragSrc=c;window.__dropInfo=null;
@@ -1730,6 +1891,8 @@ function torrentDelConfirm(id){
       e.dataTransfer.dropEffect='move';
       var over=e.target.closest?e.target.closest('.card'):null;
       cards().forEach(function(c){c.classList.remove('drop-before','drop-after')});
+      // 카드가 없는 빈 공간 위면 순서변경이 불가능 — 목록 테두리로 그 사실을 알린다
+      el.classList.toggle('drop-empty',!over||over===window.__dragSrc);
       if(!over||over===window.__dragSrc)return;
       var rc=over.getBoundingClientRect();
       var before=(e.clientY-rc.top)<rc.height/2;
@@ -1843,9 +2006,12 @@ function manualRefresh(){
 }
 document.addEventListener('keydown',function(e){
   if(document.getElementById('popupOverlay'))return;
+  // v0.41: Esc 은 입력 요소에 커서가 있어도 통합 메뉴를 닫아야 한다 (가드보다 먼저)
+  if(e.key==='Escape'){closeInfoMenu();return;}
   var t=document.activeElement;
   if(t&&(t.tagName==='INPUT'||t.tagName==='SELECT'||t.tagName==='TEXTAREA'))return;
   if(e.key==='r'||e.key==='R'){manualRefresh();}
+  if(e.key==='s'||e.key==='S'){toggleInfoMenu();}
 });
 function setTheme(t){
   try{localStorage.setItem('dr_theme',t);}catch(e){}
@@ -2002,18 +2168,17 @@ document.addEventListener('click',function(e){
 
 function switchTab(t){
   curTab=t;
+  closeInfoMenu();   // v0.41: 탭 전환 시 통합 메뉴 닫기
   if(trashMode&&t!=='storage')toggleTrash();
   document.querySelectorAll('.tab').forEach(function(el,i){
-    el.classList.toggle('active',(['dl','torrent','storage','settings','stats'])[i]===t);
+    el.classList.toggle('active',(['dl','torrent','storage','settings'])[i]===t);
   });
   document.getElementById('panel-dl').classList.toggle('active',t==='dl');
   document.getElementById('panel-torrent').classList.toggle('active',t==='torrent');
   document.getElementById('panel-storage').classList.toggle('active',t==='storage');
   document.getElementById('panel-settings').classList.toggle('active',t==='settings');
-  document.getElementById('panel-stats').classList.toggle('active',t==='stats');
   if(t==='storage')refreshStorage();
   if(t==='torrent')refreshSearchVisibility();
-  if(t==='stats')refreshStats();
   if(t==='settings'){loadSettings();loadSearchSettings();loadTrackerCount();}
 }
 
@@ -2616,6 +2781,7 @@ function statsCard(title,b){
     +'</div>';
 }
 function refreshStats(){
+  __statsAt=Date.now();
   var summary=null;
   fetch('/api/stats/summary').then(function(r){return r.json();}).then(function(s){
     summary=s;

@@ -286,6 +286,27 @@ internal fun Route.storageRoutes(context: Context, serverRef: RelayServer) {
             return@post
         }
         if (!dstDir.exists()) dstDir.mkdirs()
+        // v0.41 (T-1072): 이름 충돌 가드. renameTo 는 POSIX rename(2) 라 대상을 조용히
+        // 덮어써서, overwrite 가 명시되지 않으면 사용자 확인 없이 파일이 사라졌다.
+        // hadExisting 은 아래 실패 정리 분기에서도 쓴다 — 기존 대상이 있는데 복사 검증에
+        // 실패했을 때 dst 를 지우면 사용자 파일이 파괴된다.
+        val hadExisting = dst.exists()
+        val decision = StorageMove.decide(
+            srcName = src.name,
+            dstExists = hadExisting,
+            dstIsDir = dst.isDirectory,
+            dstSize = if (dst.isFile) dst.length() else 0L,
+            dstModified = dst.lastModified(),
+            overwrite = json.optBoolean("overwrite", false),
+        )
+        if (decision is StorageMove.Decision.Conflict) {
+            DebugLogger.w("Http", "이동 충돌(확인 대기) ${src.name} → ${dstDir.path} (E-AND-STOR-1004)")
+            call.respondText(
+                org.json.JSONObject(StorageMove.conflictFields(decision)).toString(),
+                ContentType.Application.Json,
+            )
+            return@post
+        }
         DebugLogger.i("Http", "이동 ${src.name} → ${dstDir.path.removePrefix(StorageGuard.dlRootCanonical.path)}")
         // 안전 이동: rename 우선(원자적) → 실패 시 copy + 크기 검증 후 원본 삭제
         val moved = if (src.renameTo(dst)) {
@@ -298,12 +319,13 @@ internal fun Route.storageRoutes(context: Context, serverRef: RelayServer) {
                     true
                 } else {
                     DebugLogger.e("Stor", "이동 검증 실패 → 복사본 폐기, 원본 보존 ${src.name} (E-AND-STOR-1002)")
-                    dst.deleteRecursively()
+                    // 사전에 대상이 있었다면 그 파일은 사용자 소유 — 지우면 안 된다
+                    if (!hadExisting) dst.deleteRecursively()
                     false
                 }
             } catch (e: Exception) {
-                    DebugLogger.e("Stor", "이동 실패 ${src.name}: ${e.message} (E-AND-STOR-1002)")
-                dst.deleteRecursively()
+                DebugLogger.e("Stor", "이동 실패 ${src.name}: ${e.message} (E-AND-STOR-1002)")
+                if (!hadExisting) dst.deleteRecursively()
                 false
             }
         }

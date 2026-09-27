@@ -1,5 +1,192 @@
 # Changelog
 
+## [v0.42.0] — API/MCP 하드닝 (교차 출처 차단 + MCP 규격 준수 + 도구 5→12)
+
+> 상세: `docs/plans/PLAN_v0.42_api-mcp-hardening_android.md` (T-1073~T-1079)
+> 검증: 테스트 264 → **300건 0 failures** · 실기기 curl 13종 · 웹 대시보드 4탭 무결성
+> 맥 메뉴바 앱(Phase 2~3)은 **보류** — 전 Phase 완료 후 착수
+
+### Security [web] — 교차 출처(CSRF·DNS rebinding) 벡터 차단
+
+**조사에서 실측으로 확인한 것**: 라우트가 `Content-Type` 을 확인하지 않고
+`receiveText()` → `JSONObject(body)` 만 수행해, 브라우저 cross-origin **simple request** 가
+그대로 도달했다. `text/plain` POST 는 preflight(CORS) 가 없다.
+
+```
+POST /api/storage/mkdir  -H 'Content-Type: text/plain' -d '{"path":"","name":"__probe__"}'
+→ {"ok":true}     ← 실제 폴더 생성 (테스트 후 정리)
+```
+
+`text/plain` POST 는 simple request 라 preflight 를 거치지 않으므로, **같은 Wi-Fi 에서
+사용자가 방문한 임의의 웹사이트** 가 `download_add` · `storage/delete` · `settings/*` 를
+보낼 수 있었다. CORS 는 응답을 가려줄 뿐 요청은 이미 실행된다. **MCP 전용이 아니라 REST API 전체**였다.
+
+3중 방어 (`CrossOriginGuard`):
+- **Origin/Host 검증** — Origin 이 있으면 그 authority 가 요청의 `Host` 와 같아야 한다.
+  다르면 403. DNS rebinding(원격 출처가 LAN IP 로 해석) 차단
+- **`Sec-Fetch-Site`** — 변경 메서드에서 `cross-site` 면 403. 이 헤더는 JS 위조 불가
+- **Content-Type 화이트리스트** — `/api` · `/mcp` 에서 `application/json` ·
+  `application/octet-stream` · `multipart/form-data` 만 허용. **생략도 거부**
+  (`fetch(body: Blob)` 로 타입 없이 보내도 simple request 가 된다)
+
+설계 원칙 — **네이티브 클라이언트를 막지 않는다.** `Origin` 이 없는 요청(curl · MCP 호스트 ·
+WebDAV(Finder) · 향후 맥 메뉴바 앱)은 통과한다. `/dav/` 는 Content-Type 검사에서 제외
+(Finder 가 자유롭게 쓰는 타입) — Origin 검사가 계속 보호한다.
+오류 코드 `E-AND-SRV-0120/0121/0122` 추가.
+
+### Fixed [mcp] — Streamable HTTP 규격 4항목 전부 위반 (실측)
+
+| 규격 요구 | 이전 | 이제 |
+|---|---|---|
+| `MCP-Protocol-Version` 헤더 | 무시, 200 | 협상 + 불일치 400 `HeaderMismatch` |
+| `Origin` 검증 (MUST) | 200 | Phase 0 공통 파이프라인으로 403 |
+| notification | 200 + `-32603` | **202 Accepted + body 없음** |
+| 미지원 메서드 | 200 + `-32603` | **404 + `-32601`** |
+
+가장 치명적이던 것은 notification 이었다. MCP 클라이언트는 `initialize` 직후
+`notifications/initialized` 를 **반드시** 보내는데, 서버가 이를 "지원하지 않는 메서드"로
+거부했다 — **도구를 아무리 늘려도 클라이언트가 연결되지 않는다.**
+
+- 버전 협상: `2025-06-18` / `2025-11-25` 지원. **`2026-07-28` 은 의도적으로 미지원**으로 선언
+  (SEP-2243 `Mcp-Method`/`Mcp-Name` 헤더 + `subscriptions/listen` 미구현 — 구현 안 한
+  버전을 advertise 하는 것이 그 자체로 규격 위반)
+- `serverInfo.version` 이 하드코딩 `0.9.0` 이었음 → 실제 앱 버전
+- 도구 실행 실패를 프로토콜 오류가 아닌 **`isError:true` 결과**로 반환 (클라이언트가
+  "호출 실패"와 "도구 실패"를 구분)
+- 비활성 도구·프라이버시 예외 도구는 **`tools/list` 에서 숨김** (존재하지만 못 쓰는 상태를 만들지 않음)
+- `/mcp/call` 은 하위 호환 별칭으로 유지
+
+### Added [mcp] — 도구 5 → 12개
+
+`download_add_batch`(복수 URL) · `storage_list` · `storage_mkdir` · `storage_move` ·
+`torrent_add`(magnet) · `video_analyze` · `stats_summary`
+
+`storage_move` 는 라우트와 **동일한 `StorageMove.decide()` 판정**을 쓴다 — T-1072 의
+데이터 손실 가드가 MCP 경로에도 그대로 적용된다. 실측으로 확인:
+충돌 시 `isError` + 목적지 25B 보존 / `overwrite:true` 시 11B 로 교체.
+
+`file_read` 에 `requiresPrivacyExemption` 을 붙여 프라이버시 모드에서 목록·호출 모두 차단.
+
+### Tests [android] — 36건 신규 (교차 출처 19 · MCP 규격 17)
+
+`CrossOriginGuardTest` · `McpProtocolContractTest` 신규.
+`testImplementation("org.json:json")` 추가 — android.jar 의 org.json 은 JVM 단위 테스트에서
+스텁이라 JSON 조립 로직을 검증할 수 없었다.
+
+### Known Issues
+- MCP 클라이언트 실연결(Claude Desktop·Cursor 등)은 미검증. curl 로 스펙 5항목 응답만 확인했다.
+  실제 클라이언트가 요구하는 추가 기능(elicitation·resources·sampling)이 있을 수 있다.
+
+## [v0.41.0] — 웹 대시보드 헤더 통합 (서버 설명 + 통계 → 📊 드롭다운 1개)
+
+> 상세: `docs/plans/PLAN_v0.41_info-stats-menu_android.md` (T-1064~T-1067)
+> 검증: 테스트 222 → 240건 0 failures · `verify_dashboard_info_menu.js` 35/35 · `verify_dashboard_realtime.js` 20/20
+> 브라우저 실측(1000px / 390px 뷰포트) — 서버·API 무변경
+
+### Changed [web] — 헤더 오른쪽 아이콘 하나로 통합
+
+헤더에 **상시 노출되던 서버 설명 바 1줄**과 **5번째 `📊 통계` 탭**을 헤더 우측 `📊` 아이콘 1개의
+드롭다운으로 접었다. 탭은 5 → **4개**(`다운로드 · 토렌트 · 보관함 · 설정`), 모바일에서 헤더·탭이
+2줄로 밀리던 것이 1줄로 정리된다.
+
+- 드롭다운 폭 `min(520px, 100vw-24px)` · 높이 `min(78vh,720px)` 내부 스크롤 · 우측 정렬
+- 섹션 2개: `📡 서버 상태`(기존 설명 바 DOM 그대로) / `📊 트래픽 통계`(카드·하이라이트·기록·30일 차트)
+- 닫기 4종: 버튼 토글 / 바깥 클릭 / `Esc` / 탭 전환. 단축키 `S` 추가
+- 상태 배지: 버튼 우상단 도트 — 활성 작업 있으면 녹색, 스로틀링이면 적색, 유휴면 숨김
+  (`title` 에 `진행 2 · 토렌트 1 · 7.0 MB/s` 형태의 실시간 요약)
+
+### Performance [web] — 닫힘 상태에서 통계 API 0건
+
+`📊 통계` 탭을 열어두면 SSE beat 마다 통계 API 3건이 붙었다. 이제는 **드롭다운을 열어둔 동안에만**
+갱신하며(15초 스로틀), 닫힌 상태는 0건이다. v0.40 Phase 2 의 "대시보드 유휴 부하 0" 계약을 이 화면에서도 유지한다.
+
+| 상태 | 이전 | 이후 |
+|---|---|---|
+| 다른 탭 | 0건 | 0건 |
+| 통계 화면 열어둠 | beat 마다 3건 | — (화면 없음) |
+| 드롭다운 열림 | — | 15초 마다 3건 |
+| 드롭다운 닫힘 | — | **0건** |
+
+`updateInfoBar()` 에 문자열 캐시 가드(`__infoHtml`)를 넣어, 조립 결과가 같으면 `innerHTML` 을 쓰지 않는다
+(드롭다운이 `hidden` 인 상태의 유휴 DOM 쓰기 제거).
+
+### Fixed [web] — 드롭다운 위치 2건 (설계 중 실측으로 발견)
+
+- `#infoMenu` 를 `.wrap` 하단에 두면 `position:absolute` 의 기준이 **초기 포함 블록(문서 전체)** 이 되어
+  화면 아래(뷰포트 높이 + 8px)로 튀어나갔다 → 앵커를 `.hd-acts` 로 이동
+- 모바일에서 `.hd` 가 줄바꿈되면 두 번째 줄에 `.hd-acts` 혼자 남아 `space-between` 이 좌측 정렬로 떨어진다.
+  44px 버튼 래퍼를 앵커로 쓰면 드롭다운이 좌측으로 넘쳤다(390px 뷰포트 실측 `left = -155px`)
+  → `.hd-acts{margin-left:auto}` + 액션 그룹 전체를 앵커로 사용
+
+### Changed [web] — 순서변경 드롭 표시를 보관함과 같은 시각 언어로
+
+보관함은 "이 폴더로 이동"이라 행 전체가 목적지라 사각 점선만으로 충분했다. 다운로드·토렌트는
+"순서 변경"이라 **어느 카드로**, **위/아래 어디에** 들어가는지가 둘 다 필요해 점선만으론 부족했다.
+
+- 사각 점선 태두리(`outline:2px dashed`) + 선택 배경으로 **어느 카드**인지 표시 — 보관함과 동일
+- 굵은 삽입선(`::before`, 3px, accent2 + 글로우)으로 **위/아래 삽입 위치** 표시
+- 카드 바깥 빈 공간에 떨궈도 순서변경이 안 되는 사실을 목록 테두리(`drop-empty`)로 안내
+- 구식 `box-shadow` 3px 선 제거
+
+### Fixed [web] — 헤더 버튼 어긋남 + 브레드크럼 인라인 핸들러 SyntaxError
+
+- **📊 통합 버튼만 10px 컸다** — `min-height:44px` 를 base 규칙에 넣었는데 기존 컨트롤의 터치 타깃
+  44px 은 모바일 쿼리에만 존재. 데스크톱에서 📊 44px vs ⟳ 34px 로 헤더가 어긋났다
+  (실측 top/bottom 각 5px 삐침). padding·line-height 를 `#btnRefresh` 와 동일하게 맞추고
+  `display:flex` + center 로 이모지 정렬을 엔진 비의존으로 변경
+- **보관함 브레드크럼 이동 불가** — `onclick="openDir(' + JSON.stringify(path) + ')"` 에서
+  `JSON.stringify` 의 큰따옴표가 큰따옴표 속성을 중간에서 닫아 핸들러 소스가 `openDir(` 로 잘림
+  → 상위 폴더 클릭 시 `SyntaxError: Unexpected token '}'`. 루트를 제외한 **브레드크럼 전체가 죽어 있었음**.
+  인라인 onclick 을 위임 리스너 + `data-path` 로 대체, drop 후 잔여 click 억제 추가
+- **동종 잠재 버그 2건** — `createVideo(<사용자 URL>)` / `retryVideo(<잡 URL>)` 가 `" < >` 를
+  이스케이프하지 않아 속성 조작 가능. `jsArg()` 헬퍼로 교체
+
+### Fixed [web] — 보관함 드래그 이동이 같은 이름 파일을 조용히 덮어썼다 (데이터 손실)
+
+**보고**: 보관함에서 드래그로 이동할 때 목적지에 같은 이름이 있으면 확인 없이 덮어써진다.
+
+**근본 1 — 서버에 충돌 검사가 아예 없었다.** `/api/storage/move` 는 이동을 `File.renameTo()` 로
+수행하는데, 이것은 POSIX `rename(2)` 래퍼라 **대상 파일이 이미 있어도 실패 없이 그 파일을 대체한다.**
+`copyTo(overwrite = true)` 폴백도 마찬가지였다. 같은 저장소의 다른 경로는 모두 가드가 있던 상태였다.
+
+| 경로 | 충돌 처리 (v0.41 이전) |
+|---|---|
+| `POST /api/storage/rename` | `toFile.exists()` → 거부 |
+| `POST /api/storage/delete` (휴지통) | 접미사 `-2`, `-3` 자동 부여 |
+| `POST /api/storage/trash/restore` | 접미사 `-2`, `-3` 자동 부여 |
+| `POST /api/storage/move` | **없음 → 조용히 덮어씀** |
+
+**근본 2 — 덮어쓰기 허용 후 실패 정리 분기가 사용자 파일을 파괴했다.** 이동 검증 실패·예외 시
+`dst.deleteRecursively()` 를 무조건 호출하는데, 대상이 원래부터 있었으면 그것은 **우리 가 아니라
+사용자의 파일**이다. `hadExisting` 플래그로 갈라 해결.
+
+**수정**
+- `StorageMove` (신규) — 순수 판정 객체. `overwrite=true` 가 명시된 경우에만 덮어쓴다.
+  Ktor route 테스트 하네스가 없어 판정 로직을 분리해 단위 테스트 (판정 + 응답 필드)
+- `conflict:true` + 대상 이름·크기·수정시각을 돌려주고, 웹 UI 가 `confirmPopup` 으로 확인받는다
+- 브레드크럼 드롭 · 목록 드롭 두 경로가 `storageMove()` 헬퍼를 공유 (직접 fetch 우회 차단)
+- 확인 버튼 라벨을 `확인` → `덮어쓰기` 로 (파괴적 동작은 행동을 말해야 한다)
+- 1KB 미만 파일은 `fmt()` 이 `0 KB` 로 뭉개므로 바이트 표기
+- 오류 코드 `E-AND-STOR-1004` 추가
+
+### Tests [android] — 대시보드 계약 25건 + StorageMoveTest 13건
+
+`DashboardInfoMenuContractTest` (신규 19건) — 탭 4개, 통계 패널 제거, 드롭다운 DOM 배치, **앵커 위치**,
+버튼 metrics 형제 일치, **드롭 표시 4축**(점선 태두리/삽입선/drop-empty/두 목록 바인딩),
+닫기 4종, 배지 분기, 닫힘 시 통계 0건 게이트, `__infoHtml` 캐시, 기존 `.info` 클래스 재사용(비디오 진행 박스 6곳) 보존.
+`DashboardInlineHandlerContractTest` (신규 6건) — 배포 HTML 전수 스캔으로 **홀수따옴표 / JSON.stringify 인라인 /
+자유텍스트 변수 인라인** 3축 차단.
+`scripts/verify_dashboard_info_menu.js` (신규) — 배포 HTML 에서 실제 블록을 뽑아 Node vm 으로 실행, **35/35**.
+`scripts/extract_dashboard_html.js` (신규) — 배포용 HTML 추출기.
+
+> **기억해 둘 것**: 이 화면의 위치 버그 2건과 인라인 핸들러 버그는 정적 grep·단위 테스트로 잡히지 않았고,
+> **브라우저 실측으로만** 발견됐다. 드롭다운·absolute 배치·인라인 속성 값 삽입은 반드시
+> 렌더 박스 계측 또는 실행 검증을 거칠 것.
+
+> **검증 결과**: 테스트 222 → **264건 0 failures** · `verify_dashboard_info_menu.js` 35/35 ·
+> `verify_dashboard_realtime.js` 20/20 · 실기기(0.41.0) 데스크톱 1100px / 모바일 390px /
+> synthetic DragEvent 드롭 4단계 / 따옴표 포함 경로 왕복 / 3개 테마 토큰 검증.
+
 ## [v0.40.0] — 종합 안정성 4단계 (46건) + 토렌트 결함 #1~#9
 
 > 상세: `docs/STABILITY_AUDIT_2026-09-26.md` (5축 점검 리포트) · `docs/TORRENT_AUDIT_2026-09-26.md`
