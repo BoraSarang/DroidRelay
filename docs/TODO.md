@@ -537,3 +537,12 @@ T-001~T-008 전부 완료 (커밋 7574486).
 | T-1052 | 속도 프리셋 단일화 (SpeedLimits.kt + 슬라이더 3곳 select + 작업/토렌트 개별 제한 프리셋) | ✅ |
 | T-1053 | 웹 대시보드 미러 (속도 select 3종·정체 설정 블록·STALLED 배지·uiBusy 가드) | ✅ |
 | T-1054 | 검증 (TorrentStallTest 9건+test/ktlint GREEN+실기기 설치·API/웹 실측) | ✅ |
+
+## v0.42 (2026-09-27) — 웹 대시보드 헤더 통합 (서버 설명+통계 드롭다운) (PLAN_v0.41_info-stats-menu_android.md)
+
+| T-번호 | 내용 | 상태 |
+|--------|------|------|
+| T-1064 | PLAN 작성 + TODO 등록 + 0.41.0/32 버전 bump | ✅ |
+| T-1065 | 서버 설명 바(`.info`) + 통계 탭을 헤더 우측 `📊` 단일 아이콘 드롭다운으로 통합 (4탭) | ✅ |
+| T-1066 | 닫기 UX 4종(토글/외부 클릭/Esc/S) + 상태 배지 + 15초 스로틀 (닫힘 시 통계 API 0건) + `__infoHtml` 캐시 가드 | ✅ |
+| T-1067 | 검증 (DashboardInfoMenuContractTest 10건 + verify_dashboard_info_menu.js + 실기기 설치·관찰) | ✅ |
