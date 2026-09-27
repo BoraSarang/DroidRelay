@@ -941,6 +941,14 @@ function dragActive(){return window.__dragActive&&(Date.now()-window.__dragActiv
 window.onerror=function(msg,src,line){var t=document.createElement('div');t.textContent='⚠ JS 오류: '+msg+' @'+line;t.style.cssText='position:fixed;top:10px;left:50%;transform:translateX(-50%);background:#5c1a1a;color:var(--err);padding:8px 14px;border-radius:8px;font-size:12px;z-index:99999';document.body.appendChild(t);setTimeout(function(){t.remove()},6000);};
 
 function esc(s){return (s||'').replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+// 인라인 핸들러용 — 큰따옴표 속성 안에 넣을 단일따옴표 JS 문자열 리터럴.
+// \ ' 는 JS 이스케이프하고 " < > & 는 엔티티로 바꿔 HTML 속성 파서가 잘리지 않게 한다.
+// (브레드크럼 버그: 값을 속성 안에 그대로 끼우면 `onclick="openDir("` 까지 잘려
+//  SyntaxError 가 났다 — 사용자 값은 반드시 이 헬퍼로만 인라인에 넣는다)
+function jsArg(s){
+  return String(s==null?'':s).replace(/\\/g,'\\\\').replace(/'/g,"\\'")
+    .replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
 function num(v,d){v=parseFloat(v);return isFinite(v)?v:d;}
 function kblabel(v,d,zero){v=(v!=null?v:d);return v===0?zero:v+' KB/s';}
 // ── 속도 제한 프리셋 (T-1050) — 앱 SpeedLimits.KBPS와 같은 목록이 단일 진실 ──
@@ -1039,7 +1047,7 @@ function analyzeVideo(){
       +'<button class="ghost sm" onclick="copyVideoUrl()" style="flex:0 0 auto">📋 주소 복사</button>';
     var baseName=(j.direct?((j.streamUrl||v).split('/').pop().split('?')[0].split('#')[0].replace(/\.[^.]+$/,'')||'video'):((j.title||'video').replace(/[\\/:*?"<>|]/g,'_'))).slice(0,60)||'video';
     h+='<input id="vname" type="text" value="'+esc(baseName)+'.mp4" style="flex:1 1 160px;min-width:140px;box-sizing:border-box">'
-      +'<button onclick="createVideo(\''+v.replace(/\\/g,'\\\\').replace(/'/g,"\\'")+'\')" style="flex:0 0 auto">▶ 다운로드</button>'
+      +'<button onclick="createVideo(\''+jsArg(v)+'\')" style="flex:0 0 auto">▶ 다운로드</button>'
       +'</div></div>';
     area.innerHTML=h;
     refresh();
@@ -1158,7 +1166,7 @@ function render(jobs){
     if(j.type!=='video'&&j.state==='RUNNING')pause='<button class="ghost" onclick="act(\''+j.id+'\',\'pause\')">일시정지</button>';
     if(j.type==='video'&&j.state==='RUNNING')pause='<span class="eta" style="align-self:center">FFmpeg → 삭제로 취소</span>';
     if(j.type!=='video'&&(j.state==='PAUSED'||j.state==='FAILED'))pause='<button class="ghost" onclick="act(\''+j.id+'\',\'resume\')">재개</button>';
-    if(j.type==='video'&&j.state==='FAILED')pause='<button class="ghost" onclick="retryVideo(\''+esc(j.url).replace(/\\/g,'\\\\').replace(/'/g,"\\'")+'\')">재시도</button>';
+    if(j.type==='video'&&j.state==='FAILED')pause='<button class="ghost" onclick="retryVideo(\''+jsArg(j.url)+'\')">재시도</button>';
     var cancel='<button class="ghost" onclick="delJobConfirm(\''+j.id+'\')">삭제</button>';
     var limit='';
     if(j.type!=='video'&&j.state!=='DONE'&&j.state!=='CANCELED'){
@@ -1420,19 +1428,31 @@ var dlBase=location.protocol+'//'+location.hostname+':'+location.port;
 }
 function updateBreadcrumb(){
   var parts=curPath?curPath.split('/'):[];
-  var h='<span data-path="" onclick="openDir(\'\')">📱 보관함</span>';
+  // v0.41: onclick 인라인 핸들러를 쓰면 안 된다. 경로를 JSON.stringify 로 큰따옴표 속성에
+  // 끼워 넣는 순간 HTML 파서가 `onclick="openDir("` 까지 잘라 버려
+  // SyntaxError: Unexpected token '}' 가 나고, 남은 조각이 새 액자처럼 붙어 보인다.
+  // data-path 만 심고 아래 위임 리스너가 처리한다 (따옴표 포함 경로도 안전).
+  var h='<span data-path="">📱 보관함</span>';
   var p='';
   parts.forEach(function(part){
     if(!part)return;
     p+=(p?'/':'')+part;
-    (function(path){h+=' / <span data-path="'+esc(path)+'" onclick="openDir('+JSON.stringify(path)+')">'+esc(part)+'</span>'})(p);
+    h+=' / <span data-path="'+esc(p)+'">'+esc(part)+'</span>';
   });
   document.getElementById('breadcrumb').innerHTML=h;
 }
 (function(){
   var bc=document.getElementById('breadcrumb');
   if(!bc||bc.__delegated)return;bc.__delegated=true;
+  var suppressClickUntil=0;
   function clearMarks(){document.querySelectorAll('#breadcrumb .drop-target').forEach(function(s){s.classList.remove('drop-target')});}
+  // 상위 폴더 이동 — v0.41: 인라인 onclick 대신 위임 (따옴표 포함 경로까지 안전)
+  bc.addEventListener('click',function(e){
+    if(Date.now()<suppressClickUntil)return;
+    var span=e.target.closest('[data-path]');
+    if(!span||!bc.contains(span))return;
+    openDir(span.dataset.path||'');
+  });
   bc.addEventListener('dragover',function(e){
     if(!window.__dragKey)return;
     var span=e.target.closest('[data-path]');if(!span)return;
@@ -1445,6 +1465,7 @@ function updateBreadcrumb(){
   });
   bc.addEventListener('drop',function(e){
     e.preventDefault();
+    suppressClickUntil=Date.now()+400;   // 드롭 직후 잔여 click 이 위임 이동을 중복 실행하지 않게
     var src=window.__dragKey;
     var span=e.target.closest('[data-path]');
     clearMarks();
