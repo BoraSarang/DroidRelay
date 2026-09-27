@@ -67,3 +67,59 @@
 ## 7. 남김
 - 브라우저 손 드래그는 미검증 — 합성 DragEvent 로 핸들러·CSS 만 확인. 실포인터는 사람 손이 필요
 - 통계 30일 차트는 좁은 화면에서 가로스크롤 유지(기존 동작, 520px → 420px/380px로 축소만)
+
+## 8. API/MCP 하드닝 (T-1073~T-1078) — 맥 클라이언트 전제 조건
+
+사용자 요청: "MCP 도구를 늘려야 하지 않을까" + "맥 메뉴바 앱을 만들 수 있나" → 조사 후 착수.
+계획 문서 `docs/plans/PLAN_v0.42_api-mcp-hardening_android.md` 에 보관, Phase 2~3(맥 앱)은 보류.
+
+### 조사에서 발견한 것 2가지 (모두 실측)
+
+**1. MCP 규격 4항목 전부 위반** — 도구를 늘려도 현대 클라이언트가 연결되지 않는 구조였다.
+가장 치명적인 것: 클라이언트는 `initialize` 직후 `notifications/initialized` 를 **반드시** 보내는데
+서버가 "지원하지 않는 메서드"로 거부했다. `protocolVersion` 은 `2024-11-05`(폐기된 HTTP+SSE 세대)를 반환.
+
+**2. 교차 출처 벡터 — REST API 전체가 열려 있었음** (MCP 도저)
+`text/plain` POST 는 브라우저 simple request 라 preflight 가 없다. `POST /api/storage/mkdir` 로
+**실제로 폴더가 만들어졌다.** 같은 Wi-Fi 에서 사용자가 방문한 어떤 웹사이트든
+`download_add`·`storage/delete`·`settings/*` 를 보낼 수 있었다. CORS 는 응답만 가려줄 뿐
+요청은 이미 실행된다.
+
+### 구현
+- `CrossOriginGuard` (신규) — Origin/Host 검증 · `Sec-Fetch-Site` · Content-Type 화이트리스트.
+  **네이티브 클라이언트를 막지 않는 것이 설계 원칙** (Origin 없는 curl·MCP·WebDAV·향후 맥 앱은 통과)
+- `McpServer` 응답 계층 재작성 — 202 알림 / 404 `-32601` / 버전 협상 / `isError` 결과
+- 도구 5 → 12개. `storage_move` 는 라우트와 같은 `StorageMove.decide()` 를 쓴다
+- `testImplementation("org.json:json")` — android.jar 의 org.json 은 단위 테스트에서 스텁이라
+  JSON 조립 로직을 검증할 수 없었다 (이 제약 때문에 판정 로직을 Map 으로 돌려쓴이기도 했다)
+
+### 실기기 검증 13종
+| 항목 | 결과 |
+|---|---|
+| 동일 출처 GET/POST (브라우저 대시보드) | 200 · 폴더 생성 성공 |
+| `Origin: evil.example.com` | 403 (E-AND-SRV-0120) |
+| `Origin: null` (샌드박스 iframe) | 403 |
+| `Sec-Fetch-Site: cross-site` POST | 403 (E-AND-SRV-0121) |
+| `text/plain` / `x-www-form-urlencoded` / **Content-Type 생략** | 415 (E-AND-SRV-0122) |
+| **실제 data: URL iframe 공격 2건** | 서버 로그로 **요청이 도달해 Origin 규칙에 거부**됨을 확인 |
+| WebDAV `/dav/` | Content-Type 검사 제외 · Origin 검사 유지 |
+| MCP initialize 협상 | 2025-06-18→동일 / 2025-11-25→동일 / 그 외→2025-11-25 폴백 |
+| `notifications/*` | 202 + body 0 bytes |
+| 미지원 메서드 | 404 + `-32601` |
+| 미지원 버전 | 400 + `UnsupportedProtocolVersionError` + 지원 목록 |
+| `tools/call` 실패 | `isError:true` (도구 없음 / 경로 탈출 / 인자 누락) |
+| `storage_move` 충돌 | isError + 목적지 25B 보존 / overwrite 시 11B 교체 |
+| 대시보드 4탭 + 설정 6라우트 + 드롭다운 | 무결 |
+
+테스트 264 → **300건 0 failures**. 프로브 파일은 휴지통까지 완전 정리.
+
+### 교훈 2가지
+- **`text/plain` 이라는 한 글자가 preflight 를 건너뛴다.** "JSON API" 라는 것만으로는 CSRF 방어가 아니다.
+- 규격 준수 여부는 **실측 표로** 봐야 한다. 4항목이 모두 위장 없이 위반 상태였고,
+  정적 코드 리뷰로는 드러나지 않았다.
+
+## 9. 남김
+- **MCP 클라이언트 실연결 미검증** (Claude Desktop·Cursor). curl 스펙 검증까지만 했다.
+- Phase 2~3 맥 메뉴바 앱 — 전 Phase 완료 후 착수 (PLAN_v0.42 6장에 함정 6종 기록)
+- adb 기기가 USB·무선 2경로로 잡혀 `build_and_run.sh` 가 `more than one device` 로 실패한다.
+  `adb -s R5CT215F4QK` 로 대상을 고정했다. (스크립트 수정은 별건)

@@ -117,4 +117,8 @@ dependencies {
     testImplementation(libs.mockk)
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.turbine)
+    // android.jar 의 org.json 은 JVM 단위 테스트에서 스텁이라 실제로 동작하지 않는다.
+    // 프로덕션은 Android 런타임의 org.json 을 쓰므로, 테스트에서만 정식 구현을 주입해
+    // JSON 조립 로직을 검증할 수 있게 한다 (MCP 도구 스키마 검증 등).
+    testImplementation("org.json:json:20250107")
 }

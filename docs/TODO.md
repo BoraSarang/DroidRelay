@@ -551,3 +551,15 @@ T-001~T-008 전부 완료 (커밋 7574486).
 | T-1070 | DashboardInlineHandlerContractTest 6건 (홀수따옴표/JSON.stringify 인라인/자유텍스트 인라인 전수 스캔) | ✅ |
 | T-1071 | 순서변경 드롭 표시 통일 — 사각 점선 태두리 + 삽입선 + drop-empty (보관함과 동일 시각 언어) | ✅ |
 | T-1072 | **데이터 손실** — `/api/storage/move` 이름 충돌 가드(StorageMove) + 덮어쓰기 확인 UI + 실패 정리 분기 사용자 파일 보호 | ✅ |
+
+## v0.43 (2026-09-27) — API/MCP 하드닝 (맥 클라이언트 전제 조건) (PLAN_v0.42_api-mcp-hardening_android.md)
+
+| T-번호 | 내용 | 상태 |
+|--------|------|------|
+| T-1073 | Phase 0 — Origin/Host 검증 + `Sec-Fetch-Site` 보조 판정 (CSRF·DNS rebinding 차단) | ✅ |
+| T-1074 | Phase 0 — `/api/*`·`/mcp` Content-Type 화이트리스트 (`text/plain` 벡터 차단, `/dav/` 예외) | ✅ |
+| T-1075 | Phase 1 — MCP 버전 협상 (`MCP-Protocol-Version` + `_meta` 일치, 미지원 버전 400) | ✅ |
+| T-1076 | Phase 1 — notification 202 / 미지원 메서드 404 `-32601` / `tools/call` `content`+`isError` 응답 형태 | ✅ |
+| T-1077 | Phase 1 — 도구 확장 (5 → 12개: batch·storage 3종·torrent·video·stats) | ✅ |
+| T-1078 | 검증 — 실기기 13종 + 웹 대시보드 무결성 + 테스트 300건 GREEN | ✅ |
+| T-1079 | **보류** Phase 2~3 — 맥 메뉴바 앱. `docs/plans/PLAN_v0.42` 6장 참조. 전 Phase 완료 후 착수 | ⏸ |

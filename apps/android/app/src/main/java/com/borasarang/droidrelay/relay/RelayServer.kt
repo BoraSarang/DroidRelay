@@ -460,8 +460,45 @@ private fun Application.relayRoutes(context: Context, serverRef: RelayServer) {
 
         val host = runCatching { call.request.origin.remoteHost }.getOrDefault("?")
         val reqPath = runCatching { call.request.path() }.getOrDefault("")
+        val reqMethod = call.request.httpMethod.value.uppercase()
         // 파비콘/북마크 아이콘은 정적 공개 에셋 — 접속범위 승인대기·Basic Auth 모두 스킵 (T-1007)
         val isFavicon = Favicon.isFavicon(reqPath)
+
+        // ── 교차 출처(CSRF · DNS rebinding) 차단 (v0.42, T-1073/T-1074) ──
+        // IP 게이트보다 **앞**에 둔다. 승인 대기(네트워크 왕복)까지 시킬 이유 없는 요청이므로.
+        // Origin 이 없는 요청(curl·MCP·WebDAV·네이티브 앱)은 통과 — 맥 클라이언트를 막지 않는다.
+        if (!isFavicon) {
+            val origin = call.request.headers["Origin"]
+            val fetchSite = call.request.headers["Sec-Fetch-Site"]
+            val requestHost = call.request.headers["Host"]
+            when {
+                !CrossOriginGuard.originAllowed(origin, requestHost) -> {
+                    DebugLogger.w("Security", "교차 출처 차단 origin=$origin host=$requestHost $reqMethod $reqPath (E-AND-SRV-0120)")
+                    call.respondText("교차 출처 요청이 차단되었습니다", ContentType.Text.Plain, HttpStatusCode.Forbidden)
+                    finish()
+                    return@intercept
+                }
+                !CrossOriginGuard.fetchSiteAllowed(fetchSite, reqMethod) -> {
+                    DebugLogger.w("Security", "Sec-Fetch-Site 차단 site=$fetchSite $reqMethod $reqPath (E-AND-SRV-0121)")
+                    call.respondText("교차 출처 요청이 차단되었습니다", ContentType.Text.Plain, HttpStatusCode.Forbidden)
+                    finish()
+                    return@intercept
+                }
+                !CrossOriginGuard.contentTypeAllowed(call.request.headers["Content-Type"], reqPath, reqMethod) -> {
+                    DebugLogger.w(
+                        "Security",
+                        "Content-Type 거부 ct=${call.request.headers["Content-Type"]} $reqMethod $reqPath (E-AND-SRV-0122)",
+                    )
+                    call.respondText(
+                        "지원하지 않는 Content-Type 입니다 (application/json 사용)",
+                        ContentType.Text.Plain,
+                        HttpStatusCode.UnsupportedMediaType,
+                    )
+                    finish()
+                    return@intercept
+                }
+            }
+        }
 
         // accessScope에 따른 클라이언트 접속 범위 제어
         val isTrusted = when (s.accessScope) {

@@ -1,5 +1,82 @@
 # Changelog
 
+## [v0.42.0] — API/MCP 하드닝 (교차 출처 차단 + MCP 규격 준수 + 도구 5→12)
+
+> 상세: `docs/plans/PLAN_v0.42_api-mcp-hardening_android.md` (T-1073~T-1079)
+> 검증: 테스트 264 → **300건 0 failures** · 실기기 curl 13종 · 웹 대시보드 4탭 무결성
+> 맥 메뉴바 앱(Phase 2~3)은 **보류** — 전 Phase 완료 후 착수
+
+### Security [web] — 교차 출처(CSRF·DNS rebinding) 벡터 차단
+
+**조사에서 실측으로 확인한 것**: 라우트가 `Content-Type` 을 확인하지 않고
+`receiveText()` → `JSONObject(body)` 만 수행해, 브라우저 cross-origin **simple request** 가
+그대로 도달했다. `text/plain` POST 는 preflight(CORS) 가 없다.
+
+```
+POST /api/storage/mkdir  -H 'Content-Type: text/plain' -d '{"path":"","name":"__probe__"}'
+→ {"ok":true}     ← 실제 폴더 생성 (테스트 후 정리)
+```
+
+`text/plain` POST 는 simple request 라 preflight 를 거치지 않으므로, **같은 Wi-Fi 에서
+사용자가 방문한 임의의 웹사이트** 가 `download_add` · `storage/delete` · `settings/*` 를
+보낼 수 있었다. CORS 는 응답을 가려줄 뿐 요청은 이미 실행된다. **MCP 전용이 아니라 REST API 전체**였다.
+
+3중 방어 (`CrossOriginGuard`):
+- **Origin/Host 검증** — Origin 이 있으면 그 authority 가 요청의 `Host` 와 같아야 한다.
+  다르면 403. DNS rebinding(원격 출처가 LAN IP 로 해석) 차단
+- **`Sec-Fetch-Site`** — 변경 메서드에서 `cross-site` 면 403. 이 헤더는 JS 위조 불가
+- **Content-Type 화이트리스트** — `/api` · `/mcp` 에서 `application/json` ·
+  `application/octet-stream` · `multipart/form-data` 만 허용. **생략도 거부**
+  (`fetch(body: Blob)` 로 타입 없이 보내도 simple request 가 된다)
+
+설계 원칙 — **네이티브 클라이언트를 막지 않는다.** `Origin` 이 없는 요청(curl · MCP 호스트 ·
+WebDAV(Finder) · 향후 맥 메뉴바 앱)은 통과한다. `/dav/` 는 Content-Type 검사에서 제외
+(Finder 가 자유롭게 쓰는 타입) — Origin 검사가 계속 보호한다.
+오류 코드 `E-AND-SRV-0120/0121/0122` 추가.
+
+### Fixed [mcp] — Streamable HTTP 규격 4항목 전부 위반 (실측)
+
+| 규격 요구 | 이전 | 이제 |
+|---|---|---|
+| `MCP-Protocol-Version` 헤더 | 무시, 200 | 협상 + 불일치 400 `HeaderMismatch` |
+| `Origin` 검증 (MUST) | 200 | Phase 0 공통 파이프라인으로 403 |
+| notification | 200 + `-32603` | **202 Accepted + body 없음** |
+| 미지원 메서드 | 200 + `-32603` | **404 + `-32601`** |
+
+가장 치명적이던 것은 notification 이었다. MCP 클라이언트는 `initialize` 직후
+`notifications/initialized` 를 **반드시** 보내는데, 서버가 이를 "지원하지 않는 메서드"로
+거부했다 — **도구를 아무리 늘려도 클라이언트가 연결되지 않는다.**
+
+- 버전 협상: `2025-06-18` / `2025-11-25` 지원. **`2026-07-28` 은 의도적으로 미지원**으로 선언
+  (SEP-2243 `Mcp-Method`/`Mcp-Name` 헤더 + `subscriptions/listen` 미구현 — 구현 안 한
+  버전을 advertise 하는 것이 그 자체로 규격 위반)
+- `serverInfo.version` 이 하드코딩 `0.9.0` 이었음 → 실제 앱 버전
+- 도구 실행 실패를 프로토콜 오류가 아닌 **`isError:true` 결과**로 반환 (클라이언트가
+  "호출 실패"와 "도구 실패"를 구분)
+- 비활성 도구·프라이버시 예외 도구는 **`tools/list` 에서 숨김** (존재하지만 못 쓰는 상태를 만들지 않음)
+- `/mcp/call` 은 하위 호환 별칭으로 유지
+
+### Added [mcp] — 도구 5 → 12개
+
+`download_add_batch`(복수 URL) · `storage_list` · `storage_mkdir` · `storage_move` ·
+`torrent_add`(magnet) · `video_analyze` · `stats_summary`
+
+`storage_move` 는 라우트와 **동일한 `StorageMove.decide()` 판정**을 쓴다 — T-1072 의
+데이터 손실 가드가 MCP 경로에도 그대로 적용된다. 실측으로 확인:
+충돌 시 `isError` + 목적지 25B 보존 / `overwrite:true` 시 11B 로 교체.
+
+`file_read` 에 `requiresPrivacyExemption` 을 붙여 프라이버시 모드에서 목록·호출 모두 차단.
+
+### Tests [android] — 36건 신규 (교차 출처 19 · MCP 규격 17)
+
+`CrossOriginGuardTest` · `McpProtocolContractTest` 신규.
+`testImplementation("org.json:json")` 추가 — android.jar 의 org.json 은 JVM 단위 테스트에서
+스텁이라 JSON 조립 로직을 검증할 수 없었다.
+
+### Known Issues
+- MCP 클라이언트 실연결(Claude Desktop·Cursor 등)은 미검증. curl 로 스펙 5항목 응답만 확인했다.
+  실제 클라이언트가 요구하는 추가 기능(elicitation·resources·sampling)이 있을 수 있다.
+
 ## [v0.41.0] — 웹 대시보드 헤더 통합 (서버 설명 + 통계 → 📊 드롭다운 1개)
 
 > 상세: `docs/plans/PLAN_v0.41_info-stats-menu_android.md` (T-1064~T-1067)
