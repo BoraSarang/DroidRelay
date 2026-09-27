@@ -78,9 +78,15 @@ internal object WebDashboardHtml {
   .mm-sg .sh{font-size:13px;padding-left:8px;margin-bottom:6px}
   .mm-sg .sb{font-size:11px}
   .mm-sg .hint{font-size:11px;color:var(--dim);line-height:1.5;margin-top:2px}
-  #btnInfoMenu{position:relative;min-width:44px;min-height:44px;padding:8px 12px;font-size:16px;line-height:1}
+  /* v0.41: #btnRefresh 와 **똑같은 metrics** 로 맞춘다 (padding 8px 13px · line-height 1).
+     min-height:44px 를 base 에 두면 데스크톱에서 이 버튼만 34px 형제보다 10px 커져
+     헤더가 어긋난다(사파리에서 더 두드러짐) — 터치 타깃 44px 은 모바일 쿼리로만 준다.
+     display:flex + center 로 이모지 세로 정렬을 엔진에 의존하지 않게 한다
+     (Safari 는 Apple Color Emoji 의 line box 가 텍스트 글리프와 달라 ⊙ 리듬이 어긋난다). */
+  #btnInfoMenu{position:relative;display:flex;align-items:center;justify-content:center;
+    min-width:40px;padding:8px 13px;font-size:16px;line-height:1}
   #btnInfoMenu.on{background:var(--accentbg);border-color:var(--accent);color:var(--accent2)}
-  .mm-dot{position:absolute;top:6px;right:6px;width:7px;height:7px;border-radius:99px;background:var(--ok);
+  .mm-dot{position:absolute;top:5px;right:5px;width:7px;height:7px;border-radius:99px;background:var(--ok);
     box-shadow:0 0 0 2px var(--surface);pointer-events:none}
   .mm-dot.warn{background:var(--err)}
   .mm-dot[hidden]{display:none}
@@ -280,6 +286,7 @@ internal object WebDashboardHtml {
     .tabs .tab{padding:9px 2px;font-size:13px}
     .hd{flex-wrap:wrap;margin-bottom:12px}
     #btnRefresh{padding:12px 16px;min-height:44px}
+    #btnInfoMenu{padding:12px 16px;min-height:44px;min-width:44px}
     #themeSel{min-height:44px;max-width:130px}
     body[data-theme=toxic] h1,body[data-theme=midnight] h1{text-shadow:none}
     body[data-theme=toxic] .card,body[data-theme=toxic] .file-row,

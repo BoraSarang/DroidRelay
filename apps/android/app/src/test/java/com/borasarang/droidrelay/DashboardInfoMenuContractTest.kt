@@ -54,6 +54,27 @@ class DashboardInfoMenuContractTest {
     }
 
     @Test
+    fun `통합 버튼은 형제 컨트롤과 같은 metrics 다`() {
+        // v0.41 실측 결함: base 규칙에 min-height:44px 를 두면 데스크톱에서 이 버튼만
+        // 34px 형제(#btnRefresh) 보다 10px 커져 헤더가 어긋났다(사파리에서 더 두드러짐).
+        // 터치 타깃 44px 은 모바일 쿼리로만 준다.
+        val base = html.indexOf("#btnInfoMenu{position:relative;")
+        assertTrue("#btnInfoMenu base 규칙을 찾을 수 없음", base >= 0)
+        val rule = html.substring(base, html.indexOf("}", base) + 1)
+        assertFalse("base 규칙에 min-height 가 있다 — 데스크톱에서 형제보다 커진다", rule.contains("min-height"))
+        assertTrue("형제 버튼(#btnRefresh)과 padding 이 다르다", rule.contains("padding:8px 13px"))
+        assertTrue("형제 버튼과 line-height 가 다르다", rule.contains("line-height:1"))
+        assertTrue(
+            "이모지 세로 정렬을 엔진에 맡기고 있다 (Safari Apple Color Emoji line box 불일치)",
+            rule.contains("align-items:center"),
+        )
+        assertTrue(
+            "모바일 터치 타깃 44px 규칙이 없다",
+            html.contains("#btnInfoMenu{padding:12px 16px;min-height:44px;min-width:44px}"),
+        )
+    }
+
+    @Test
     fun `드롭다운은 헤더 액션 그룹 안에 앵커되어 있다`() {
         // v0.41 실제 결함 2건 (둘 다 브라우저 실측으로 발견 — 정적 grep 으로는 안 잡힌다):
         //  1. .mm 을 .wrap 하단에 두면 position:absolute 의 기준이 초기 포함 블록(문서)이 되어
