@@ -622,7 +622,9 @@ T-001~T-008 전부 완료 (커밋 7574486).
 | M-11 | 탐색 상태 표시 추가 여부 확정 (`🔌 10.38.120.211 자동 발견 ✓`) | ⏸ |
 | M-12 | M2 — 팔레트 (Carbon 핫키 `⌘⇧D` · `.nonactivatingPanel` · IME 입력 소스 캡처) | ⏸ |
 | M-13 | M3 — 독립 창 + 탭바 | ✅ |
-| M-14 | M4 — 설정 영속화 + **DMG 배포 경로** | ⏸ |
+| M-14 | M4 — **DMG 배포 경로** — `./build_and_run.sh dmg macos` → `dist/DroidRelay-<버전>.dmg` (create-dmg, Applications 바로가기, ad-hoc 서명) | ✅ |
+| M-14 | **앱 아이콘 신설** — `Tools/MakeIcon.swift` 가 SF Symbol 을 즉석에서 그려 icns 생성(리포에 PNG 10장 없음) | ✅ |
+| M-14 | **macOS 버전 = 서버 버전 연동** — 하드코딩 0.1.0 이었음(서버 0.43.0). `gradle.properties` 에서 읽는다 | ✅ |
 | M-14 | **메뉴바 속도 표시** — `statusItem.view` 로 `MenuBarSpeedView`(NSTextField 2줄 직접 배치) + `MenuBarTitle`(그릴 줄을 정하는 순수 로직) · 9pt 2줄이 메뉴바 22pt 에 들어감 · `--title-check`/`--watch` 로 프레임·잘림·실측값 검증. 테스트 64 → **85건** | ✅ |
 | M-14 | **2줄 표시** — TetherLens 방식(`statusItem.view` + 9pt) 로 확정. 10.5pt 로는 26pt 필요해 잘렸으나 **9pt 는 21pt** 로 22pt 안에 들어간다 | ✅ |
 | M-14 | **설정 시 "DroidRelay Settings" 창이 뜸** — `Settings { EmptyView() }` 씬 하나만 있으면 활성화될 때 자동 표시. 씬 없이 `NSApplication` 직접 부팅으로 교체. 창 0개 확인 | ✅ |
