@@ -52,7 +52,7 @@ final class TorrentStorageParseTests: XCTestCase {
     }
 
     /// 진행률이 0..1 밖으로 나가면 바(width = w * p) 가 화면 밖으로 나가거나
-    /// 음수가 되��� SwiftUI 가 조용히 뭉갠다. 클램프가防线이다.
+    /// 음수가 되면 SwiftUI 가 조용히 뭉갠다. 클램프가 방어선이다.
     func test_진행률_클램프() {
         XCTAssertEqual(Torrent(json: torrentJSON(["progress": 1.8]))!.percent, 100)
         XCTAssertEqual(Torrent(json: torrentJSON(["progress": -0.5]))!.percent, 0)
@@ -147,5 +147,40 @@ final class TorrentStorageParseTests: XCTestCase {
         let a = StorageEntry(json: ["name": "같은", "type": "file"])!
         let b = StorageEntry(json: ["name": "같은", "type": "dir"])!
         XCTAssertEqual(a.id, b.id)
+    }
+
+    // MARK: - 경로 조합 (어제 틀렸던 가정의 교정)
+
+    /// **`GET /api/storage` 에는 `path` 키가 없다** (실측). 오직 `name` 뿐이다.
+    ///
+    /// 그런데 `POST /api/storage/rename` 은 `from` 에 **전체 경로**를 받는다.
+    /// 이전 코드는 `o["path"] ?? name` 이라 **항상 이름만** 보냈고,
+    /// 하위 폴더 항목에 대한 모든 쓰기가 실패했다.
+    /// 이 테스트가 그 가정을 되돌린다 — 서버가 `path` 를 **안 준다** 는 걸 고정.
+    func test_서버는_path_키를_안준다() {
+        let e = StorageEntry(json: ["name": "예편.mkv", "type": "file"], dir: "M/영화")!
+        // 서버 응답에 path 가 있었으면 이렇게 됐어야 한다
+        XCTAssertEqual(e.name, "예편.mkv")
+        // 그런데 path 는 **상위 경로 + 이름**으로 만들어졌다
+        XCTAssertEqual(e.path, "M/영화/예편.mkv")
+    }
+
+    /// 루트(빈 경로)에서는 경로가 이름 그대로다
+    func test_루트에서는_경로가_이름이다() {
+        let e = StorageEntry(json: ["name": "M", "type": "dir"], dir: "")!
+        XCTAssertEqual(e.path, "M")
+    }
+
+    /// **앞에 `/` 가 붙은 상위 경로도 처리한다** — 규칙이 두 갈래로 갈라지지 않게.
+    func test_앞에슬래시가_붙은_상위경로() {
+        XCTAssertEqual(StorageEntry(json: ["name": "a", "type": "file"], dir: "/M")!.path, "M/a")
+        XCTAssertEqual(StorageEntry(json: ["name": "a", "type": "file"], dir: "/M/영화")!.path, "M/영화/a")
+    }
+
+    /// **`//` 가 생기면 안 된다** — 서버의 `storageChild` 가 거부한다.
+    func test_슬래시가_두번_생기지_않는다() {
+        let e = StorageEntry(json: ["name": "a", "type": "file"], dir: "M/")!
+        XCTAssertEqual(e.path, "M/a")
+        XCTAssertFalse(e.path.contains("//"), "중복 슬래시는 서버가 거부한다")
     }
 }
