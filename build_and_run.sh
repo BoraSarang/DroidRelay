@@ -129,8 +129,14 @@ PLIST
     || echo "   ⚠ ad-hoc 서명 실패 — 실행 시 Gatekeeper 차단 가능"
 }
 
+# 설치 위치는 **사용자 앱 폴더**. /Applications 는 시스템 영역이라
+# 승인 프롬프트·권한 문제가 붙고, 사용자 폴더는 본인만 다루는 영역이라
+# 빌드 스크립트가 건드려도 된다. (사용자 지정)
+MACOS_APPS_DIR="$HOME/Applications"
+
 macos_install() {
-  local app="/Applications/$APP_NAME.app"
+  mkdir -p "$MACOS_APPS_DIR"
+  local app="$MACOS_APPS_DIR/$APP_NAME.app"
   # 실행 중이면 먼저 종료 — 덮어쓰는 동안 실행 파일이 묶여 있으면 실패한다
   pkill -x "$APP_NAME" 2>/dev/null && { echo "   · 실행 중이라 종료함"; sleep 1; } || true
   rm -rf "$app"
@@ -168,7 +174,7 @@ case "$CMD" in
       if [ ! -x "$BIN" ]; then echo "❌ 바이너리 생성 실패: $BIN"; exit 1; fi
       echo "📦 .app 번들 생성 중…"
       macos_bundle "$BIN" "$MACOS_DIR/.build/$APP_NAME.app" release
-      echo "📲 /Applications 에 설치 중…"
+      echo "📲 $MACOS_APPS_DIR 에 설치 중…"
       macos_install
       echo
       echo "실행   : ./build_and_run.sh run macos"
@@ -228,8 +234,8 @@ case "$CMD" in
   uninstall)
     if [ "$PLATFORM" = "macos" ]; then
       pkill -x "$APP_NAME" 2>/dev/null && echo "   · 실행 종료" || true
-      rm -rf "/Applications/$APP_NAME.app" "$MACOS_DIR/.build/$APP_NAME.app"
-      echo "✅ 제거 완료: /Applications/$APP_NAME.app"
+      rm -rf "$MACOS_APPS_DIR/$APP_NAME.app" "$MACOS_DIR/.build/$APP_NAME.app"
+      echo "✅ 제거 완료: $MACOS_APPS_DIR/$APP_NAME.app"
       exit 0
     fi
     if ! resolve_device; then exit 1; fi
@@ -298,11 +304,11 @@ case "$CMD" in
     echo "    a11y       덤프 수집        devices 연결 목록"
     echo
     echo "  macos"
-    echo "    debug      swift build + .app 번들 → /Applications 설치"
+    echo "    debug      swift build + .app 번들 → ~/Applications 설치"
     echo "    run        설치본 실행 (프로세스 생존 확인까지)"
     echo "    diagnose   서버 탐색 · SSE 생존 (메뉴바 앱의 유일한 진단 수단)"
     echo "    test       swift test       clean   .build 클린"
-    echo "    uninstall  /Applications 에서 제거"
+    echo "    uninstall  ~/Applications 에서 제거"
     echo
     echo "  DRD_SERIAL=<시리얼> 로 Android 대상 기기 지정 (여러 대 연결 시 필수)"
     exit 1

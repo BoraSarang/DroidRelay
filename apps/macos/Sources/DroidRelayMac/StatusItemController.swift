@@ -60,15 +60,14 @@ final class StatusItemController {
         }
     }
 
+    /// 배지와 속도를 **한 번에** 그린다.
+    ///
+    /// **왜 합쳤나** — AppKit 에서 `button.title` 을 대입하면 `attributedTitle` 이
+    /// **지워진다**. 배지만 갱신하려고 `b.title = " \(n)"` 를 대입하면, 바로 앞에서
+    /// 넣어 둔 속도가 **즉시 사라진다**(실측: 배지만 보이고 속도 행이 안 뜬다).
+    /// 그래서 둘을 하나의 attributed 문자열로 합쳐 한 번만 대입한다.
     func updateBadge() {
         renderTitle()
-        guard let b = statusItem?.button else { return }
-        let n = model.badgeCount
-        if n == 0 {
-            b.title = ""
-        } else {
-            b.title = " \(n)"
-        }
     }
 
     @objc private func clicked(_ sender: NSStatusBarButton) {
@@ -119,23 +118,33 @@ final class StatusItemController {
     private func renderTitle() {
         guard let b = statusItem?.button else { return }
         let sources = model.speedSetting.sources
-        guard !model.speedSetting.isOff else {
-            b.attributedTitle = NSAttributedString(string: Self.appIcon)
-            return
-        }
-        var lines: [String] = []
-        for (dir, isDown) in [("\u{2193}", true), ("\u{2191}", false)] {
-            let cells = sources.map { s -> String in
-                SpeedFormat.text(isDown ? model.speed(for: s).downBps : model.speed(for: s).upBps)
+
+        // 1줄 = 아이콘 + 배지
+        var lines = [Self.appIcon + (model.badgeCount > 0 ? " \(model.badgeCount)" : "")]
+        var ranges: [NSRange] = []   // 속도 부분만 고정폭 글꼴로
+
+        if !model.speedSetting.isOff {
+            for (dir, isDown) in [("\u{2191}", false), ("\u{2193}", true)] {
+                let head = "\(dir) "
+                let cells = sources.map { s -> String in
+                    SpeedFormat.text(isDown ? model.speed(for: s).downBps : model.speed(for: s).upBps)
+                }
+                let body = cells.joined(separator: "  ")
+                let start = lines[0].count + head.count
+                lines[0] += head + body
+                ranges.append(NSRange(location: start, length: body.count))
+                lines[0] += "\n"
             }
-            lines.append("\(dir) " + cells.joined(separator: "  "))
+            lines.removeLast()
         }
-        // 값 열이 어긋나지 않게 고정폭 글꼴 — 자리수가 바뀌면 줄이 좌우로 흔들린다
+
         let attr = NSMutableAttributedString(string: lines.joined(separator: "\n"))
         let full = NSRange(location: 0, length: attr.length)
-        attr.addAttribute(.font, value: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium),
-                          range: full)
         attr.addAttribute(.font, value: NSFont.systemFont(ofSize: 12), range: full)
+        // 값 부분만 고정폭 숫자로 — 자리수가 바뀌면 줄이 좌우로 흔들린다
+        for r in ranges {
+            attr.addAttribute(.font, value: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium), range: r)
+        }
         b.attributedTitle = attr
         b.toolTip = sources.map { "\($0.label) " + SpeedFormat.text(model.speed(for: $0).downBps)
                                 + " / " + SpeedFormat.text(model.speed(for: $0).upBps) }

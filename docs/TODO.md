@@ -624,6 +624,7 @@ T-001~T-008 전부 완료 (커밋 7574486).
 | M-13 | M3 — 독립 창 + 탭바 | ⏸ |
 | M-14 | M4 — 설정 영속화 + **DMG 배포 경로** | ⏸ |
 | M-14 | **메뉴바 속도 표시** — 2줄(↑다운) × 출처 열, 열 개수는 설정의 토글이 결정 · `SpeedFormat`(MB·KB·B/s) · `SpeedHistory`(경과시간 기반 델타, 되감김 방어) · Droid 속도는 잡+토렌트 합산 · 1초 자체 샘플러. 테스트 45 → **64건** | ✅ |
+| — | **앱 설치 위치 = `~/Applications`** (사용자 지정). `/Applications` 는 시스템 영역이라 승인·권한이 붙는다 | ✅ |
 | M-14 | **기기 속도 — 서버 미지원** (`api/net/speed` 없음). `TrafficStats` 엔드포인트 신설이 선행되어야 기기 열을 켤 수 있다 (스위치는 그때까지 비활성) | ⏸ |
 | M-14 | **로그인 시 자동 실행** — `SMAppService.mainApp` (구식 `SMLoginItemSetEnabled` 는 macOS 13 deprecated) · 상태는 플래그가 아니라 Launch Services 조회 · 실패 사유를 설정 화면에 노출 · `--login-item=on/off` 진단 플래그 · `--diagnose` 에 상태 출력. 테스트 39 → **45건** | ✅ |
 
