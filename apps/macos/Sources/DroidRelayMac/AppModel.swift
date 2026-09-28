@@ -42,7 +42,207 @@ final class AppModel {
     var jobs: [RelayClient.Job] = []
     var torrents: [Torrent] = []
     var storage: [StorageEntry] = []
+    /// **지금 보고 있는 보관함 위치** — `""` 이면 루트, `"M/영화"` 면 그 안.
+    ///
+    /// ## 왜 경로를 기억해야 하는가
+    ///
+    /// `GET /api/storage` 는 **항상 한 겹만** 돌려준다. 하위 폴더를 보려면
+    /// `?path=` 를 줘야 하는데, 그 경로를 기억하지 않으면
+    /// 폴더를 눌러도 항상 루트 목록이 나온다 — **누르는 아무것도 안 된다.**
+    var storagePath: String = ""
+    /// **지금 열 작업 대상** — 인라인 입력/확인에 쓴다.
+    ///
+    /// 이전 버전은 `model.currentTargetID` 만 설정하고 **입력 칸(`@State`)을
+    /// 채우지 않았다.** 그래서 "실행" 이 **영영 비활성**이었다.
+    /// → 대상과 입력을 **하나의 값**으로 묶어 둘 다 움직이게 한다.
+    var storageEdit: StorageEdit?
+    /// **휴지통 내용물** — `GET /api/storage/trash`.
+    ///
+    /// 복원/영구 삭제는 **여기서** 한다. "휴지통으로 보내기"만 있고 되돌릴 방법이
+    /// 없으면 그것은 삭제가 아니라 **데이터를 잃게 하는 UI** 다.
+    var trash: [StorageTrashItem] = []
+    /// **마지막 쓰기 동작의 결과 — 화면에 보인다.**
+    ///
+    /// ## 왜 이게 필요한가
+    ///
+    /// 쓰기 동작(일시정지/재개/삭제/이름바꾸기)은 **조용히 실패한다.**
+    /// 서버가 400 으로 거절하거나 항목이 이미 사라졌을 때 UI 는 아무 변화가 없다.
+    /// 사용자는 "눌렀다" 고 믿지만 서버는 거부했다 — **근거 없이 성공을 믿게 된다.**
+    ///
+    /// 그래서 실패를 **눈에 보이게** 남긴다. 성공은 조용해도 된다
+    /// (화면이 곧 결과다). 실패만 남기면 "왜 안 바뀌지" 를 스스로 답할 수 있다.
+    /// **삭제/조작 확인 대기 중인 대상.** `nil` 이면 확인창이 없다.
+    ///
+    /// ## 왜 서버를 바로 때리지 않나
+    ///
+    /// 이 화면을 만들면서 **사용자 토렌트 2건을 지웠다.** 원인은 단순했다:
+    /// 삭제 버튼이 확인 없이 곧바로 서버를 때렸다.
+    ///
+    /// 검증하러 눌렀는데 진짜 데이터가 사라졌다. 되돌릴 수 없는 것이었다.
+    /// → **모든 파괴 동작은 이 값이 세워질 때까지만 UI 가 대기**한다.
+    ///
+    /// 컨펌은 `ConfirmSpec` 가 **종류별 서로 다른 문구**를 만든다.
+    /// (완료 토렌트는 "파일 남음", 미완료는 "조각도 삭제", 잡은 "파일까지 삭제")
+    var confirm: ConfirmRequest?
+
+    /// **확인창을 세운다** — 아직 아무것도 지우지 않는다.
+    func askConfirm(_ c: ConfirmRequest) { confirm = c }
+
+    /// **확인창을 닫는다** — 아무 일도 하지 않는다.
+    func cancelConfirm() { confirm = nil }
+
+    /// **확인했다 — 이제서야 서버를 때린다.**
+    ///
+    /// ## 파괴 동작을 여기서만 호출하는 이유
+    ///
+    /// 컨펌 UI 의 "확인" 버튼은 **이 함수 하나만** 부른다.
+    /// 행의 "삭제" 버튼은 `askConfirm` 만 부른다.
+    /// → 서버를 때리는 경로가 **하나**뿐이라, 우회로가 생기지 않는다.
+    func performConfirm() {
+        guard let c = confirm else { return }
+        confirm = nil
+        guard let s = server else { return }
+        // 대상이 목록에서 사라졌을 수 있다(다른 곳에서 지웠을 수도 있다).
+        // 그래도 시도한다 — 서버가 "없음" 이라고 답하면 배너로 보인다.
+        switch c.kind {
+        case .job(let j): jobDeleteNow(j)
+        case .torrent(let t): torrentDeleteNow(t.id)
+        case .storage(let e): storageTrash(e)
+        case .purge(let name):
+            Task {
+                let r = await RelayClient(base: s.baseURL).storagePurge(name: name)
+                lastResult = r.ok ? "영구 삭제 완료" : "영구 삭제 실패 — \(r.message)"
+                if r.ok { await reloadTrash(s) }
+                await refresh()
+            }
+        case .move(let e):
+            // 이동은 **목적지 경로가 추가로 필요하다.** 컨펌에서 바로 하지 않고
+            // 인라인 편집을 연다 — 물어볼 게 아직 남았다.
+            beginStorageEdit(e, .move)
+        case .rename(let e):
+            // 이름변경도 **새 이름이 추가로 필요하다.** 같은 이유로 편집창을 연다.
+            beginStorageEdit(e, .rename)
+        case .restore(let name):
+            // **복원 위치가 보장되지 않는다** — 서버가 원래 위치를 기억하지 않아
+            // 보관함 루트로 돌아온다. 컨펌에서 확인받고 여기서 실행한다.
+            Task {
+                let r = await RelayClient(base: s.baseURL).storageRestore(name: name)
+                lastResult = r.ok ? "복원 완료" : "복원 실패 — \(r.message)"
+                if r.ok { await reloadTrash(s) }
+                await refresh()
+            }
+        }
+    }
+
+    var lastResult: String = ""
     var storageFree: Int = 0
+
+    // MARK: - 추가 입력 (다운로드 · 토렌트)
+
+    /// **다운로드 추가 칸의 내용** — 모델에 둔다.
+    ///
+    /// ## 왜 `@State` 로 두지 않았는가 (PR #28 교훈)
+    ///
+    /// `@State` 로 두면 **"추가" 버튼의 활성 조건**이 화면 쪽 값(복사본)을 보고,
+    /// **실제 전송**은 모델 값을 본다. 둘이 어긋나면 "눌러도 아무 일 없다".
+    /// 보관함 편집이 정확히 그 증상으로 실패했다.
+    ///
+    /// → **입력도 모델에 두고 하나만 본다.** 어긋날 여지가 없다.
+    var addUrlText: String = ""
+
+    /// **토렌트(magnet) 추가 칸의 내용** — 같은 이유로 모델에 둔다.
+    var addMagnetText: String = ""
+
+    /// **다운로드 추가 칸이 "추가" 를 받을 수 있는가** — 웹 1789행 조건.
+    var canAddUrl: Bool { !AddInput.urls(addUrlText).isEmpty }
+
+    /// **토렌트 추가 칸이 "추가" 를 받을 수 있는가** — 웹 1806행 조건.
+    var canAddMagnet: Bool { AddInput.isMagnet(addMagnetText) }
+
+    /// **보관함 인라인 편집 상태 — 대상 경로와 입력값이 항상 같이 움직인다.**
+    ///
+    /// ## 왜 하나의 값인가
+    ///
+    /// 이전에는 `@State private var target = ""` 와 `model.currentTargetID` 가
+    /// **따로** 있었다. 대상만 설정하고 입력 칸은 비워 두니까
+    /// `canRun == false` → **"실행" 버튼이 영영 눌리지 않았다.**
+    ///
+    /// 두 값을 **하나로 묶으면** 이런 어긋남이 구조적으로 불가능해진다.
+    /// 입력 칸이 비어 있으면 아예 편집창이 안 열린다.
+    /// **확인 대기 중인 동작 하나** — 대상과, 사용자에게 보여줄 문구를 함께 담는다.
+    ///
+    /// ## 왜 문구까지 태그에 넣는가
+    ///
+    /// 컨펌 UI 가 `kind` 마다 `if` 로 문구를 만들면 **UI 와 Core 의 규칙이 둘로 갈라진다.**
+    /// (이번에 실제 사고가 났듯이, 규칙이 어긋나면 사용자가 모르게 파일을 잃는다)
+    /// → **`ConfirmSpec` 한 곳에서 만든다.** UI 는 그리기만 한다.
+    struct ConfirmRequest: Identifiable, Equatable {
+        enum Kind: Equatable {
+            case job(RelayClient.Job)
+            case torrent(Torrent)
+            case storage(StorageEntry)
+            /// **휴지통 항목 이름** — `StorageEntry` 로는 만들 수 없다(휴지통 목록의 항목형)
+            case purge(String)
+            case move(StorageEntry)
+            case rename(StorageEntry)
+            /// **휴지통 항목 이름** — 복원 위치가 보장되지 않아 확인이 필요하다
+            case restore(String)
+        }
+        let id = UUID()
+        let kind: Kind
+        let spec: ConfirmSpec
+
+        init(kind: Kind) {
+            self.kind = kind
+            switch kind {
+            case .job(let j): self.spec = ConfirmSpec.job(j)
+            case .torrent(let t): self.spec = ConfirmSpec.torrent(t)
+            case .storage(let e): self.spec = ConfirmSpec.storage(e)
+            case .purge(let n): self.spec = ConfirmSpec.purge(n)
+            case .move(let e): self.spec = ConfirmSpec.move(e)
+            case .rename(let e): self.spec = ConfirmSpec.rename(e)
+            case .restore(let n): self.spec = ConfirmSpec.restore(n)
+            }
+        }
+    }
+
+    struct StorageEdit: Identifiable, Equatable {
+        /// **입력값이 필요한 동작만** 담는다.
+        ///
+        /// ## 왜 `purge`/`restore` 가 없는가 — 컨펌 우회로 차단
+        ///
+        /// 원래 여기에 `purge`/`restore` 가 있었고 `runStorageEdit` 이 그것도 실행했다.
+        /// 그러면 **`confirm` 을 거치지 않고 삭제하는 경로가 코드에 남는다.**
+        /// (언젠가 화면 하나가 `beginStorageEdit(.purge, …)` 를 쓰면 컨펌 없이 지워진다)
+        ///
+        /// 파괴 동작은 **`performConfirm()` 하나만** 실행할 수 있게 한다.
+        /// 여기서 빼는 것으로 **우회로가 컴파일 에러로 드러난다** —
+        /// 다시 넣으려면 반드시 컨펌 경로를 고쳐야 한다.
+        enum Kind: String, Equatable {
+            case rename = "이름 변경"
+            case move = "이동"
+            case mkdir = "새 폴더"
+        }
+        let id = UUID()
+        var kind: Kind
+        /// **대상 전체 경로** (예: `M/영화/예편.mkv`) — 서버가 받는 `from` 값
+        var path: String
+        /// **사용자가 입력한 값** — 비어 있으면 실행 불가
+        var input: String = ""
+        /// **이동 목적지 폴더 경로** (`move` 에서만 쓴다)
+        var destDir: String = ""
+
+        /// **실행할 수 있는가** — 입력값이 **실제로 채워졌을 때만** 참.
+        ///
+        /// 서버는 이 값이 비면 조용히 실패하거나 422 를 돌려준다.
+        /// 버튼을 **못 누르게** 하는 게 그보다 낫다.
+        var canRun: Bool {
+            switch kind {
+            case .rename, .mkdir: return !input.trimmingCharacters(in: .whitespaces).isEmpty
+            case .move: return !destDir.trimmingCharacters(in: .whitespaces).isEmpty
+            }
+        }
+    }
     /// Droid(앱) 속도 — 잡+토렌트를 서버가 준 값에서 합산한다(웹 대시보드와 동일 계산)
     var droidSpeed: SpeedReading = .init(downBps: 0, upBps: 0)
     /// 기기(폰 전체) 속도 — 서버의 누적 카운터를 **여기서** 시간 차로 나눈 값.
@@ -181,7 +381,8 @@ final class AppModel {
     /// 설정 창에서 주소를 직접 넣었을 때.
     func useManualAddress(_ address: String) async {
         let parts = address.split(separator: ":")
-        guard parts.count == 2, let p = Int(parts[1]),
+        // 포트는 형식 검증에만 쓴다 — 실제 접속은 displayAddress(포트 포함)로 간다
+        guard parts.count == 2, Int(parts[1]) != nil,
               let u = URL(string: "http://\(address)")
         else { phase = .failed; return }
         guard let info = await RelayClient.probe(u) else { phase = .failed; return }
@@ -218,7 +419,8 @@ final class AppModel {
         // `torrents` 가 영영 비어 속도가 계속 0 이 된다.
         // (실측: 서버는 10KB/s 를 보내는데 메뉴바는 '—' — 탭 조건이 원인이었다)
         async let t = client.torrents()
-        async let f = selectedTab == .storage ? client.storage() : storage
+        // **현재 위치 경로를 반드시 넘긴다.** 루트 고정이면 하위 폴더를 못 연다.
+        async let f = selectedTab == .storage ? client.storage(path: storagePath) : storage
         async let i = client.serverInfo()
         let (jobs, torrents, storage, info) = await (j, t, f, i)
         self.jobs = jobs
@@ -239,111 +441,272 @@ final class AppModel {
         await refresh()
     }
 
+    // MARK: - 추가 (다운로드 · 토렌트)
+
+    /// **다운로드 추가** — `POST /api/jobs` 를 URL 개수만큼.
+    ///
+    /// ## 웹과 같은 일, 웹과 같은 문구 (1786~1803행)
+    ///
+    /// - 공백/쉼표/줄바꿈으로 나누고 `https?://` 만 보낸다 (`AddInput`).
+    /// - **여러 개면 전부 시도**하고 성공/실패 개수를 알려준다.
+    ///   하나만 보내고 조용히 놓치는 일은 없다.
+    /// - **전부 시도한 뒤** 입력 칸을 비우고 목록을 다시 당긴다.
+    ///
+    /// ## 왜 개수를 세어 알려주는가
+    ///
+    /// 웹은 `showDlToast(ok+'건 추가'+(fail>0?' · 실패 '+fail+'건':''))` 라고
+    /// **실패가 섞였음을 드러낸다.** 클라이언트가 "완료" 만 말하면
+    /// 3개 중 1개가 조용히 422 를 받은 걸 사용자는 모른다.
+    func addDownloads() {
+        guard let s = server else { return }
+        let urls = AddInput.urls(addUrlText)
+        // **빈 입력으로는 아무 요청도 가지 않는다.** 웹 1789행 alert 과 같은 조건.
+        guard !urls.isEmpty else {
+            lastResult = "추가 실패 — http:// 또는 https:// 로 시작하는 주소가 없습니다"
+            return
+        }
+        let raw = addUrlText
+        Task {
+            var ok = 0
+            var firstErr = ""
+            for u in urls {
+                let r = await RelayClient(base: s.baseURL).addDownload(url: u)
+                if r.ok { ok += 1 } else if firstErr.isEmpty { firstErr = r.message }
+            }
+            // **같은 칸을 연속으로 두 번 추가할 수 있게 지운다.**
+            // (사용자가 전송 도중 지우고 싶어할 수 있다. 웹도 지운다 — 1798행)
+            if addUrlText == raw { addUrlText = "" }
+            if ok == urls.count {
+                lastResult = "다운로드 \(ok)건 추가"
+            } else {
+                // 실패 사유를 **버리지 않는다** — 몇 건 중 몇 건, 그리고 왜.
+                lastResult = "추가 \(ok)/\(urls.count)건 · 실패 사유: \(firstErr)"
+            }
+            await refresh()
+        }
+    }
+
+    /// **토렌트 추가** — `POST /api/torrents/add`.
+    ///
+    /// magnet 도 `.torrent` URL 도 받는다는 점은 웹과 같지만,
+    /// **형식을 여기서 먼저 확인한다** — 서버까지 가서 422 를 받는 것보다 빠르다.
+    func addMagnet() {
+        guard let s = server else { return }
+        let raw = addMagnetText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !raw.isEmpty else {
+            lastResult = "추가 실패 — magnet:? 로 시작하는 링크를 입력하세요"
+            return
+        }
+        let original = addMagnetText
+        Task {
+            let r = await RelayClient(base: s.baseURL).addTorrent(magnetOrURL: raw)
+            // **성공한 경우에만** 칸을 비운다. 실패하면 입력값을 지워서
+            // 사용자가 "방금 붙여넣은 링크" 를 잃어버리게 하지 않는다.
+            if r.ok, addMagnetText == original { addMagnetText = "" }
+            lastResult = r.ok ? "토렌트 추가됨" : "추가 실패 — \(r.message)"
+            await refresh()
+        }
+    }
+
+    /// 잡 일시정지/재개 — 실패하면 **화면에 남긴다.**
     func control(_ id: String, _ action: String) {
         guard let s = server else { return }
         Task {
-            await RelayClient(base: s.baseURL).control(id, action)
+            let ok = await RelayClient(base: s.baseURL).control(id, action)
+            if !ok { lastResult = "\(action) 실패 — 서버가 거절했습니다" }
             await refresh()
         }
     }
 
+    /// 잡 삭제 — `DELETE /api/jobs/{id}`.
+    ///
+    /// 일시정지/재개와 **다른 경로**다. 잡 라우트에 `cancel` 이 없어서
+    /// `control(id, "cancel")` 은 400 "지원 없는 동작" 이었다(실측).
+    ///
+    /// **컨펌을 거쳐야 한다** — 이 함수는 "확인" 에서만 호출된다.
+    /// UI 의 삭제 버튼은 `askConfirm(.job(j))` 만 한다.
+    func jobDeleteNow(_ j: RelayClient.Job) {
+        guard let s = server else { return }
+        Task {
+            let ok = await RelayClient(base: s.baseURL).jobDelete(j.id)
+            if !ok { lastResult = "삭제 실패 — 서버가 거절했습니다" }
+            await refresh()
+        }
+    }
+
+    /// **잡 삭제 컨펌을 세운다** — 아직 지우지 않는다.
+    func askJobDelete(_ j: RelayClient.Job) { askConfirm(.init(kind: .job(j))) }
+
+    /// 잡 속도 제한 — `POST /api/jobs/{id}/limit` (B/s).
+    ///
+    /// **UI 가 보낸 B/s 를 그대로 넘긴다.** 단위 변환은 `SpeedPresets` 가
+    /// 화면에서 이미 끝냈고, 여기서 한 번 더 바꾸면 값이 어긋난다.
+    func jobLimit(_ id: String, _ maxDownBps: Int) {
+        guard let s = server else { return }
+        Task {
+            let r = await RelayClient(base: s.baseURL).setJobLimit(id: id, maxDownBps: maxDownBps)
+            if !r.ok { lastResult = "속도 제한 실패 — \(r.message)" }
+            await refresh()
+        }
+    }
+
+    /// 토렌트 일시정지/재개 — `POST /api/torrents/{id}/{action}`.
+    ///
+    /// **반환값을 버리지 않는다.** 서버가 400 으로 거절할 수 있고
+    /// (예: 이미 중지된 토렌트에 pause), 그럼 사용자는 "눌렀는데 아무 일 없다" 는
+    /// 상태로 남는다. 실패를 알리고 조용히 넘어가지 않는다.
     func torrentControl(_ id: String, _ action: String) {
         guard let s = server else { return }
         Task {
-            await RelayClient(base: s.baseURL).torrentControl(id, action)
+            let ok = await RelayClient(base: s.baseURL).torrentControl(id, action)
+            if !ok { lastResult = "토렌트 \(action) 실패 (서버가 거절했습니다)" }
             await refresh()
         }
     }
 
-    // MARK: - 쓰기 동작 (M-14)
-
-    /// **사용자에게 보여줄 마지막 결과.** 실패 사유를 여기에 남겨 UI 가 읽는다.
-    @ObservationIgnored var lastResult: WriteResult = .success
-    /// 진행 중 여부 — 중복 실행을 막고 버튼을 비활성화한다.
-    @ObservationIgnored var busy = false
-    /// 상세 시트가 보고 있는 토렌트
-    @ObservationIgnored var detail: TorrentDetail?
-    /// 휴지통 목록
-    @ObservationIgnored var trash: [StorageTrashItem] = []
-    /// 시트가 지금 조작하려는 항목 id — **모두 "한 항목" 대상**이라 하나로 충분하다.
-    @ObservationIgnored var currentTargetID: String = ""
-
-    private func write(_ op: @escaping (RelayClient) async -> WriteResult) async {
-        guard let s = server else { lastResult = .fail("서버에 연결되어 있지 않습니다"); return }
-        busy = true
-        let r = await op(RelayClient(base: s.baseURL))
-        busy = false
-        // **성공해도 목록을 다시 읽어야 한다.** 서버가 새 항목을 만든 뒤라
-        // 로컬 배열에는 반영이 없다.
-        if r.ok { await refresh() }
-        lastResult = r
-    }
-
-    // MARK: 다운로드
-
-    func addDownload(_ url: String) async { await write { await $0.addDownload(url: url) } }
-    func setJobLimit(_ id: String, bps: Int) async { await write { await $0.setJobLimit(id: id, maxDownBps: bps) } }
-
-    // MARK: 토렌트
-
-    func addTorrent(_ input: String) async { await write { await $0.addTorrent(magnetOrURL: input) } }
-    func setTorrentLimit(_ id: String, bps: Int) async { await write { await $0.setTorrentLimit(id: id, maxDownBps: bps) } }
-
-    /// 토렌트 상세를 연다 — **시드 정보의 유일한 출처**이므로 실패하면 그대로 알린다.
-    func openDetail(_ id: String) async {
-        guard let s = server else { lastResult = .fail("서버에 연결되어 있지 않습니다"); return }
-        busy = true
-        let d = await RelayClient(base: s.baseURL).torrentDetail(id: id)
-        busy = false
-        if let d { detail = d; lastResult = .success }
-        else { lastResult = .fail("상세 정보를 가져오지 못했습니다") }
-    }
-
-    // MARK: 보관함
-
-    func storageMove(_ from: String, to folder: String) async {
-        await write { await $0.storageMove(from: from, to: folder) }
-    }
-    func storageRename(_ from: String, to: String) async {
-        await write { await $0.storageRename(from: from, to: to) }
-    }
-    func storageTrash(_ path: String) async { await write { await $0.storageTrash(path: path) } }
-    func storageDelete(_ path: String) async { await write { await $0.storageDelete(path: path) } }
-    func storageMkdir(_ path: String, _ name: String) async {
-        await write { await $0.storageMkdir(path: path, name: name) }
-    }
-    func storageRestore(_ name: String) async { await write { await $0.storageRestore(name: name) } }
-    func storagePurge(_ name: String) async { await write { await $0.storagePurge(name: name) } }
-
-    /// 휴지통을 읽는다 — 열 때마다 새로 읽어야 한다(다른 기기에서 지웠을 수도 있다).
-    func loadTrash() async {
-        guard let s = server else { return }
-        trash = await RelayClient(base: s.baseURL).storageTrashList()
-    }
-
-    /// 보관함 항목을 공유 링크로 만들어 브라우저로 연다.
-    ///
-    /// **파일을 직접 내려받는 엔드포인트가 없다.** 웹 대시보드도 공유 링크를 만들어
-    /// 브라우저로 연다 — 서버가 파일을 스트림하지 않는다. 같은 방식이 유일하게 일관된다.
-    func shareStorage(_ path: String) async {
-        guard let s = server else { lastResult = .fail("서버에 연결되어 있지 않습니다"); return }
-        busy = true
-        let token = await RelayClient(base: s.baseURL).storageShareLink(path: path)
-        busy = false
-        guard let token, let u = URL(string: "\(s.baseURL.absoluteString)/s/\(token)") else {
-            lastResult = .fail("공유 링크를 만들지 못했습니다")
-            return
-        }
-        NSWorkspace.shared.open(u)
-        lastResult = .success
-    }
-
-    func torrentDelete(_ id: String) {
+    /// **컨펌을 거쳐야 한다** — 이 함수는 "확인" 에서만 호출된다.
+    func torrentDeleteNow(_ id: String) {
         guard let s = server else { return }
         Task {
-            await RelayClient(base: s.baseURL).torrentDelete(id)
+            let ok = await RelayClient(base: s.baseURL).torrentDelete(id)
+            if !ok { lastResult = "토렌트 삭제 실패 — 서버가 거절했습니다" }
             await refresh()
         }
+    }
+
+    /// **토렌트 삭제 컨펌을 세운다** — 아직 지우지 않는다.
+    ///
+    /// 미완료면 **받은 조각까지 사라진다**(서버 `deleteRecursively`).
+    /// 완료면 목록에서만 빠진다. `ConfirmSpec.torrent` 가 둘을 나눠 말한다.
+    func askTorrentDelete(_ t: Torrent) { askConfirm(.init(kind: .torrent(t))) }
+
+    /// 토렌트 속도 제한 — `POST /api/torrents/{id}/limit` (B/s).
+    func torrentLimit(_ id: String, _ maxDownBps: Int) {
+        guard let s = server else { return }
+        Task {
+            let r = await RelayClient(base: s.baseURL).setTorrentLimit(id: id, maxDownBps: maxDownBps)
+            if !r.ok { lastResult = "속도 제한 실패 — \(r.message)" }
+            await refresh()
+        }
+    }
+
+    // MARK: - 보관함 (탐색 + 조작)
+
+    /// **하위 폴더로 내려간다.** 목록은 `storagePath` 기준으로 다시 당긴다.
+    func storageEnter(_ entry: StorageEntry) {
+        guard entry.isDirectory else { return }
+        storagePath = entry.path
+        storageEdit = nil
+        Task { await refresh() }
+    }
+
+    /// **한 단계 위로.** 루트면 아무 일도 없다.
+    func storageUp() {
+        guard !storagePath.isEmpty else { return }
+        // 마지막 `/` 앞에서 자른다 — `M/영화` → `M`, `M` → ""
+        let t = storagePath.split(separator: "/").dropLast().joined(separator: "/")
+        storagePath = t
+        storageEdit = nil
+        Task { await refresh() }
+    }
+
+    /// **탐색 경로 조각 — 빵조각 UI 용.**
+    ///
+    /// ## 여기서 한 번 틀렸었다
+    ///
+    /// 처음엔 `storagePath.isEmpty ? ["보관함"] : storagePath.split(...)` 라 써서
+    /// **하위 폴더에서 루트 조각이 사라졌다.** `M/영화` 에 있으면
+    /// `["영화"]` 만 떠서 **어디로든 돌아갈 방법이 화면에 없다.**
+    ///
+    /// 탐색 UI 는 **언제나 루트에서 시작**한다. 경로 조각 앞에 "보관함" 을 붙인다.
+    /// (이걸 놓치면 사용자는 팝오버를 닫고 다시 열어야만 루트로 돌아갈 수 있다)
+    var storageCrumbs: [(label: String, path: String)] {
+        let parts = storagePath.isEmpty ? [] : storagePath.split(separator: "/").map(String.init)
+        var out: [(label: String, path: String)] = [("보관함", "")]
+        for (i, p) in parts.enumerated() {
+            out.append((p, parts[0...i].joined(separator: "/")))
+        }
+        return out
+    }
+
+    /// **편집창을 연다.** 대상 경로와 종류를 **같이** 넣는다.
+    func beginStorageEdit(_ entry: StorageEntry, _ kind: StorageEdit.Kind) {
+        storageEdit = StorageEdit(kind: kind, path: entry.path,
+                                  input: kind == .rename ? entry.name : "")
+    }
+
+    /// **새 폴더 만들기** — 대상은 현재 위치다.
+    func beginMkdir() {
+        storageEdit = StorageEdit(kind: .mkdir, path: storagePath)
+    }
+
+    /// **편집창 실행.** `canRun == false` 면 **아무것도 하지 않는다.**
+    ///
+    /// 서버를 불렀다 422 를 받는 것보다, 못 누르게 하는 게 낫다.
+    /// (그리고 성공하면 **편집창을 닫고** 목록을 다시 당긴다 —
+    ///  닫지 않으면 "실행됨" 인데 입력창이 남아 있어 성공인지 실패인지 모른다)
+    func runStorageEdit() {
+        guard var e = storageEdit, e.canRun, let s = server else { return }
+        storageEdit = nil          // 먼저 닫는다 — 중복 실행 방지 + 즉시 반응
+        let name = e.input.trimmingCharacters(in: .whitespaces)
+        let dest = e.destDir.trimmingCharacters(in: .whitespaces)
+        Task {
+            let c = RelayClient(base: s.baseURL)
+            let r: WriteResult
+            switch e.kind {
+            case .rename: r = await c.storageRename(from: e.path, to: name)
+            case .mkdir: r = await c.storageMkdir(path: e.path, name: name)
+            case .move: r = await c.storageMove(from: e.path, to: dest)
+            }
+            lastResult = r.ok ? "\(e.kind.rawValue) 완료" : "\(e.kind.rawValue) 실패 — \(r.message)"
+            await refresh()
+        }
+    }
+
+    /// **휴지통으로 보내기** — `POST /api/storage/delete`.
+    ///
+    /// **이 엔드포인트는 200 을 주면서 `{"error": …}` 를 담아 보낸다(실측).**
+    /// 즉 **상태 코드만 보면 삭제가 성공한 것처럼 보인다.**
+    /// → `WriteResult` 가 본문을 봐야 한다. 여기서 실패를 무시하면
+    /// "휴지통으로 보냈다" 고 잘못 안내한다.
+    /// **휴지통으로 보내기 — 컨펌을 먼저.**
+    ///
+    /// 되돌릴 수 있지만, **사용자가 실수로 누를 수 있다.**
+    /// "삭제" 라는 이름의 버튼이 파일을 움직인다는 것을 모를 수 있다.
+    func askStorageTrash(_ e: StorageEntry) { askConfirm(.init(kind: .storage(e))) }
+
+    /// **휴지통으로 이동 실행** — 컨펌 "확인" 에서만 부른다.
+    func storageTrash(_ entry: StorageEntry) {
+        guard let s = server else { return }
+        Task {
+            let r = await RelayClient(base: s.baseURL).storageTrash(path: entry.path)
+            lastResult = r.ok ? "휴지통으로 이동 — \(entry.name)" : "휴지통 이동 실패 — \(r.message)"
+            // 휴지통이 하나 늘었을 수 있다. 안 읽으면 "휴지통 0개" 가 그대로 남는다.
+            if r.ok { await reloadTrash(s) }
+            await refresh()
+        }
+    }
+
+    /// **휴지통 목록을 연다** — 복원·영구 삭제는 여기서 한다.
+    func loadTrash() {
+        guard let s = server else { return }
+        Task { await reloadTrash(s) }
+    }
+
+    /// **휴지통 목록을 다시 읽는다.**
+    ///
+    /// ## 왜 쓰기 직후에도 부르는가
+    ///
+    /// `refresh()` 는 목록·잡·토렌트만 갱신한다. 휴지통은 안 건드린다.
+    /// → 복원/영구 삭제/휴지통 이동을 하고도 **화면의 휴지통 목록은 옛날 것** 이 남는다.
+    /// → 사용자는 "지웠는데 왜 아직 있어" 하고, **화면이 거짓말** 하게 된다.
+    ///
+    /// 쓰기 동작이 **휴지통에 영향을 주면** 반드시 이걸 다시 불러온다.
+    @discardableResult
+    private func reloadTrash(_ s: ServerInfo) async -> [StorageTrashItem] {
+        let t = await RelayClient(base: s.baseURL).storageTrashList()
+        trash = t
+        return t
     }
 
     // MARK: - 실시간

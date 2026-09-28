@@ -195,6 +195,229 @@ final class StatusItemController {
         ]
     }
 
+    /// **팝오버를 열고 그대로 대기한다.** 외부 도구(`Tools/DumpAX.swift`)가
+    /// 화면 내용을 읽을 수 있게 하는 것이 목적이다.
+    ///
+    /// 왜 이게 필요한가: **눈으로 볼 수 없는 경우 "화면에 뭐가 있는가" 를
+    /// 확인할 방법이 이것뿐이다.** 앱이 스스로 덤프하면 자기 자신을 원격 AX 로
+    /// 질의할 수 없어(실측: 창 0개) 아무것도 안 나온다. → 반드시 밖에서 물어봐야 한다.
+    func holdPopoverOpen() {
+        showPopoverForCheck()
+    }
+
+    /// **무조건 팝오버를 연다.** 진단 전용 — 토글이 아니라 "연 상태" 를 만든다.
+    func forceShowPopover() {
+        if popover?.isShown != true { showPopoverForCheck() }
+    }
+
+    /// **원격(프로세스 간) AX 트리로 화면에 보이는 텍스트를 뽑는다.**
+    ///
+    /// ## 왜 로컬 AX 로는 안 되는가
+    ///
+    /// 자기 프로세스의 `NSView.accessibilityTitle()` 은 SwiftUI 텍스트를 **거의 안 준다.**
+    /// AX 덤프 결과가 `AXUnknown` 만 나오는 것이 그 증거다.
+    /// SwiftUI 는 텍스트를 `NSAccessibilityElement`(한 프로세스 밖에서 질의되는
+    /// 원격 요소)로 노출하므로, **자기 자신에게는 값이 없고 다른 프로세스에서 물어보면 나온다.**
+    ///
+    /// → `AXUIElementCreate` 로 **자기 자신의 프로세스**를 질의한다.
+    /// 이것이 VoiceOver 가 실제로 읽는 경로라 "화면에 뭐가 있나" 의 정답이다.
+    /// AX 속성 키 — C 전역 상수라 Swift 심볼로 안 들어온다. **문자열 리터럴이 정답이다.**
+    private enum AXKey {
+        static let windowChildren = "AXWindows"
+        static let children = "AXChildren"
+        static let role = "AXRole"
+        static let subrole = "AXSubrole"
+        static let title = "AXTitle"
+        static let value = "AXValue"
+        static let desc = "AXDescription"
+    }
+
+    func debugRemoteAX() -> [String] {
+        var out = ["══ 원격 AX 덤프 (VoiceOver 가 읽는 경로) ══"]
+        let pid = ProcessInfo.processInfo.processIdentifier
+        let app = AXUIElementCreateApplication(pid)
+        let wins = axCopy(app, AXKey.windowChildren) as? [AXUIElement] ?? []
+        out.append("프로세스 \(pid) — 창 \(wins.count)개")
+        for (i, w) in wins.enumerated() {
+            let title = axCopy(w, AXKey.title) as? String ?? "(제목 없음)"
+            let role = axCopy(w, AXKey.role) as? String ?? "?"
+            out.append("")
+            out.append("── 창 #\(i): \(role) “\(title)”")
+            axDump(w, depth: 1, into: &out)
+        }
+        return out
+    }
+
+    private func axCopy(_ e: AXUIElement, _ attr: String) -> CFTypeRef? {
+        var v: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(e, attr as CFString, &v) == .success else { return nil }
+        return v
+    }
+
+    private func axDump(_ e: AXUIElement, depth: Int, into out: inout [String]) {
+        guard depth < 24 else { return }
+        let pad = String(repeating: "  ", count: depth)
+        let role = axCopy(e, AXKey.role) as? String ?? "?"
+        var label = axCopy(e, AXKey.title) as? String ?? ""
+        if label.isEmpty, let v = axCopy(e, AXKey.value) { label = Self.axString(v) }
+        if label.isEmpty { label = axCopy(e, AXKey.desc) as? String ?? "" }
+        let sub = axCopy(e, AXKey.subrole) as? String ?? ""
+        var line = pad + role + (sub.isEmpty ? "" : ".\(sub)")
+        if !label.isEmpty { line += "  “\(label)”" }
+        out.append(line)
+        let kids = axCopy(e, AXKey.children) as? [AXUIElement] ?? []
+        for k in kids { axDump(k, depth: depth + 1, into: &out) }
+    }
+
+    /// AX 값(`CFTypeRef`)을 사람이 읽는 문자열로.
+    ///
+    /// **AXValue 는 CFTypeRef 그 자체라 조건부 캐스팅이 경고가 된다.**
+    /// 그래서 `AXValueGetType` 으로 문자열인지 먼저 확인한 뒤에만 값을 꺼낸다.
+    /// (숫자/문자열 속성이 `AXValue` 안에 들어오고 `as? String` 은 조용히 nil 이 된다)
+    private static func axString(_ v: CFTypeRef) -> String {
+        if let s = v as? String { return s }
+        if CFGetTypeID(v) == AXValueGetTypeID() {
+            let av = v as! AXValue          // 위 ID 검사로 AXValue 임이 보장된다
+            // **AXValueType 원시값 3 = kAXValueStringType, 2 = kAXValueDoubleType**
+            // C 상수(kAXValueStringType 등)가 Swift 에 노출되지 않으므로 번호를 쓴다.
+            // (값 정의는 macOS AXValue.h — 바꾸면 안 된다)
+            let t = AXValueGetType(av).rawValue
+            if t == 3 {
+                var sv: CFString?
+                if AXValueGetValue(av, AXValueType(rawValue: 3)!, &sv), let s = sv { return s as String }
+            }
+            var dv = Double(0)
+            if AXValueGetValue(av, AXValueType(rawValue: 2)!, &dv) { return String(format: "%g", dv) }
+        }
+        if let n = v as? NSNumber { return n.stringValue }
+        return String(describing: v)
+    }
+
+    /// **접근성(AX) 트리로 화면에 보이는 텍스트를 뽑는다.**
+    ///
+    /// ## 왜 AX 트리인가
+    ///
+    /// 뷰 계층을 내려가면 `CGDrawingView` 만 나온다(위 덤프이 그 증거다).
+    /// SwiftUI 는 텍스트를 CoreGraphics 레이어로 그려서 **뷰 계층에 문자열이 없다.**
+    /// 그러면 "화면에 뭐가 있는지"를 확인할 방법이 눈뿐이다.
+    ///
+    /// **접근성 트리는 그 문제를 우회한다.** VoiceOver 가 읽는 것이 곧 화면에 있는
+    /// 텍스트이고, SwiftUI 는 접근성을 의도적으로 노출한다.
+    /// → "사용자가 화면 낭독기로 hears 하는 것" = "화면에 있는 것".
+    func debugAX() -> [String] {
+        guard let p = popover, let host = p.contentViewController?.view else {
+            return ["══ AX 덤프 ══\n팝오버 없음"]
+        }
+        var out = ["══ AX 덤프 (화면에 보이는 텍스트) ══",
+                   "표시 중: \(p.isShown)", ""]
+        axWalk(host, depth: 0, into: &out)
+        return out
+    }
+
+    private func axWalk(_ e: Any, depth: Int, into out: inout [String]) {
+        guard depth < 40 else { return }
+        let pad = String(repeating: "  ", count: depth)
+        var line = pad
+        if let v = e as? NSView {
+            let f = v.frame
+            line += v.isHidden || f.width < 1 ? "[숨김] " : ""
+            let n = String(describing: type(of: v))
+            line += (n.split(separator: ".").last.map(String.init) ?? "?") + " "
+        }
+        // **AX 접근은 `NSAccessibilityProtocol` 인스턴스에만 된다.**
+        // NSObject 로 캐스팅하면 컴파일은 되지만 런타임에 부재 메서드가 된다 —
+        // 그래서 protocol 을 실제로 conform 하는 값만 받는다.
+        if let a = e as? NSAccessibilityProtocol {
+            let role = a.accessibilityRole()?.rawValue ?? "?"
+            // `accessibilityValue()` 는 `Any?` 다 — NSNumber/String/NSAttributedString
+            // 이 섞여 온다. 화면에 보이는 값은 **문자열로 바꾼 뒤** 비교한다.
+            // (숫자 0 은 "비어 있음" 이 아니라 "값 0" 이므로 String 변환 후 판정)
+            let valText = a.accessibilityValue().map { v -> String in
+                if let s = v as? String { return s }
+                if let n = v as? NSNumber { return n.stringValue }
+                if let s = v as? NSAttributedString { return s.string }
+                return String(describing: v)
+            } ?? ""
+            if let t = a.accessibilityTitle(), !t.isEmpty {
+                out.append("\(line)\(role): “\(t)”")
+            } else if !valText.isEmpty {
+                out.append("\(line)\(role): \(valText)")
+            } else if let lab = a.accessibilityLabel(), !lab.isEmpty {
+                out.append("\(line)\(role): \(lab)")
+            } else {
+                out.append("\(line)\(role)")
+            }
+        } else {
+            out.append(line + "—")
+        }
+        // 자식 순회 — NSView 계층은 subviews, AX 요소는 accessibilityChildren()
+        var kids: [Any] = []
+        if let v = e as? NSView { kids = v.subviews }
+        else if let a = e as? NSAccessibilityProtocol {
+            kids = (a.accessibilityChildren() ?? []).map { $0 as Any }
+        }
+        for k in kids { axWalk(k, depth: depth + 1, into: &out) }
+    }
+
+    /// **화면에 실제로 그려진 것을 텍스트로 덤프한다.**
+    ///
+    /// ## 왜 이게 필요한가
+    ///
+    /// 이전까지 "팝오버에 버튼이 있다" 는 주장이 **코드만 보고** 나왔다.
+    /// 실제로 뜨는지, 그려지는지 확인하지 않았다. 그래서
+    /// "시트가 안 닫히는", "대상 칸이 안 채워지는" 같은 걸
+    /// 사용자가 화면을 보고 발견하게 되었다.
+    ///
+    /// **눈으로 볼 수 없는 경우 화면의 진실은 뷰 계층에 있다.**
+    /// NSHostingView 아래의 모든 서브뷰를 재귀적으로 내려가며
+    /// 라벨·버튼·텍스트필드의 **실제 문자열과 프레임** 을 뽑는다.
+    /// 이것을 파일로 남기면 "무엇이 그려졌는가" 를 근거로 말할 수 있다.
+    func debugUI() -> [String] {
+        guard let p = popover, let host = p.contentViewController?.view else {
+            return ["팝오버 없음 — install() 이 안 돌았다"]
+        }
+        var out: [String] = ["══ 팝오버 UI 덤프 ══",
+                             "표시 중: \(p.isShown)",
+                             "크기: \(Int(p.contentSize.width))×\(Int(p.contentSize.height))", ""]
+        walk(host, depth: 0, into: &out)
+        return out
+    }
+
+    /// 서브뷰 계층을 재귀적으로 덤프한다.
+    ///
+    /// ## 왜 접근성(AX) API 를 쓴다
+    ///
+    /// SwiftUI 의 `Text` 는 `NSTextField` 가 아니다. 대개 `NSHostingView` 안의
+    /// 비공개 레이어로 그려지므로 `as? NSTextField` 로는 **거의 아무것도 못 잡는다.**
+    /// 접근성 레이블은 SwiftUI 가 **의도적으로 노출**하는 값이라 사람이 읽는
+    /// 화면과 일치한다. 프레임이 0×0 인 항목(숨김/스크롤 밖)은 "보이지 않음" 으로
+    /// 표시한다 — 눈에 있는데 덤프에 없는 것과, 눈에 없는데 덤프에 있는 것을 구분한다.
+    private func walk(_ v: NSView, depth: Int, into out: inout [String]) {
+        let pad = String(repeating: "  ", count: depth)
+        let f = v.frame
+        var line = "\(pad)\(type(of: v))"
+        // 숨김/크기 0 — 그려지지 않는다. 존재하지만 보이지 않는 것과 구분해야 한다
+        let visible = f.width > 0.5 && f.height > 0.5 && !v.isHidden
+        line += visible ? "  [\(Int(f.width))×\(Int(f.height))]" : "  [숨김 \(Int(f.width))×\(Int(f.height))]"
+        let label = Self.axText(v)
+        if !label.isEmpty { line += "  “\(label)”" }
+        out.append(line)
+        for s in v.subviews { walk(s, depth: depth + 1, into: &out) }
+    }
+
+    /// 뷰에서 사람이 읽는 문자열을 최대한 하나만 뽑는다.
+    ///
+    /// **순서가 중요하다** — 구체적인 것(NSTextField 값, AX 라벨, AX 제목)에서
+    /// 시작해 없으면 타입 이름이라도 준다. 빈 문자열이면 아무것도 없는 뷰다.
+    private static func axText(_ v: NSView) -> String {
+        if let t = v as? NSTextField, !t.stringValue.isEmpty { return t.stringValue }
+        if let b = v as? NSButton, !b.title.isEmpty { return b.title }
+        if let p = v as? NSPopUpButton { return p.titleOfSelectedItem ?? "popup(\(p.numberOfItems)개)" }
+        if let a = v as? NSView, let l = a.accessibilityLabel(), !l.isEmpty { return l }
+        if let a = v as? NSView, let t2 = a.accessibilityTitle(), !t2.isEmpty { return t2 }
+        return ""
+    }
+
     /// **고정 소스에서 팝오버를 띄워 본다** — 클릭 없이 경로를 검증한다.
     /// 위치가 안 잡히는지, 콘텐츠가 붙는지, 화면 안에 뜨는지 눈으로 확인할 수 있다.
     func showPopoverForCheck() {

@@ -7,6 +7,8 @@ import ServiceManagement
 /// `--watch` 로그 위치
 let agentWatchLog = NSString(string: "~/.agent-droidrelay-watch.log").expandingTildeInPath
 let popoverLog = NSString(string: "~/.agent-droidrelay-popover.log").expandingTildeInPath
+/// 화면에 실제로 그려진 뷰 계층 덤프 (`--ui-dump`)
+let uiDumpLog = NSString(string: "~/.agent-droidrelay-ui.log").expandingTildeInPath
 
 /// 로그 파일에 **덧붙인다.** `String.write(atomically:false)` 는 파일을 잘라서
 /// 마지막 1줄만 남는다(실제로 그랬다).
@@ -103,6 +105,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     }
                 }
                 await MainActor.run { NSApp.terminate(nil) }
+            }
+            return
+        }
+        // **화면에 실제로 그려진 것을 텍스트로 남긴다.**
+        //
+        // "코드에 버튼이 있다" 와 "화면에 버튼이 보인다" 는 다른 말이다.
+        // 이 모드는 후자를 근거로 만든다 — 뷰 계층을 그대로 훑어
+        // 라벨과 프레임을 파일로 dumping 한다.
+        // **팝오버를 열고 대기** — 밖에서 `Tools/DumpAX.swift` 로 화면 내용을 읽는다.
+        // 앱 스스로 덤프하면 자기 자신을 원격 AX 로 질의할 수 없어(창 0개) 무의미하다.
+        if CommandLine.arguments.contains("--ui-hold") {
+            let m = AppModel(storedAddress: UserDefaults.standard.string(forKey: "serverAddress"))
+            let c = StatusItemController(model: m)
+            model = m; controller = c
+            c.install()
+            Task {
+                await m.connect()
+                try? await Task.sleep(for: .seconds(1.2))
+                await MainActor.run { c.holdPopoverOpen() }
+                // 종료하지 않는다 — 덤프가 끝날 때까지 열린 상태를 유지한다
+            }
+            return
+        }
+        if CommandLine.arguments.contains("--ui-dump") {
+            let m = AppModel(storedAddress: UserDefaults.standard.string(forKey: "serverAddress"))
+            let c = StatusItemController(model: m)
+            model = m; controller = c
+            c.install()
+            Task {
+                await m.connect()
+                // **한 번만 연다.** 이전처럼 루프에서 토글하면 마지막에 닫힌다 —
+                // 그럼 "표시 중: false" 가 찍혀 화면이 안 뜬 것처럼 보인다(실제로 그랬다).
+                try? await Task.sleep(for: .seconds(1.0))
+                await MainActor.run { c.forceShowPopover() }
+                // 렌더가 끝날 때까지 기다린다. 3.5초 — 서버 응답 + 그래프 첫 샘플 포함
+                try? await Task.sleep(for: .seconds(3.5))
+                await MainActor.run {
+                    // **원격 AX 가 진짜 답이다.** 로컬 뷰 계층은 SwiftUI 텍스트를
+                    // 안 주고(AXUnknown), 프로세스 간 질의는 VoiceOver 경로라 값을 준다.
+                    appendLog(c.debugRemoteAX().joined(separator: "\n") + "\n", to: uiDumpLog)
+                    NSApp.terminate(nil)
+                }
             }
             return
         }

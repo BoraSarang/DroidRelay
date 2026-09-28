@@ -55,8 +55,27 @@ public struct RelayClient: Sendable {
         public let uploadedBps: Int
         public let etaSeconds: Int?
         public let isVideo: Bool
+        /// **서버가 원본으로 준 타입** — "video" 등. `isVideo` 는 이 값의 축약형이다.
+        public let typeRaw: String
+        /// **현재 적용된 속도 제한 (B/s). 0 = 무제한.**
+        ///
+        /// 웹은 이 값을 프리셋 선택기의 현재값으로 쓴다(1182행 `j.maxDownBps`).
+        /// 없으면 **무제한으로 표시하면서 실제로 제한이 걸려 있을 수 있다** —
+        /// 사용자가 아무것도 안 고르고 확인하면 틀린 정보를 믿게 된다.
+        public let maxDownBps: Int
 
-        public var isActive: Bool { state == "RUNNING" || state == "STALLED" }
+        /// **목록에 뜨는 상태인가.**
+        ///
+        /// ## 왜 `QUEUED` 를 넣었나
+        ///
+        /// 원래는 `RUNNING`/`STALLED` 뿐이었다. 그 결과 **다운로드를 추가하자마자
+        /// 잡이 화면에서 사라졌다** — 서버가 받는 즉시 `QUEUED` 로 시작하는데
+        /// 그것이 필터에 없었기 때문이다.
+        ///
+        /// 사용자가 하는 일이 "추가했는데 안 보인다 → 실패한 줄 안다" 다.
+        /// **다만 이 값은 `isRunning`(속도 합산용)과 목적이 다르다.**
+        /// 대기 중인 잡은 아직 네트워크를 쓰지 않으므로 속도 합산에는 넣으면 안 된다.
+        public var isActive: Bool { ActionRules.isListable(state) }
 
         /// **속도 합산에 쓸 판정** — 서버의 상태 문자열을 하드코딩하지 않는다.
         ///
@@ -97,6 +116,29 @@ public struct RelayClient: Sendable {
               let o = any as? [[String: Any]]
         else { return [] }
         return o.compactMap(Self.job(from:))
+    }
+
+    /// **최상위가 JSON 배열인 응답을 `[[String: Any]]` 로 돌려준다.**
+    ///
+    /// ## 왜 이게 필요한가 (실측으로 고친 함정)
+    ///
+    /// `getJSON` 은 **사전(`[String: Any]`) 전용**이다. 서버가
+    /// `GET /api/storage/trash` 처럼 **배열**을 주면 `any as? [String: Any]` 가
+    /// 실패해서 `nil` 이 된다.
+    ///
+    /// 그럼 호출부가 `await getJSON(...) as? [[String: Any]]` 로 되돌려도
+    /// **이미 nil 을 배열로 캐스팅한 것이라 그대로 nil** 이다.
+    /// → 함수는 조용히 `[]` 를 돌려준다. → **휴지통 목록은 항상 비어 보였다.**
+    ///
+    /// `jobs()`/`torrents()` 는 원래 이렇게 파싱했다. 휴지통만 빠졌다.
+    /// `RelayClient+Write` 의 확장에서 도 쓸 수 있게 `fileprivate` 이 아니라
+    /// 모듈 내부 공개로 둔다.
+    func getJSONArray(_ path: String) async -> [[String: Any]] {
+        guard let d = try? await get(path),
+              let any = try? JSONSerialization.jsonObject(with: d, options: [.fragmentsAllowed]),
+              let o = any as? [[String: Any]]
+        else { return [] }
+        return o
     }
 
     // MARK: - 속도 (M-14)
@@ -160,16 +202,42 @@ public struct RelayClient: Sendable {
         return arr.compactMap { Torrent(json: $0) }
     }
 
+    /// 보관함 목록 — `path` 가 비면 루트, 있으면 그 폴더 안.
+    ///
+    /// ## 쿼리를 문자열로 이어 붙이면 안 되는 이유 (실측으로 발견한 함정)
+    ///
+    /// 이전엔 이렇게 짰었다:
+    /// ```swift
+    /// var p = "api/storage"
+    /// if !path.isEmpty { p += "?path=" + … }
+    /// let d = try? await get(p)          // ← get() 이 appendingPathComponent 로 붙인다
+    /// ```
+    ///
+    /// `appendingPathComponent` 는 `?` 와 `=` 를 **경로의 일부로 퍼센트 인코딩**한다.
+    /// → 요청이 `/api/storage%3Fpath=M` 로 가고 서버는 404 를 준다.
+    /// → `try?` 가 삼킨다. → **빈 배열.**
+    ///
+    /// 결과적으로 **하위 폴더 목록은 한 번도 열린 적이 없었다.**
+    /// 폴더를 눌러도 항상 빈 화면이었다. "폴더가 비어 있나" 로 오해할 만했다.
+    ///
+    /// 그래서 **`URLComponents` 로 쿼리를 분리**한다. 인코딩도 그 몫을 한다.
     public func storage(path: String = "") async -> [StorageEntry] {
-        var p = "api/storage"
+        let root = base.appendingPathComponent("api/storage")
+        var url = root
         if !path.isEmpty {
-            p += "?path=" + (path.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "")
+            if var comps = URLComponents(url: root, resolvingAgainstBaseURL: false) {
+                comps.queryItems = [URLQueryItem(name: "path", value: path)]
+                url = comps.url ?? root
+            }
         }
-        let d: Data? = try? await get(p)
+        let d = try? await get(url)
         guard let d, let any = try? JSONSerialization.jsonObject(with: d, options: [.fragmentsAllowed]),
               let arr = any as? [Any]
         else { return [] }
-        return arr.compactMap { StorageEntry(json: $0) }
+        // **경로는 서버가 안 준다 — 여기서 상위 경로와 합쳐 만든다.**
+        // (StorageEntry.path 를 주지 않으면 루트에서 열었을 때 하위 폴더의
+        //  항목도 이름만 남아 `이름 변경`/`휴지통` 이 전부 실패한다)
+        return arr.compactMap { StorageEntry(json: $0, dir: path) }
     }
 
     /// 토렌트 제어 — 본문 없이 POST. 서버의 Content-Type 가드는 **본문이 있을 때만**
@@ -189,7 +257,8 @@ public struct RelayClient: Sendable {
         var req = URLRequest(url: base.appendingPathComponent("api/torrents/\(id)"))
         req.httpMethod = "DELETE"
         req.timeoutInterval = 5
-        let (d, r) = (try? await session.data(for: req)) ?? (nil, nil)
+        // 본문은 필요 없다 — 상태 코드만으로 성공 여부를 판정한다
+        let (_, r) = (try? await session.data(for: req)) ?? (nil, nil)
         guard let http = r as? HTTPURLResponse else { return false }
         return (200..<300).contains(http.statusCode)
     }
@@ -205,7 +274,10 @@ public struct RelayClient: Sendable {
             speedBps: (o["speedBps"] as? Int) ?? 0,
             uploadedBps: (o["torrentUploadSpeed"] as? Int) ?? (o["uploadSpeed"] as? Int) ?? 0,
             etaSeconds: (o["etaSec"] as? Int) ?? (o["etaSeconds"] as? Int),
-            isVideo: o["type"] as? String == "video"
+            isVideo: o["type"] as? String == "video",
+            typeRaw: o["type"] as? String ?? "",
+            // **서버가 안 보내도 조용히 0 이 되게 두지 않는다** — 값이 없으면 0(무제한)
+            maxDownBps: int(o["maxDownBps"])
         )
     }
 
@@ -221,18 +293,52 @@ public struct RelayClient: Sendable {
 
     // MARK: - 제어 (M1 범위: 일시정지 / 재개 / 취소)
 
+    /// 잡 일시정지/재개 — `POST /api/jobs/{id}/{action}`.
+    ///
+    /// ## 반환값을 고친 이유
+    ///
+    /// 원래는 요청 결과와 무관하게 `true` 를 돌려줬다:
+    /// ```swift
+    /// _ = try? await session.data(for: req)
+    /// return true          // ← 네트워크가 끊겨도, 400 이어도 "성공"
+    /// ```
+    /// 그래서 **서버가 거절했는데 클라이언트는 성공으로 보고했다.**
+    /// 사용자는 아무 반응이 없고, 무엇이 틀렸는지 알 방법이 없다.
+    /// → 상태 코드를 본다. 연결 실패(0)도 실패다.
     public func control(_ id: String, _ action: String) async -> Bool {
         var req = URLRequest(url: base.appendingPathComponent("api/jobs/\(id)/\(action)"))
         req.httpMethod = "POST"
         req.timeoutInterval = 5
-        _ = try? await session.data(for: req)
-        return true
+        guard let (_, r) = try? await session.data(for: req),
+              let http = r as? HTTPURLResponse else { return false }
+        return (200..<300).contains(http.statusCode)
+    }
+
+    /// 잡 삭제 — `DELETE /api/jobs/{id}`.
+    ///
+    /// **`POST /{action}` 에 `cancel` 이 없다는 걸 나중에 알았다.** 서버는
+    /// 일시정지/재개만 받는다(JobRoutes 100~109행). 삭제는 이 메서드다.
+    public func jobDelete(_ id: String) async -> Bool {
+        var req = URLRequest(url: base.appendingPathComponent("api/jobs/\(id)"))
+        req.httpMethod = "DELETE"
+        req.timeoutInterval = 5
+        guard let (_, r) = try? await session.data(for: req),
+              let http = r as? HTTPURLResponse else { return false }
+        return (200..<300).contains(http.statusCode)
     }
 
     // MARK: - 내부
 
     private func get(_ path: String) async throws -> Data {
-        var req = URLRequest(url: base.appendingPathComponent(path))
+        try await get(base.appendingPathComponent(path))
+    }
+
+    /// **쿼리가 이미 붙은 URL 로 GET.**
+    ///
+    /// `appendingPathComponent` 로 문자열 경로를 붙이면 `?` 가 경로로 인코딩된다.
+    /// 쿼리가 있는 요청은 **반드시 이쪽을 써야 한다.** (보관함 하위 폴더가 그랬다)
+    private func get(_ url: URL) async throws -> Data {
+        var req = URLRequest(url: url)
         req.timeoutInterval = 5
         req.cachePolicy = .reloadIgnoringLocalCacheData
         let (d, _) = try await session.data(for: req)

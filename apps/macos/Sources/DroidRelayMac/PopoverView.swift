@@ -8,8 +8,6 @@ struct PopoverView: View {
     @Bindable var model: AppModel
     var onSettings: () -> Void
     var onQuit: () -> Void
-    /// 쓰기 시트 — 어느 것이 열렸는가. nil 이면 닫힘.
-    @State private var sheet: WriteSheets.Sheet?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -36,72 +34,33 @@ struct PopoverView: View {
                 .frame(width: 328)
                 Divider().opacity(0.5)
             }
-            // ── 액션 바 ──
-            // **탭마다 다른 동작이 필요하다.** 다운로드 탭은 "추가", 보관함 탭은
-            // "폴더 만들기/휴지통", 토렌트 탭은 "추가" — 한 줄에 다 몰아넣으면
-            // 어느 탭에서 쓸지 모른다.
-            HStack(spacing: 6) {
-                actionButton("plus", "다운로드 추가") { sheet = .addDownload }
-                actionButton("arrow.down.circle", "토렌트 추가") { sheet = .addTorrent }
-                Spacer()
-                if model.selectedTab == .storage {
-                    actionButton("folder.badge.plus", "폴더") { sheet = .mkdir }
-                    actionButton("trash", "휴지통") {
-                        Task { await model.loadTrash() }
-                        sheet = .trash
-                    }
-                }
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 5)
-
             tabBar
             Divider().opacity(0.5)
+            // ── 확인 막대 ──
+            // **삭제는 여기서 멈춘다.**
+            //
+            // ## 왜 시트가 아니라 팝오버 안인가
+            //
+            // 이 앱은 `.accessory` 라 **키 윈도우가 없다** → `.sheet` 가 뜨지 않는다
+            // (PR #28 의 시트 8종이 전부 그랬다). 한 번 더 같은 실수를 반복하지 않는다.
+            if let c = model.confirm {
+                confirmBar(c)
+            }
             content
+            // **실패 배너** — 쓰기 동작이 조용히 실패할 때만 뜬다.
+            //
+            // 성공은 화면이 그대로 증거다(목록에서 사라졌고, 상태가 바뀌었다).
+            // **아무것도 안 바뀌었는데 아무 말도 없으면** 사용자는 성공을 믿게 되고,
+            // 그건 사실이 아니다. 실패만 눈에 띄게 남긴다.
+            if !model.lastResult.isEmpty {
+                resultBanner
+            }
             Divider().opacity(0.5)
             stats
             Divider().opacity(0.5)
             footer
         }
         .frame(width: 352)
-        .sheet(item: $sheet) { which in
-            WriteSheets(model: model, sheet: .constant(which))
-        }
-        // **실패 사유는 dismiss 하지 않는다.** 서버가 준 오류(예: "이미 등록된
-        // 다운로드입니다") 는 사용자가 다음 행동을 정하는 데 필요한 정보다.
-        .overlay(alignment: .bottom) {
-            if !model.lastResult.ok && sheet == nil {
-                resultBanner
-            }
-        }
-    }
-
-    private var resultBanner: some View {
-        HStack(alignment: .top, spacing: 6) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(.orange)
-            Text(model.lastResult.message)
-                .font(.system(size: 11))
-                .fixedSize(horizontal: false, vertical: true)
-            Spacer(minLength: 0)
-            Button {
-                model.lastResult = .success
-            } label: {
-                Image(systemName: "xmark").font(.system(size: 9))
-            }
-            .buttonStyle(.plain).foregroundStyle(.secondary)
-        }
-        .padding(8)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 6))
-        .padding(8)
-    }
-
-    private func actionButton(_ icon: String, _ tip: String, _ act: @escaping () -> Void) -> some View {
-        Button(action: act) {
-            Image(systemName: icon).font(.system(size: 11))
-        }
-        .buttonStyle(.borderless)
-        .help(tip)
     }
 
     // MARK: - 탭바 (M3)
@@ -145,6 +104,110 @@ struct PopoverView: View {
         }
     }
 
+    /// **쓰기 실패 배너.** 닫을 수 있다 — 방치하면 "이 메시지가 아직 유효한가"
+    /// 를 알 수 없어서, 사용자가 스스로 지울 수 있게 한다.
+    private var resultBanner: some View {
+        HStack(alignment: .top, spacing: 6) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 10))
+                .foregroundStyle(.orange)
+            Text(model.lastResult)
+                .font(.system(size: 11))
+                .foregroundStyle(.primary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 4)
+            Button {
+                model.lastResult = ""
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundStyle(.tertiary)
+            }
+            .buttonStyle(.plain)
+            .help("닫기")
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .frame(width: 352)
+        .background(Color.orange.opacity(0.12))
+    }
+
+    // MARK: - 확인 막대 (삭제 컨펌)
+
+    /// **파괴 동작 확인 막대** — 팝오버 안에 직접 그린다.
+    ///
+    /// ## 왜 지금 만들어진가
+    ///
+    /// 이 화면을 만들며 **사용자 토렌트 2건을 지웠다.** 삭제 버튼이 확인 없이
+    /// 곧바로 서버를 때렸고, 되돌릴 수 없었다.
+    ///
+    /// 검증하러 눌렀는데 진짜 데이터가 사라졌다 — **같은 일을 두 번 하면 안 된다.**
+    /// 그래서 **모든 파괴 동작 앞에 반드시 이 막대가 선다.**
+    ///
+    /// ## 무엇을 보여주나
+    ///
+    /// - **대상 이름** (무엇을 지우는가)
+    /// - **파일이 살아남는지** (되돌릴 수 있는가)
+    /// - 되돌릴 수 있으면 "휴지통 이동" 처럼 **덜 무섭게** 부른다
+    ///
+    /// `ConfirmSpec` 가 이미 종류별로 문구를 정해 준다. 여기서는 그리기만 한다.
+    private func confirmBar(_ c: AppModel.ConfirmRequest) -> some View {
+        // `.background(...)` 는 `some View` 를 그대로 못 돌려준다 →
+        // **명시적으로 `return`** 한다. 없으면 "타입을 알 수 없다" 는 컴파일 오류.
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 5) {
+                Image(systemName: c.spec.isDestructive
+                      ? "exclamationmark.triangle.fill" : "questionmark.circle.fill")
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(c.spec.isDestructive ? Color.red : Color.accentColor)
+                Text(c.spec.title)
+                    .font(.system(size: 11.5, weight: .semibold))
+                Spacer(minLength: 4)
+            }
+            // **문자열 해석을 하지 않는다.** `ConfirmSpec.attributedBody` 가
+            // `(텍스트, 강조)` 조각을 이어 붙여 만든 결과다.
+            //
+            // 마크다운(`AttributedString(markdown:)`)을 썼다가 **두 번** 꼬였다:
+            // ① `Text` 가 `**` 를 그대로 보여줬다 ② 파일명의 `*` `_` 가 eaten 됐다
+            //    (`__agent_test__` → `agent_test`, 즉 **무엇을 지우는지가 틀어짐**)
+            //
+            // → **파일명은 원본 그대로** 표시하고, 강조만 구조로 받는다.
+            Text(c.spec.attributedBody)
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack(spacing: 6) {
+                Spacer(minLength: 0)
+                Button { model.cancelConfirm() } label: {
+                    Text("취소").font(.system(size: 11))
+                }
+                .controlSize(.small)
+                .keyboardShortcut(.cancelAction)
+                .accessibilityLabel("취소, 아무것도 하지 않음")
+                Button { model.performConfirm() } label: {
+                    // **되돌릴 수 없으면 "삭제", 되돌릴 수 있으면 그에 맞는 동사.**
+                    // 둘을 같은 라벨로 두면 사용자가 위험도를 구분할 수 없다.
+                    Text(c.spec.isDestructive ? "삭제" : c.spec.title)
+                        .font(.system(size: 11, weight: .semibold))
+                }
+                .controlSize(.small)
+                .buttonStyle(.borderedProminent)
+                .tint(c.spec.isDestructive ? Color.red : Color.accentColor)
+                // **VoiceOver/자동 검증이 구분할 수 있게 이름을 분리한다.**
+                .accessibilityLabel(c.spec.isDestructive
+                                    ? "\(c.spec.title), 되돌릴 수 없음"
+                                    : "\(c.spec.title), 되돌릴 수 있음")
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .frame(width: 352, alignment: .leading)
+        // **빨간 배경 = 되돌릴 수 없다.** 사용자가 문구를 다 읽지 않아도 구분된다.
+        .background((c.spec.isDestructive ? Color.red : Color.accentColor).opacity(0.10))
+        Divider().opacity(0.5)
+    }
+
     @ViewBuilder
     private var content: some View {
         switch model.selectedTab {
@@ -181,10 +244,16 @@ struct PopoverView: View {
                     empty("진행 중인 작업이 없습니다", tip: model.phase == .failed ? "설정에서 주소를 확인하세요" : nil)
                 }
                 ForEach(model.activeJobs) { j in
-                    JobRow(job: j) { act in model.control(j.id, act) }
+                    JobRow(job: j,
+                           onAction: { act in model.control(j.id, act) },
+                           onDelete: { model.askJobDelete(j) },
+                           onLimit: { bps in model.jobLimit(j.id, bps) })
                 }
                 ForEach(model.seedingJobs) { j in
-                    JobRow(job: j) { act in model.control(j.id, act) }
+                    JobRow(job: j,
+                           onAction: { act in model.control(j.id, act) },
+                           onDelete: { model.askJobDelete(j) },
+                           onLimit: { bps in model.jobLimit(j.id, bps) })
                 }
             }
             .padding(5)
@@ -203,20 +272,9 @@ struct PopoverView: View {
                 ForEach(model.torrents) { t in
                     TorrentRow(
                         torrent: t,
-                        onPause: { model.torrentControl(t.id, "pause") },
-                        onResume: { model.torrentControl(t.id, "resume") },
-                        onDelete: { model.torrentDelete(t.id) },
-                        // **시드 정보는 목록에 없다.** `/api/torrents` 의 seeds/peers 는
-                        // DB 저장값이고 "지금 몇 명 붙어있는지" 는 상세만 안다.
-                        onDetail: {
-                            model.currentTargetID = t.id
-                            Task { await model.openDetail(t.id) }
-                            sheet = .detail
-                        },
-                        onLimit: {
-                            model.currentTargetID = t.id
-                            sheet = .torrentLimit
-                        }
+                        onAction: { act in model.torrentControl(t.id, act) },
+                        onDelete: { model.askTorrentDelete(t) },
+                        onLimit: { bps in model.torrentLimit(t.id, bps) }
                     )
                 }
             }
@@ -228,18 +286,198 @@ struct PopoverView: View {
     // MARK: - 목록 (보관함)
 
     private var storageList: some View {
-        ScrollView {
-            LazyVStack(spacing: 1) {
-                if model.storage.isEmpty {
-                    empty("보관함이 비어 있습니다", tip: nil)
+        VStack(spacing: 0) {
+            storageToolbar
+            Divider().opacity(0.4)
+            ScrollView {
+                LazyVStack(spacing: 1) {
+                    if model.storage.isEmpty {
+                        empty("보관함이 비어 있습니다", tip: nil)
+                    }
+                    // **편집창은 목록 위에 뜬다** — 시트가 아니라.
+                    //
+                    // 이 앱은 `.accessory` 활성화 정책이라 **키 윈도우가 없다.**
+                    // 키 윈도우 없으면 `.sheet` 가 **조용히 뜨지 않는다.**
+                    // (PR #28 의 8종 시트가 전부 그랬다 — 컴파일은 되고 아무 일도 안 일어남)
+                    if let e = model.storageEdit {
+                        storageEditBar(e)
+                        Divider().opacity(0.4)
+                    }
+                    ForEach(model.storage) { e in
+                        StorageRow(entry: e,
+                                   onOpen: { model.storageEnter(e) },
+                                   onRename: { model.askConfirm(.init(kind: .rename(e))) },
+                                   onMove: { model.askConfirm(.init(kind: .move(e))) },
+                                   onTrash: { model.askStorageTrash(e) })
+                    }
                 }
-                ForEach(model.storage, id: \.name) { e in
-                    StorageRow(entry: e, onMove: { Task { await model.storageTrash(e.path) } })
+                .padding(5)
+            }
+            .frame(maxHeight: 270)
+            if !model.trash.isEmpty {
+                Divider().opacity(0.4)
+                trashList
+            }
+        }
+    }
+
+    /// **탐색 막대** — 위치 표시 + 위로 + 새 폴더.
+    ///
+    /// 하위 폴더를 보려면 `?path=` 로 다시 불러와야 한다. **어디에 있는지
+    /// 안 보이면** 사용자는 "아무것도 안 되네" 로 오해한다.
+    private var storageToolbar: some View {
+        HStack(spacing: 6) {
+            // **빵조각** — 항상 "보관함" 으로 시작한다. 이 조각이 있어야
+            // 하위 폴더에서 루트로 올라갈 수 있다.
+            ForEach(Array(model.storageCrumbs.enumerated()), id: \.offset) { i, c in
+                if i > 0 {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 7, weight: .bold))
+                        .foregroundStyle(.tertiary)
+                }
+                let isHere = (i == model.storageCrumbs.count - 1)
+                Button {
+                    model.storagePath = c.path
+                    model.storageEdit = nil
+                    Task { await model.refresh() }
+                } label: {
+                    Text(c.label).font(.system(size: 11, weight: isHere ? .semibold : .regular))
+                        .lineLimit(1)
+                }
+                .buttonStyle(.plain)
+                // **현재 위치는 누를 수 없다** — 이미 거기다.
+                // 그래도 눌리게 두면 "왜 안 바뀌지" 는 혼란이 생긴다.
+                .disabled(isHere)
+                .foregroundStyle(isHere ? Color.primary : Color.accentColor)
+                // **탭 버튼과 라벨이 겹치면 안 된다.**
+                //
+                // 탭에도 "보관함" 이 있고 빵조각 첫 칸에도 "보관함" 이 있다.
+                // 라벨만 보면 **같은 이름의 버튼 두 개**가 되고,
+                // VoiceOver 사용자도 자동 검증도 둘을 구분할 수 없다.
+                // → 빵조각에는 **목적을 붙여** 이름이 다르도록 한다.
+                .accessibilityLabel(i == 0 ? "보관함 최상위로 가기" : c.label)
+            }
+            Spacer(minLength: 4)
+            Button { model.beginMkdir() } label: {
+                Image(systemName: "folder.badge.plus").font(.system(size: 11))
+            }
+            .buttonStyle(.plain)
+            .help("새 폴더")
+            Button { model.loadTrash() } label: {
+                Image(systemName: "trash").font(.system(size: 11))
+            }
+            .buttonStyle(.plain)
+            .help("휴지통")
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+    }
+
+    /// **인라인 편집창** — 대상 경로 + 입력 + 실행.
+    ///
+    /// `canRun == false` 면 실행 버튼이 **비활성**이다.
+    /// (빈 입력으로 서버를 불렀다 422 받는 것보다 못 누르게 하는 게 낫다)
+    private func storageEditBar(_ e: AppModel.StorageEdit) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 5) {
+                Image(systemName: "pencil.line").font(.system(size: 10))
+                Text("\(e.kind.rawValue): \(e.path)").font(.system(size: 10.5))
+                    .lineLimit(1).truncationMode(.middle)
+                Spacer()
+                Button { model.storageEdit = nil } label: {
+                    Image(systemName: "xmark").font(.system(size: 8, weight: .bold))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.tertiary)
+                .help("취소")
+            }
+            .foregroundStyle(.secondary)
+
+            HStack(spacing: 5) {
+                // **파괴 동작(`purge`/`restore`)은 여기 올 수 없다.**
+                // `Kind` 에서 아예 뺐기 때문에 컴파일러가 막는다.
+                // (이 분기가 있었다는 건 컨펌 우회로가 코드에 남아 있었다는 뜻)
+                if e.kind == .move {
+                    TextField("목적지 폴더", text: binding(\.destDir))
+                        .textFieldStyle(.roundedBorder).font(.system(size: 11))
+                } else {
+                    TextField(placeholder(e.kind), text: binding(\.input))
+                        .textFieldStyle(.roundedBorder).font(.system(size: 11))
+                }
+                Button { model.runStorageEdit() } label: {
+                    Text("실행").font(.system(size: 11))
+                }
+                // **반드시 `model` 에서 읽는다.**
+                //
+                // `e` 는 함수 진입 시점의 **값 복사본**이라 타이핑해도 갱신되지 않는다.
+                // 여기서 `e.canRun` 을 읽으면 "실행" 버튼이 **영영 비활성**이다 —
+                // PR #28 의 "실행 버튼이 안 눌린다" 버그의 정체.
+                .disabled(!(model.storageEdit?.canRun ?? false))
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+            }
+        }
+        .padding(8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.accentColor.opacity(0.10))
+    }
+
+    private func placeholder(_ k: AppModel.StorageEdit.Kind) -> String {
+        k == .rename ? "새 이름" : "폴더 이름"
+    }
+
+    /// **`model.storageEdit` 에 직접 바인딩한다.**
+    ///
+    /// ## 왜 이렇게 하는가
+    ///
+    /// 이전 실패의 핵심: 대상만 `model` 에 심고 입력은 `@State` 로 따로 받아
+    /// **둘이 어긋났다.** 화면의 "실행" 가능 여부가 화면에 있는 입력값을 보지 않고
+    /// 복사본을 봤기 때문에 **영영 눌리지 않았다.**
+    ///
+    /// **`model` 의 값 하나만 읽고 쓴다** — 어긋날 여지가 원천적으로 없다.
+    private func binding(_ k: WritableKeyPath<AppModel.StorageEdit, String>) -> Binding<String> {
+        Binding(get: { model.storageEdit?[keyPath: k] ?? "" },
+                set: { model.storageEdit?[keyPath: k] = $0 })
+    }
+
+    /// **휴지통** — 복원과 영구 삭제.
+    ///
+    /// "휴지통으로 보내기"만 있고 되돌릴 방법이 없으면 그건 삭제가 아니라
+    /// **데이터를 잃게 하는 UI** 다. 둘 다 있어야 의미가 있다.
+    ///
+    /// **복원/영구삭제 모두 컨펌을 거친다.**
+    /// - 복원: 파일이 **루트로 돌아온다**(서버가 원래 위치를 기억하지 않는다).
+    ///   사용자가 모르고 누르면 엉뚱한 곳에 파일이 생긴다 → 확인이 필요하다.
+    /// - 영구삭제: **되돌릴 수 없다** → 반드시 확인이 필요하다.
+    private var trashList: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text("휴지통 \(model.trash.count)개").font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.secondary)
+            ForEach(model.trash) { t in
+                HStack(spacing: 6) {
+                    Image(systemName: t.isDirectory ? "folder.fill" : "doc.fill")
+                        .font(.system(size: 9.5)).foregroundStyle(.tertiary)
+                    Text(t.name).font(.system(size: 11)).lineLimit(1).truncationMode(.middle)
+                    Spacer(minLength: 2)
+                    // **복원도 컨펌을 거친다** — 서버가 원래 위치를 기억하지 않아
+                    // 보관함 루트로 돌아온다. 사용자가 그걸 모르면 "왜 다른 데 있지" 한다.
+                    Button {
+                        model.askConfirm(.init(kind: .restore(t.name)))
+                    } label: { Text("복원").font(.system(size: 10.5)) }
+                        .buttonStyle(.plain).foregroundStyle(Color.accentColor)
+                        .accessibilityLabel("\(t.name) 복원, 보관함 맨 위로 돌아옴")
+                    Button {
+                        model.askConfirm(.init(kind: .purge(t.name)))
+                    } label: { Text("영구 삭제").font(.system(size: 10.5)) }
+                        .buttonStyle(.plain).foregroundStyle(Color.red)
+                        .accessibilityLabel("\(t.name) 영구 삭제, 되돌릴 수 없음")
                 }
             }
-            .padding(5)
         }
-        .frame(maxHeight: 300)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxHeight: 110)
     }
 
     private func empty(_ title: String, tip: String?) -> some View {
@@ -369,6 +607,14 @@ private extension AppModel.Phase {
 struct JobRow: View {
     let job: RelayClient.Job
     let onAction: (String) -> Void
+    /// **삭제 — `DELETE /api/jobs/{id}`**
+    ///
+    /// `onAction` 과 **다른 경로**다. 잡의 일시정지/재개는
+    /// `POST /api/jobs/{id}/{action}` 이지만 삭제는 `DELETE /api/jobs/{id}` 다.
+    /// 같은 클로저로 보내면 서버가 400 으로 거절한다(실측).
+    var onDelete: () -> Void = {}
+    /// **속도 제한 — `POST /api/jobs/{id}/limit`** (B/s 값)
+    var onLimit: (Int) -> Void = { _ in }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -409,17 +655,73 @@ struct JobRow: View {
             .font(.system(size: 10.5))
             .monospacedDigit()
 
+            // **버튼은 상태에 따라 달라진다** (웹 1176~1180행과 동일).
+            //
+            // 이전에는 "일시정지/취소"를 항상 둘 다 띄웠다. 그래서
+            // **일시정지된 잡에 "일시정지"가 떠서 눌러도 아무 일도 안 일어나는**
+            // 상태가 고정이었다. 재개 경로가 화면에 없었다.
+            // 규칙은 `ActionRules` 한 곳에 있다 (테스트 15건이 웹과 같은지 고정).
             HStack(spacing: 5) {
-                if job.isSeeding {
-                    small("시딩 중지", .orange) { onAction("cancel") }
-                } else {
-                    small("일시정지", .primary) { onAction("pause") }
-                    small("취소", .red) { onAction("cancel") }
+                ForEach(actions, id: \.self) { a in
+                    if a == .videoNotice {
+                        // 비디오는 서버가 일시정지를 400 으로 거절한다 —
+                        // 웹도 버튼 대신 이 문구를 넣는다(1177행)
+                        Text(ActionRules.label(a))
+                            .font(.system(size: 10.5))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 7).padding(.vertical, 2)
+                    } else {
+                        let act = a.rawAction
+                        small(ActionRules.label(a), .primary) { onAction(act) }
+                    }
+                }
+                // **삭제 — 웹 1180행과 동일하게 항상 보인다.**
+                //
+                // 이전에 `onAction("cancel")` 을 보냈다. 그런데 잡 경로에는
+                // `cancel` 이 **없다**(서버는 pause·resume 만 받는다) → 400 "지원 없는 동작".
+                // 즉 이 버튼은 **한 번도 동작한 적이 없다.**
+                // 잡 삭제는 `DELETE /api/jobs/{id}` 라 별도 경로가 필요하다.
+                if ActionRules.jobDeletable(job.state) {
+                    small("삭제", .red) { onDelete() }
+                }
+                Spacer(minLength: 0)
+                // **속도 제한 — 프리셋 드롭다운** (웹 1181~1184행)
+                //
+                // 이전엔 "초당 바이트" 숫자를 직접 입력하게 했다. 1MB/s 를
+                // 고르려면 `1048576` 을 손으로 넣어야 했다 → 사실상 못 쓰는 기능.
+                // 웹의 `SPEED_PRESETS` 를 그대로 쓴다(테스트가 웹과 같음을 고정).
+                if ActionRules.jobLimitEditable(state: job.state, type: job.typeRaw) {
+                    speedLimitPicker
                 }
             }
             .padding(.top, 1)
         }
         .padding(8)
+    }
+
+    /// 속도 제한 선택기.
+    ///
+    /// **완료/취소된 잡에는 없다** — 이미 끝났으니 바꿀 수 없다(웹 1181행).
+    /// **비디오 잡에도 없다** — FFmpeg 파이프라인이라 제한이 먹지 않는다.
+    private var speedLimitPicker: some View {
+        Picker("", selection: Binding(
+            get: { SpeedPresets.kbps(fromBps: job.maxDownBps) },
+            set: { k in onLimit(SpeedPresets.bps(fromKbps: k)) }
+        )) {
+            ForEach(SpeedPresets.options(currentBps: job.maxDownBps), id: \.kbps) { o in
+                Text(o.label).tag(o.kbps)
+            }
+        }
+        .labelsHidden()
+        .pickerStyle(.menu)
+        .controlSize(.mini)
+        .font(.system(size: 10.5))
+        .frame(maxWidth: 96)
+        .help("속도 제한")
+    }
+
+    private var actions: [ActionRules.JobAction] {
+        ActionRules.jobActions(state: job.state, type: job.typeRaw)
     }
 
     private func small(_ t: String, _ c: Color, _ a: @escaping () -> Void) -> some View {
@@ -437,13 +739,11 @@ struct JobRow: View {
 
 struct TorrentRow: View {
     let torrent: Torrent
-    let onPause: () -> Void
-    let onResume: () -> Void
-    let onDelete: () -> Void
-    /// **시드 정보 열기** — 목록에 없는 값의 유일한 출처
-    var onDetail: () -> Void = {}
-    /// 속도 제한 시트
-    var onLimit: () -> Void = {}
+    let onAction: (String) -> Void
+    /// **삭제 — `DELETE /api/torrents/{id}`** (잡과 같은 이유로 별도 경로)
+    var onDelete: () -> Void = {}
+    /// **속도 제한 — `POST /api/torrents/{id}/limit`** (B/s)
+    var onLimit: (Int) -> Void = { _ in }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -477,7 +777,8 @@ struct TorrentRow: View {
                 Text(torrent.stateLabel).foregroundStyle(.secondary)
                 Text(torrent.sizeText).foregroundStyle(.tertiary)
                 Spacer()
-                if torrent.seeds > 0 || torrent.peers > 0 {
+                // **시드/피어 — 웹 1313행과 동일: 둘 다 0 이면 아예 그리지 않는다.**
+                if ActionRules.torrentShowsPeers(seeds: torrent.seeds, peers: torrent.peers) {
                     Text("▲\(torrent.seeds) ▼\(torrent.peers)").foregroundStyle(.tertiary)
                 }
             }
@@ -485,23 +786,79 @@ struct TorrentRow: View {
             .monospacedDigit()
             .lineLimit(1)
 
+            // **ETA — 웹 1306행: `DOWNLOADING` + 속도 > 0 일 때만.**
+            //
+            // 속도가 0 인데 계산하면 "남은 0초" 또는 무한대가 나온다.
+            // 일시정지한 토렌트에 "남은 12분" 이 떠 있으면 사실이 아니다.
+            if ActionRules.torrentShowsEta(state: torrent.state, downloadBps: torrent.downloadBps) {
+                Text(etaText)
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(.tertiary)
+                    .monospacedDigit()
+                    .lineLimit(1)
+            }
+
+            if !torrent.errorMessage.isEmpty {
+                Text(torrent.errorMessage)
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(.red)
+                    .lineLimit(2)
+            }
+
+            // **버튼은 상태에 따라 달라진다** (웹 1325~1329행과 동일).
+            //
+            // 이전에는 일시정지/재개/삭제를 **항상 3개 다** 띄웠다.
+            // → "다운로드 중" 인데 "재개" 가 떠서 눌러도 아무 일도 안 되는 상태.
             HStack(spacing: 5) {
-                // **상세는 완료 여부와 무관하게 항상 보인다** — 완료된 토렌트도
-                // "몇 명이 시드해 주는지" 가 궁금한 대상이다.
-                small("시드 정보", .primary, onDetail)
-                small("속도", .primary, onLimit)
-                if torrent.isDone {
-                    Text("완료 — 보관함으로 이동됨").font(.system(size: 10.5))
-                        .foregroundStyle(.tertiary)
-                } else {
-                    small("일시정지", .primary, onPause)
-                    small("재개", .primary, onResume)
-                    small("삭제", .red, onDelete)
+                ForEach(actions, id: \.self) { a in
+                    small(ActionRules.label(a), .primary) { onAction(a.rawAction) }
+                }
+                if ActionRules.torrentDeletable(state: torrent.state) {
+                    small("삭제", .red) { onDelete() }
+                }
+                Spacer(minLength: 0)
+                // **속도 제한 — 웹 1330행: 토렌트는 상태와 무관하게 항상**
+                if ActionRules.torrentLimitEditable(state: torrent.state) {
+                    speedLimitPicker
                 }
             }
             .padding(.top, 1)
         }
         .padding(8)
+    }
+
+    private var actions: [ActionRules.JobAction] {
+        ActionRules.torrentActions(state: torrent.state)
+    }
+
+    /// **남은 시간.** 계산 불가하면 빈 문자열 — 그러면 아예 안 보인다.
+    ///
+    /// `etaText` 가 "∞" 같은 값을 내놓으면 화면에 "남은 ∞" 가 찍힌다.
+    /// **표시할 수 없으면 표시하지 않는 것**이 정답이다.
+    private var etaText: String {
+        let remain = torrent.totalSize - torrent.downloadedSize
+        guard torrent.downloadBps > 0, remain > 0 else { return "" }
+        let sec = remain / torrent.downloadBps
+        if sec < 60 { return "남은 \(sec)초" }
+        if sec < 3600 { return "남은 \(sec / 60)분" }
+        return "남은 \(sec / 3600)시간 \(sec % 3600 / 60)분"
+    }
+
+    private var speedLimitPicker: some View {
+        Picker("", selection: Binding(
+            get: { SpeedPresets.kbps(fromBps: torrent.maxDownBps) },
+            set: { k in onLimit(SpeedPresets.bps(fromKbps: k)) }
+        )) {
+            ForEach(SpeedPresets.options(currentBps: torrent.maxDownBps), id: \.kbps) { o in
+                Text(o.label).tag(o.kbps)
+            }
+        }
+        .labelsHidden()
+        .pickerStyle(.menu)
+        .controlSize(.mini)
+        .font(.system(size: 10.5))
+        .frame(maxWidth: 96)
+        .help("속도 제한")
     }
 
     private func small(_ t: String, _ c: Color, _ a: @escaping () -> Void) -> some View {
@@ -515,14 +872,22 @@ struct TorrentRow: View {
     }
 }
 
+/// 보관함 한 줄.
+///
+/// **행을 누르면 폴더면 내려가고, 오른쪽 메뉴에서 조작한다.**
+///
+/// ## 왜 행 전체를 버튼으로 두지 않나
+///
+/// 352pt 폭에 이름·크기·날짜·버튼 3개를 다 넣으면 이름이 두 글자만 보인다.
+/// 그리고 **파괴 동작(휴지통)을 한 번의 클릭으로 단추에 걸어두면 안 된다** —
+/// 사고의 대가가 크다. 그래서 조작은 메뉴로 숨기고, `누르면 들어가기` 만 직접 누른다.
 struct StorageRow: View {
     let entry: StorageEntry
-    /// 폴더로 이동 — **시트에서 대상/목적지를 입력**한다(서버가 판단한다)
-    var onMove: () -> Void = {}
-    /// 휴지통으로 보내기 — **즉시 지우지 않는다**
-    var onTrash: () -> Void = {}
-    /// Mac 으로 내려받기(공유 링크)
-    var onShare: () -> Void = {}
+    /// **폴더를 열기** — 파일이면 호출되지 않는다.
+    let onOpen: () -> Void
+    let onRename: () -> Void
+    let onMove: () -> Void
+    let onTrash: () -> Void
 
     var body: some View {
         HStack(spacing: 7) {
@@ -541,25 +906,37 @@ struct StorageRow: View {
                 .foregroundStyle(.tertiary)
             }
             Spacer(minLength: 0)
-            // **액션은 호버 시에만** — 항상 보이면 4개 아이콘이 목록 전체를 덮는다.
-            rowActions
+
+            if entry.isDirectory {
+                // **폴더는 열기가 유일한 기본 동작.** 모양(▸)도 같이 줘서
+                // "누를 수 있다" 를 미리 알린다 — 안 그러면 클릭 가능한 줄로 안 보인다.
+                Button(action: onOpen) {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(.tertiary)
+                }
+                .buttonStyle(.plain)
+                .help("열기")
+            }
+
+            Menu {
+                Button { onRename() } label: { Label("이름 변경", systemImage: "pencil") }
+                Button { onMove() } label: { Label("이동", systemImage: "folder") }
+                Divider()
+                // **가장 위험한 조작이므로 맨 아래에 두고 빨갛다.**
+                Button { onTrash() } label: { Label("휴지통", systemImage: "trash") }
+            } label: {
+                Image(systemName: "ellipsis.circle")
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(.tertiary)
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help("조작")
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 5)
         .contentShape(Rectangle())
-    }
-
-    private var rowActions: some View {
-        HStack(spacing: 7) {
-            Button(action: onMove) {
-                Image(systemName: "folder").font(.system(size: 10.5))
-            }.buttonStyle(.borderless).help("폴더로 이동")
-            Button(action: onShare) {
-                Image(systemName: "square.and.arrow.down").font(.system(size: 10.5))
-            }.buttonStyle(.borderless).help("Mac 으로 내려받기")
-            Button(action: onTrash) {
-                Image(systemName: "trash").font(.system(size: 10.5))
-            }.buttonStyle(.borderless).foregroundStyle(.orange).help("휴지통으로 보내기")
-        }
     }
 }

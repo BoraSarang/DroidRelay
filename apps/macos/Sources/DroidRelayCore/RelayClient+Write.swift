@@ -112,9 +112,11 @@ extension RelayClient {
     }
 
     /// 휴지통 목록.
+    ///
+    /// **배열 파싱 함수를 써야 한다** — `getJSON` 은 사전 전용이라
+    /// 서버가 준 배열을 `nil` 로 삼킨다(→ 목록이 영영 비어 보인다). 실측 함정.
     public func storageTrashList() async -> [StorageTrashItem] {
-        guard let arr = await getJSON("api/storage/trash") as? [[String: Any]]
-        else { return [] }
+        let arr = await getJSONArray("api/storage/trash")
         return arr.compactMap(StorageTrashItem.init(json:))
     }
 
