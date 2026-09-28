@@ -93,13 +93,15 @@ final class StatusItemController {
     /// 1. **팝오버를 먼저 닫는다.** 열려 있으면 창 두 개가 겹쳐 보인다.
     ///    `.transient` 라 어차피 닫히긴 하지만, **지금 닫아야 창이 그 자리에 뜬다.**
     /// 2. **컨트롤러를 한 번만 만든다.** 매번 만들면 설정 창이 계속 새로 생긴다.
-    /// 3. **`present()`** — 이 안에서 `NSApp.activate` 가 **먼저** 돌아야 창이 key 가 되고
+    /// 3. **위치를 먼저 정한다** (`applyPlacement`) — **표시보다 먼저**다.
+    ///    반대면 창이 (0,0) 에서 보이다가 순간적으로 중앙으로 **튀어 움직인다.**
+    /// 4. **`present()`** — 이 안에서 `NSApp.activate` 가 **먼저** 돌아야 창이 key 가 되고
     ///    주소 입력창이 키보드를 받을 수 있다. 순서가 바뀌면 **입력 불가능한 창**이 된다.
     func showSettingsWindow() {
         popover?.performClose(nil)
         if settingsWindow == nil { settingsWindow = SettingsWindowController(model: model) }
+        settingsWindow?.applyPlacement()
         settingsWindow?.present()
-        settingsWindow?.positionUnderMenuBar()
     }
 
     /// 노치가 있는 화면에서 새 항목이 노치 밑에 숨어 보이지 않는 문제가 있다.

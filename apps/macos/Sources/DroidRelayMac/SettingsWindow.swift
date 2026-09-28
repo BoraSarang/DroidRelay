@@ -25,7 +25,7 @@ import SwiftUI
 ///    는 건드리지 않는다. 대신 **컨트롤러를 강한 참조로 들고 있는다** — 풀려서 창이
 ///    통째로 사라지는 것을 막는다.
 @MainActor
-final class SettingsWindowController: NSWindowController {
+final class SettingsWindowController: NSWindowController, NSWindowDelegate {
 
     /// **셋업을 한 번만** — `NSWindowController.init(window:)` 로 창을 직접 준다.
     init(model: AppModel) {
@@ -38,9 +38,9 @@ final class SettingsWindowController: NSWindowController {
         w.title = "DroidRelay 설정"
         w.titlebarAppearsTransparent = false
         w.isReleasedWhenClosed = false          // 닫아도 창이 파괴되지 않는다
-        w.center()
         super.init(window: w)
         w.contentView = NSHostingView(rootView: SettingsView(model: model))
+        w.delegate = self
     }
 
     @available(*, unavailable)
@@ -56,14 +56,45 @@ final class SettingsWindowController: NSWindowController {
         window?.makeKeyAndOrderFront(nil)
     }
 
-    /// **창을 메뉴바 아래에 붙인다** — 화면 한가운데서 튀어나오는 걸 피한다.
+    /// **창을 놓을 자리를 정한다 — 가운데, 혹은 사용자가 마지막으로 둔 자리.**
     ///
-    /// **화면 밖으로 나가지 않게 오른쪽을 반드시 제한한다.** 계산이 틀리면
-    /// 제목바조차 화면 밖에 나가서 사용자는 "창이 안 떴지?" 라고 읽는다.
-    func positionUnderMenuBar() {
-        guard let w = window, let vf = NSScreen.main?.visibleFrame else { return }
-        let x = max(vf.minX + 8, vf.maxX - w.frame.width - 16)
-        w.setFrameOrigin(NSPoint(x: x, y: vf.maxY - w.frame.height - 8))
+    /// ## 왜 처음엔 오른쪽이 아니라 가운데인가
+    ///
+    /// 원래는 메뉴바 오른쪽에 붙였다. 사용자가 "창이 아니라 팝오버처럼 보인다"고
+    /// 받아들였고, **메뉴바와 무관한 앱의 설정 창**이라는 걸 화면 가운데가 말해 준다.
+    /// 메뉴바 앱이라는 사실은 **아이콘**이 이미 말하고 있다.
+    ///
+    /// ## 왜 `NSScreen.main` 하나로 안 되나
+    ///
+    /// 사용자가 창을 2인치 모니터 쪽으로 옮겨뒀다면 **거기서 뜨는 게 맞다.**
+    /// 화면 가운데를 무조건 강제하면 **배치한 사용자를 매번 무시하는 것**이 된다.
+    ///
+    /// 그래서 **전체 화면**을 넘기고, 그 어디에서도 안 보일 때만 가운데로 되돌린다
+    /// (`WindowPlacement` 규칙). 모니터가 빠졌는데 그 자리에 띄우면
+    /// **사용자는 아무것도 못 본다.**
+    func applyPlacement() {
+        guard let w = window else { return }
+        // **주 화면이 첫째여야 한다** — `visible[0]` 이 "돌아갈 곳"으로 쓰인다.
+        var frames = NSScreen.screens.map(\.visibleFrame)
+        if let main = NSScreen.main?.visibleFrame { frames.removeAll { $0 == main }; frames.insert(main, at: 0) }
+        guard !frames.isEmpty else { w.center(); return }
+        let origin = WindowPlacement.resolve(saved: WindowPlacement.loadOrigin(),
+                                             size: w.frame.size, visible: frames)
+        w.setFrameOrigin(origin)
+    }
+
+    /// **창이 사라질 때 위치를 기억한다.**
+    ///
+    /// ## 왜 `NSWindowDelegate` 인가 — 알림보다 나은 이유
+    ///
+    /// `NSWindow.willCloseNotification` 에도 걸 수 있지만, **여러 창이 같은 알림을
+    /// 듣기 때문에 "이 창이 닫혔다" 를 다시 확인해야 한다.** delegate 는
+    /// **이 창한테만** 불린다. 필터 한 줄이 사라진다.
+    ///
+    /// 저장 실패가 문제가 되지 않는 이유: 이건 **편의다.** 잃어도 다음에 가운데로 뜬다.
+    func windowWillClose(_ notification: Notification) {
+        guard let origin = window?.frame.origin else { return }
+        WindowPlacement.saveOrigin(origin)
     }
 }
 
