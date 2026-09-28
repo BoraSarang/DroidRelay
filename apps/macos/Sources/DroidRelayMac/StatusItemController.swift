@@ -15,6 +15,15 @@ import SwiftUI
 final class StatusItemController {
     private var statusItem: NSStatusItem?
     private var popover: NSPopover?
+    /// **설정 창 컨트롤러 — 강한 참조로 들고 있다.**
+    ///
+    /// ## 왜 강한 참조인가 (실측된 함정)
+    ///
+    /// `NSWindowController` 가 `nil` 로 풀리면 **창이 통째로 사라진다.**
+    /// `.sheet` 였을 땐 이 문제가 없었는데(시트는 뷰 트리에 매달려 있었다)
+    /// 창으로 바꾸면서 새로 생긴 것이었다. `isReleasedWhenClosed = false` 만으로는
+    /// **컨트롤러 자체의 해제는 막지 못한다** — 그래서 여기서 붙든다.
+    private var settingsWindow: SettingsWindowController?
     private let model: AppModel
 
     /// 메뉴바에서 이 앱을 끌 수 있을지 (아이콘 위치 예약) — 아님면 다른 앱의 것도 건드린다.
@@ -73,8 +82,24 @@ final class StatusItemController {
         }
 
         // **팝오버를 직접 닫지 않는다.** 바깥 클릭은 `behavior = .transient` 가 처리한다.
-        // `NSWindow.didResignKeyNotification` 으로 닫으면 팝오버 안에서 설정 시트를 열었을 때
-        // resign key 가 울려 **시트가 열리는 순간 팝오버까지 사라진다**.
+        // `NSWindow.didResignKeyNotification` 으로 닫으면 resign key 가 울려
+        // **설정 창이 뜨는 순간 팝오버까지 사라진다.** 그래서 아래에서 **명시적으로** 닫는다.
+    }
+
+    /// **설정을 별도 창으로 연다.**
+    ///
+    /// ## 순서가 이 함수 전체다 — 바꾸지 말 것
+    ///
+    /// 1. **팝오버를 먼저 닫는다.** 열려 있으면 창 두 개가 겹쳐 보인다.
+    ///    `.transient` 라 어차피 닫히긴 하지만, **지금 닫아야 창이 그 자리에 뜬다.**
+    /// 2. **컨트롤러를 한 번만 만든다.** 매번 만들면 설정 창이 계속 새로 생긴다.
+    /// 3. **`present()`** — 이 안에서 `NSApp.activate` 가 **먼저** 돌아야 창이 key 가 되고
+    ///    주소 입력창이 키보드를 받을 수 있다. 순서가 바뀌면 **입력 불가능한 창**이 된다.
+    func showSettingsWindow() {
+        popover?.performClose(nil)
+        if settingsWindow == nil { settingsWindow = SettingsWindowController(model: model) }
+        settingsWindow?.present()
+        settingsWindow?.positionUnderMenuBar()
     }
 
     /// 노치가 있는 화면에서 새 항목이 노치 밑에 숨어 보이지 않는 문제가 있다.
@@ -155,7 +180,9 @@ final class StatusItemController {
         // **그래프(≈60pt) + 탭/목록/통계가 함께 들어가야 한다.**
         // 420 으로 고정하면 아래 내용이 잘린다 — 고정 높이를 유지하는 편이 덜 깜빡인다.
         p.contentSize = NSSize(width: 352, height: 520)
-        p.contentViewController = NSHostingController(rootView: PopoverContainer(model: model))
+        p.contentViewController = NSHostingController(
+            rootView: PopoverContainer(model: model) { [weak self] in self?.showSettingsWindow() }
+        )
         popover = p
         return p
     }
@@ -487,122 +514,23 @@ final class StatusItemController {
 /// 설정 창은 M4 범위라 지금은 주소 입력만 최소로 제공한다.
 struct PopoverContainer: View {
     @Bindable var model: AppModel
-    @State private var showSettings = false
-    @State private var address = ""
-    /// 로그인 시 자동 실행 — **Launch Services 를 직접 조회**한다(UserDefaults 플래그가 아니라).
-    @State private var loginOn = LoginItem.isEnabled
-    @State private var showDroid = true
-    @State private var showDevice = false
-    @State private var loginMsg: String? = nil
+    /// **설정 창을 띄운다** — 컨트롤러가 주입한다.
+    var onSettings: () -> Void
 
     var body: some View {
         PopoverView(
             model: model,
-            onSettings: {
-                address = model.storedAddress ?? ""
-                loginOn = LoginItem.isEnabled   // 시트를 열 때마다 실제 상태로 새로고침
-                showDroid = model.speedSetting.showDroid
-                showDevice = model.speedSetting.showDevice
-                loginMsg = nil
-                showSettings = true
-            },
+            onSettings: onSettings,
             onQuit: { NSApp.terminate(nil) }
         )
-        .sheet(isPresented: $showSettings) {
-            settingsSheet
-        }
         .task { if model.phase == .idle { await model.connect() } }
         .onChange(of: model.badgeCount) { _, _ in
             NotificationCenter.default.post(name: .drBadgeChanged, object: nil)
-        }
-        .onChange(of: showDroid) { _, _ in
-            model.speedSetting.showDroid = showDroid
-        }
-        .onChange(of: showDevice) { _, _ in
-            model.speedSetting.showDevice = showDevice
         }
         .onChange(of: model.droidSpeed) { _, _ in NotificationCenter.default.post(name: .drBadgeChanged, object: nil) }
         .onChange(of: model.deviceSpeed) { _, _ in NotificationCenter.default.post(name: .drBadgeChanged, object: nil) }
     }
 
-    private var settingsSheet: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("DroidRelay 연결").font(.system(size: 14, weight: .bold))
-            Text("자동으로 찾지 못하면 주소를 직접 입력하세요.")
-                .font(.system(size: 11.5)).foregroundStyle(.secondary)
-            HStack {
-                TextField("10.0.0.5:3000", text: $address)
-                    .textFieldStyle(.roundedBorder)
-                Button("연결") { Task { await model.useManualAddress(address) } }
-                    .disabled(address.isEmpty)
-            }
-            Divider()
-            HStack {
-                Text("자동 검색으로 다시 시도").font(.system(size: 12))
-                Spacer()
-                Button("다시 찾기") { Task { await model.connect() } }
-            }
-
-            Divider()
-            Text("메뉴바 속도").font(.system(size: 14, weight: .bold))
-            speedToggle("Droid 속도", "이 앱이 쓰는 트래픽", $showDroid)
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("기기 속도").font(.system(size: 12))
-                    Text(model.deviceSpeedAvailable
-                         ? "폰 전체 트래픽" : "서버 지원 대기 중 — 켜도 값이 나오지 않습니다")
-                        .font(.system(size: 10.5))
-                        .foregroundStyle(model.deviceSpeedAvailable ? .secondary : Color.orange)
-                }
-                Spacer()
-                Toggle("", isOn: $showDevice)
-                    .labelsHidden()
-                    .disabled(!model.deviceSpeedAvailable)
-            }
-
-            Divider()
-            Text("시작").font(.system(size: 14, weight: .bold))
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("로그인 시 자동 실행").font(.system(size: 12))
-                    if let loginMsg {
-                        Text(loginMsg).font(.system(size: 10.5)).foregroundStyle(.secondary)
-                    } else {
-                        Text("Mac 에 로그인하면 DroidRelay 가 자동으로 뜹니다")
-                            .font(.system(size: 10.5)).foregroundStyle(.tertiary)
-                    }
-                }
-                Spacer()
-                Toggle("", isOn: Binding(
-                    get: { loginOn },
-                    set: { toggleLogin($0) }
-                ))
-                .labelsHidden()
-            }
-
-            HStack { Spacer(); Button("닫기") { showSettings = false }.keyboardShortcut(.defaultAction) }
-        }
-        .padding(20)
-        .frame(width: 420)
-    }
-
-    private func speedToggle(_ t: String, _ h: String, _ binding: Binding<Bool>) -> some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(t).font(.system(size: 12))
-                Text(h).font(.system(size: 10.5)).foregroundStyle(.secondary)
-            }
-            Spacer()
-            Toggle("", isOn: binding).labelsHidden()
-        }
-    }
-
-    /// 실패해도 앱은 죽지 않는다 — 사유를 설정 화면에 남기고 스위치를 원래대로 되돌린다.
-    private func toggleLogin(_ want: Bool) {
-        let r = LoginItem.set(want)
-        loginOn = LoginItem.isEnabled   // 요청한 값이 아니라 **실제** 상태를 따른다
-        if case .applied = r { loginMsg = nil } else { loginMsg = r.message }
-    }
 }
 
 extension Notification.Name { static let drBadgeChanged = Notification.Name("drBadgeChanged") }

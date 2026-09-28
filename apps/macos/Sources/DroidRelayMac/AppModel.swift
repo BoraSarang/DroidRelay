@@ -22,6 +22,23 @@ private enum Prefs {
     static func setShowFinishedJobs(_ v: Bool) {
         UserDefaults.standard.set(v, forKey: finishedKey)
     }
+
+    /// **SSE 안전망 폴링 주기(초)** — 설정 화면에서 고른다.
+    static let pollKey = "backupPollSeconds"
+
+    /// **저장값을 읽되 허용 범위로 눌러서 준다.**
+    ///
+    /// 왜 클램프하냐면 — `UserDefaults` 는 손으로 편집할 수 있다.
+    /// **화면에서 고를 수 없는 값이 저장되어 있더라도 앱이 폭발하지 않아야 한다.**
+    static var backupPollSeconds: Int {
+        let raw = UserDefaults.standard.object(forKey: pollKey) == nil
+            ? BackupPoll.defaultSeconds
+            : UserDefaults.standard.integer(forKey: pollKey)
+        return BackupPoll.clamp(raw)
+    }
+    static func setBackupPollSeconds(_ v: Int) {
+        UserDefaults.standard.set(BackupPoll.clamp(v), forKey: pollKey)
+    }
 }
 
 /// 앱 전역 상태. @Observable 이므로 view 가 자동으로 갱신된다.
@@ -388,6 +405,27 @@ final class AppModel {
         didSet {
             speedSetting.save()
             NotificationCenter.default.post(name: .drBadgeChanged, object: nil)
+        }
+    }
+
+    /// **SSE 안전망 폴링 주기(초)** — 설정 화면에서 고른다.
+    ///
+    /// ## 왜 바꾸면 바로 반영되나
+    ///
+    /// 이 값은 `subscribe()` 안에서 이미 돌고 있는 루프의 **슬립 시간**이다.
+    /// 저장만 하고 끝내면 **"설정을 바꿨는데 아무 일도 없다"** 가 되는데,
+    /// 그건 사용자가 화면을 닫았다 다시 열어야만 바뀐다 — 발견하기 어렵다.
+    /// 그래서 바꾸는 즉시 **루프를 새로 시작**한다.
+    ///
+    /// **1초 속도 샘플링은 건드리지 않는다.** 그건 안전망이 아니라 그래프용이라
+    /// `BackupPoll` 에 설명이 있다.
+    var backupPollSeconds = Prefs.backupPollSeconds {
+        didSet {
+            let v = BackupPoll.clamp(backupPollSeconds)
+            // **클램프가 실제로 값을 바꾼 경우에도 저장은 정상값으로 한다.**
+            if v != backupPollSeconds { backupPollSeconds = v; return }
+            Prefs.setBackupPollSeconds(v)
+            restartBackupPoll()
         }
     }
 
@@ -867,13 +905,24 @@ final class AppModel {
             await self?.refresh()
         } }
         startSpeedSampling()
-        // SSE 가 조용히 죽어도 진행률이 멈추면 안 된다 — 10초 백업 폴링
-        // (웹 대시보드가 쓰는 것과 동일한 계약)
+        restartBackupPoll()
+    }
+
+    /// **SSE 안전망 폴링을 (재)시작한다** — 주기는 `backupPollSeconds`.
+    ///
+    /// ## 왜 따로 떼어냈나
+    ///
+    /// `subscribe()` 에서 인라인으로 두면 **설정을 바꿀 때 재사용할 수가 없다.**
+    /// 설정값이 바뀔 때마다 SSE 와 속도 샘플러까지 전부 다시 걸 필요는 없다 —
+    /// **안전망 하나만 다시 건다.** 그게 이 메서드의 존재 이유다.
+    private func restartBackupPoll() {
         pollTask?.cancel()
+        let seconds = BackupPoll.clamp(backupPollSeconds)
         pollTask = Task {
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(10))
-                if !Task.isCancelled { await refresh() }
+                try? await Task.sleep(for: .seconds(seconds))
+                if Task.isCancelled { break }
+                await refresh()
             }
         }
     }
