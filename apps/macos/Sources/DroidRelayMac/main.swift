@@ -1,20 +1,41 @@
 import AppKit
+import ObjectiveC
 import SwiftUI
 import DroidRelayCore
 import ServiceManagement
 
+/// `--watch` 로그 위치
+let agentWatchLog = NSString(string: "~/.agent-droidrelay-watch.log").expandingTildeInPath
+
+/// 프로세스 진입점 — `@main` 대신 직접 부팅한다(씬 없이).
+///
+/// **`NSApplicationMain` 을 쓰면 안 된다** — 그 경로는 `Info.plist` 의 씬 설정을
+/// 다시 읽어 "설정 창"을 되살린다. 여기서는 빈 설정을 박아 부팅한다.
+let app = Boot.start()
+app.run()
+
 /// 앱 진입점.
 ///
-/// 메뉴바 전용 앱이므로 Dock 아이콘이 없어야 한다(`.accessory`).
-/// `LSUIElement` 와 같은 효과지만 코드로 하므로 Info.plist 없이도 동작하고
-/// SPM 빌드로 만든 실행 파일을 바로 쓸 수 있다.
-@main
-struct DroidRelayMacApp: App {
-    @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
-
-    var body: some Scene {
-        Settings { EmptyView() }   // 설정은 팝오버에서 제공 (M1 범위)
-        .commands { CommandGroup(replacing: .newItem) {} }
+/// **씬을 두지 않는 이유** — `Settings { EmptyView() }` 씬 하나만 있던 앱은
+/// **활성화될 때 그 창이 자동으로 열린다**(실측: 실행하자마자 "DroidRelay Settings" 창이 떴다).
+/// 내용이 `EmptyView()` 라도 **창이 뜨는** 이유라 빈 화면으로 숨겨도 해결되지 않는다.
+///
+/// 씬이 아예 없는 `App` 은 유효하지 않다. 그래서 SwiftUI `App` 수명주기를 버리고
+/// `NSApplication` 을 직접 부팅한다. 메뉴바 앱은 씬이 필요 없다 —
+/// `NSStatusItem` + `NSPopover` 로 전부 구성한다(아래 `main()`).
+@MainActor
+enum Boot {
+    static func start() -> NSApplication {
+        let app = NSApplication.shared
+        // Dock 아이콘 숨김. 씬이 없으므로 여기서 반드시 해줘야 한다 —
+        // `applicationDidFinishLaunching` 에서 하면 첫 프레임에 Dock 아이콘이 보인다.
+        app.setActivationPolicy(.accessory)
+        let delegate = AppDelegate()
+        app.delegate = delegate
+        // **전역에서 살아 있어야 한다.** 지역 변수로 두면 delegate 가 해제돼서
+        // 앱이 아무 응답도 안 하는 프로세스로 남는다(아무 오류 없이).
+        objc_setAssociatedObject(app, "drDelegate", delegate, .OBJC_ASSOCIATION_RETAIN)
+        return app
     }
 }
 
@@ -36,11 +57,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             print("[DroidRelay] 로그인 항목 등록 → \(LoginItem.set(true).message)  (실제: \(LoginItem.isEnabled))")
             NSApp.terminate(nil); return
         }
+        // 메뉴바 회귀는 `--diagnose` 로 검증할 수 없다(진단은 StatusItem 을 만들지 않는다).
+        // 상태 항목을 실제로 만들어 **무엇이 그려지는지 문자열로** 확인하는 전용 모드.
+        if CommandLine.arguments.contains("--title-check") {
+            Task { await Diagnostics.titleCheck() }
+            return
+        }
+        // **실행 중인 앱이 진짜로 무엇을 그리는지** 파일로 남긴다.
+        //
+        // `--title-check` 는 별도 프로세스라 상태 항목이 "살아 있는" 앱과 다르다.
+        // 사용자가 보는 건 이 프로세스인데, 여기를 안 보면 또 같은 착각을 한다.
+        if CommandLine.arguments.contains("--watch") {
+            let m = AppModel(storedAddress: UserDefaults.standard.string(forKey: "serverAddress"))
+            let c = StatusItemController(model: m)
+            model = m; controller = c
+            c.install()
+            Task {
+                await m.connect()
+                while true {
+                    try? await Task.sleep(for: .seconds(1))
+                    await MainActor.run {
+                        let f = c.debugFrames.joined(separator: " / ")
+                        let l = c.debugLines.joined(separator: " | ")
+                        let msg = "[\(Date().timeIntervalSince1970.formatted(.number.precision(.fractionLength(0))))] \(l)  —  \(f)  [\(m.phaseLabel)]\n"
+                        // **덧붙여야 한다.** `String.write(toFile:atomically:false)` 는
+                        // 파일을 **자른다** — 그래서 20초 관찰해도 마지막 1줄만 남았다.
+                        // (이 버그 때문에 "갱신이 안 된다" 고 잘못 읽을 뻔했다)
+                        if !FileManager.default.fileExists(atPath: agentWatchLog) {
+                            FileManager.default.createFile(atPath: agentWatchLog, contents: nil)
+                        }
+                        if let fh = FileHandle(forWritingAtPath: agentWatchLog) {
+                            fh.seekToEndOfFile()
+                            fh.write(Data(msg.utf8))
+                            try? fh.close()
+                        }
+                    }
+                }
+            }
+            return
+        }
         if CommandLine.arguments.contains("--login-item=off") {
             print("[DroidRelay] 로그인 항목 해제 → \(LoginItem.set(false).message)  (실제: \(LoginItem.isEnabled))")
             NSApp.terminate(nil); return
         }
-        NSApp.setActivationPolicy(.accessory)   // Dock 아이콘 숨김
+        // Dock 아이콘 숨김은 `Boot.start()` 에서 이미 했다.
 
         let m = AppModel(storedAddress: UserDefaults.standard.string(forKey: "serverAddress"))
         model = m
@@ -108,6 +168,16 @@ enum Diagnostics {
             // 로그인 항목 — **설치본에서만** 성립한다. `swift run` 컨텍스트면 .notFound 가
             // 나오는데 그게 정답이다(경로가 안정적이지 않아 등록 대상이 될 수 없다).
             // 스위치가 왜 안 먹는지 확인할 수단이 여기뿐이라 diagnose 에 노출한다.
+            // 속도 — 메뉴바 2줄이 실제로 이런 문자열이 된다
+            let droid = await c.droidSpeed()
+            let dev = await c.deviceSpeed()
+            print("Droid 속도  : ↓ \(SpeedFormat.text(droid.downBps))  ↑ \(SpeedFormat.text(droid.upBps))")
+            if dev == nil {
+                print("기기 속도   : (서버 미지원 — TrafficStats 엔드포인트 신설 필요)")
+            } else {
+                let d = dev!
+                print("기기 속도   : ↓ \(SpeedFormat.text(d.downBps))  ↑ \(SpeedFormat.text(d.upBps))")
+            }
             let st = SMAppService.mainApp.status
             let stName = switch st {
                 case .notRegistered: "미등록"
@@ -127,6 +197,43 @@ enum Diagnostics {
         }
         print("=== 끝 ===")
         await MainActor.run { NSApp.terminate(nil) }
+    }
+
+    /// 메뉴바 항목이 **실제로 무엇을 그리는지** 확인한다.
+    ///
+    /// **왜 전용 모드인가** — `--diagnose` 는 `StatusItem` 을 만들지 않는다. 그래서
+    /// "진단 출력이 정상인데 메뉴바에 아무것도 안 보인다" 는 상태가 계속 터졌고
+    /// (앱 아이콘만 보이는 문제), 눈으로 봐야만 알았다. 그 공백을 메운다.
+    /// `AppModel` 과 `StatusItemController` 가 둘 다 MainActor 격리라 본문을 통째로 격리한다.
+    @MainActor
+    static func titleCheck() async {
+        let m = AppModel(storedAddress: UserDefaults.standard.string(forKey: "serverAddress"))
+        if let s = await m.server { _ = s }
+        // 값이 0 이면 "속도가 안 뜬다" 와 "서버에 값이 없다" 를 구분할 수 없다.
+        // 그래서 **값이 있는 것처럼 채워서** 문자열이 어떻게 조립되는지 본다.
+        m.droidSpeed = SpeedReading(downBps: 460_390, upBps: 9_626)
+        let c = StatusItemController(model: m)
+        c.install()
+        for line in c.debugLines { print("메뉴바 줄   : |\(line)|") }
+        print("배지        : \(m.badgeCount)")
+        print("열 개수     : \(m.visibleSpeedSources.count)  (설정: droid=\(m.speedSetting.showDroid) device=\(m.speedSetting.showDevice) · 기기지원=\(m.deviceSpeedAvailable))")
+        print("           → 기기가 미지원인데 켜져 있어도 **빈 열을 만들지 않는다**")
+        print("아이콘 열   : 없음 (사용자 지정 — 열마다 아이콘 두지 않음)")
+        for f in c.debugFrames { print("즉시  \(f)") }
+        // **런 루프를 실제로 돌린 뒤에 다시 잰다.** 상태 항목이 처음 붙을 때와
+        // 윈도우 서버가 레이아웃을 마친 뒤에는 두께가 다를 수 있다.
+        // "22pt 라서 2줄이 안 된다" 같은 결론을 내리기 전에 이걸 확인해야 한다.
+        for wait in [0.5, 1.5, 3.0] {
+            try? await Task.sleep(for: .seconds(wait))
+            for f in c.debugFrames { print("\(String(format: "%4.1fs", wait)) \(f)") }
+        }
+        // **실제 서버 값으로 다시** 그린다 — 앞의 값은 고정한 샘플이었다.
+        // 0 이면 "아무것도 흐르지 않는다" 와 "연결이 안 됐다" 를 구분할 수 있으니
+        // 상태 문구를 함께 찍는다.
+        print("실측 속도   : \(m.droidSpeed.downBps)↓ / \(m.droidSpeed.upBps)↑  (\(m.phaseLabel))")
+        print("실제 그리는 줄: \(c.debugLines.joined(separator: " | "))")
+
+        NSApp.terminate(nil)
     }
 
     /// SSE 생존 확인 — 메뉴바 앱의 실시간 갱신이 실제로 통하는지 본다.

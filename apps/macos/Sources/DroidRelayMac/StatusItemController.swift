@@ -22,27 +22,54 @@ final class StatusItemController {
 
     init(model: AppModel) { self.model = model }
 
+    /// 현재 메뉴바에 그려진 줄 (검증용)
+    private var drawnLines: [MenuBarTitle.MenuBarLine] = []
+    /// 모델 관찰 루프 — 팝오버와 무관하게 메뉴바를 갱신한다.
+    private var observe: Task<Void, Never>?
+    /// 메뉴바에 붙는 뷰 — `statusItem.view` 로 들어간다.
+    private var speedView: MenuBarSpeedView?
+
     func install() {
         seedPositionOnce()
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem = item
 
-        if let b = item.button {
-            b.image = NSImage(systemSymbolName: "antenna.radiowaves.left.and.right",
-                              accessibilityDescription: "DroidRelay")
-            b.image?.isTemplate = true
-            b.target = self
-            b.action = #selector(clicked(_:))
-            b.sendAction(on: [.leftMouseUp, .rightMouseUp])
-        }
+        // ## `statusItem.view` 로 넣는다 — 여기가 다섯 번째 실패의 답
+        //
+        // `statusItem.button` 의 title·image·서브뷰 로는 **전부 실패했다.**
+        // `NSStatusItem` 은 **`.view` 로도** 내용을 가질 수 있고, 여기에 직접 배치한
+        // `NSTextField` 는 시스템이 건드릴 일이 없다.
+        //
+        // (TetherLens 의 검증된 방식. 2줄이 성립하는 이유도 거기서 찾았다 —
+        //  **9pt 폰트**는 줄당 11pt, 2줄이 22pt 로 메뉴바 두께에 딱 들어간다.
+        //  내 이전 구현은 10.5pt(줄당 13pt)라 26pt 가 필요했고 잘렸다.)
+        let v = MenuBarSpeedView(
+            onClick: { [weak self] in self?.togglePopover() },
+            onRightClick: { [weak self] in self?.showMenu() }
+        )
+        item.view = v
+        speedView = v
         updateBadge()
 
-        // 배지 갱신. `PopoverContainer` 가 `badgeCount` 변화를 알리면 받아 그린다.
-        // (이 알림을 안 받으면 배지는 `install()` 시점 값으로 영영 고착된다)
-        NotificationCenter.default.addObserver(
-            forName: .drBadgeChanged, object: nil, queue: .main
-        ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.updateBadge() }
+        // ## 갱신을 누가 시키는가 — 여기가 마지막 함정이었다
+        //
+        // 이전에는 `PopoverContainer` 의 `.onChange(of: model.badgeCount)` 가
+        // `.drBadgeChanged` 를 올리고 그걸 여기서 받았다. 그럼 **팝오버가 살아야** 갱신된다.
+        //
+        // 그런데 `NSHostingController` 는 **팝오버를 처음 열 때** 만들어진다.
+        // → 앱을 켠 직후에는 아무것도 알리지 않는다 → 메뉴바가 `install()` 시점의
+        // `—` 로 **영영 고착된다.** 사용자가 클릭해 팝오버를 열기 전까지.
+        //
+        // `--watch` 로그로 실측: 서버에는 62.8 KB/s 가 흐르는데 메뉴바는 `—` .
+        // 서버 문제가 아니라 **갱신 트리거가 팝오버에 묶여 있던 것** 이었다.
+        //
+        // → **컨트롤러가 모델을 직접 관찰한다.** 팝오버는 그릴 대상일 뿐 아니다.
+        observe = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(500))
+                if Task.isCancelled { break }
+                await MainActor.run { self?.updateBadge() }
+            }
         }
 
         // **팝오버를 직접 닫지 않는다.** 바깥 클릭은 `behavior = .transient` 가 처리한다.
@@ -60,14 +87,59 @@ final class StatusItemController {
         }
     }
 
+    /// 배지와 속도를 **한 번에** 그린다.
+    ///
+    /// **버튼의 `title` 을 만지지 않는 이유** — `attributedTitle` 을 지우기 때문이다.
+    /// 한 번 더 상처를 냈다: 처음엔 `attributedTitle` 에 넣고 배지만 `b.title` 로 갱신했는데,
+    /// AppKit 이 `attributedTitle` 을 **삭제**해서 속도가 사라졌다(배지만 남음).
+    /// 지금은 버튼에도 뷰에도 대입하지 않고 **뷰 하나만** 갱신한다.
+    /// 배지와 속도를 **한 번에** 그린다.
+    ///
+    /// ## `b.image` 로 넣는다 — 서브뷰는 실패했다
+    ///
+    /// 커스텀 `NSView` 를 서브뷰로 붙이는 길을 먼저 시도했다. **결과는 아무것도 안
+    /// 보였다** — 안테나 아이콘까지 사라졌다. 원인은 `NSStatusBarButton` 이 컨테이너가
+    /// 아니라 `NSButton` 이고, `NSStatusBar` 이 레이아웃을 다시 잡을 때 **버튼 프레임을
+    /// 자기가 결정한다** — 서브뷰 프레임은 그때마다 버려진다. 넣은 직후 조회하면
+    /// "정상" 으로 보이는데 실제로는 그려지지 않는다.
+    ///
+    /// `b.image` 는 시스템이 **항상** 그리는 자리다(안테나 심볼이 거기서 그려졌다).
+    /// 그래서 그림을 이미지로 구워서 이 자리에 넣는다.
     func updateBadge() {
+        let src = model.speedSetting
+        let drawn = MenuBarTitle.lines(
+            badge: model.badgeCount,
+            droid: model.droidSpeed,
+            // **못 쓰는 출처는 열을 만들지 않는다** — 서버가 값을 안 주는데 0 을 넣으면
+            // 사용자는 화면에서 "고장 났구나" 를 읽는다.
+            device: model.deviceSpeedAvailable ? model.deviceSpeed : nil,
+            includeDroid: src.showDroid,
+            includeDevice: src.showDevice
+        )
+        drawnLines = drawn
+        // **버튼이 아니라 `speedView` 를 갱신한다.** `NSStatusItem.view` 로 붙인 뒤
+        // 여기서 내용을 채운다 — 시스템이 개입하지 않으므로 값이 유실되지 않는다.
+        // 값이 없으면 빈 문자열이 들어가고 앱 아이콘 하나만 남는다.
+        speedView?.apply(drawn)
+        renderTooltip()
+    }
+
+    /// 실제로 그리는 줄 — `--title-check` 검증용.
+    var debugLines: [String] { drawnLines.map(\.text) }
+
+    /// 메뉴바에 붙은 실제 프레임 — **잘림 여부를 숫자로 본다.**
+    var debugFrames: [String] {
+        guard let v = speedView else { return ["speedView    : **nil — install() 이 안 돌았다**"] }
+        return ["speedView ok : true"] + v.debugGeometry
+    }
+
+    private func renderTooltip() {
         guard let b = statusItem?.button else { return }
-        let n = model.badgeCount
-        if n == 0 {
-            b.title = ""
-        } else {
-            b.title = " \(n)"
-        }
+        let sources = model.visibleSpeedSources
+        b.toolTip = sources.isEmpty ? "DroidRelay" :
+            sources.map { "\($0.label) ↓ \(SpeedFormat.text(model.speed(for: $0).downBps))"
+                        + " ↑ \(SpeedFormat.text(model.speed(for: $0).upBps))" }
+                   .joined(separator: "\n")
     }
 
     @objc private func clicked(_ sender: NSStatusBarButton) {
@@ -112,7 +184,11 @@ final class StatusItemController {
 
     @objc private func openDash() { model.openDashboard() }
     @objc private func openSettings() { NSApp.activate(ignoringOtherApps: true) }
-    @objc private func quit() { NSApp.terminate(nil) }
+    @objc private func quit() {
+        observe?.cancel()
+        observe = nil
+        NSApp.terminate(nil)
+    }
 }
 
 /// 설정 창은 M4 범위라 지금은 주소 입력만 최소로 제공한다.
@@ -122,6 +198,8 @@ struct PopoverContainer: View {
     @State private var address = ""
     /// 로그인 시 자동 실행 — **Launch Services 를 직접 조회**한다(UserDefaults 플래그가 아니라).
     @State private var loginOn = LoginItem.isEnabled
+    @State private var showDroid = true
+    @State private var showDevice = false
     @State private var loginMsg: String? = nil
 
     var body: some View {
@@ -130,6 +208,8 @@ struct PopoverContainer: View {
             onSettings: {
                 address = model.storedAddress ?? ""
                 loginOn = LoginItem.isEnabled   // 시트를 열 때마다 실제 상태로 새로고침
+                showDroid = model.speedSetting.showDroid
+                showDevice = model.speedSetting.showDevice
                 loginMsg = nil
                 showSettings = true
             },
@@ -142,6 +222,14 @@ struct PopoverContainer: View {
         .onChange(of: model.badgeCount) { _, _ in
             NotificationCenter.default.post(name: .drBadgeChanged, object: nil)
         }
+        .onChange(of: showDroid) { _, _ in
+            model.speedSetting.showDroid = showDroid
+        }
+        .onChange(of: showDevice) { _, _ in
+            model.speedSetting.showDevice = showDevice
+        }
+        .onChange(of: model.droidSpeed) { _, _ in NotificationCenter.default.post(name: .drBadgeChanged, object: nil) }
+        .onChange(of: model.deviceSpeed) { _, _ in NotificationCenter.default.post(name: .drBadgeChanged, object: nil) }
     }
 
     private var settingsSheet: some View {
@@ -160,6 +248,23 @@ struct PopoverContainer: View {
                 Text("자동 검색으로 다시 시도").font(.system(size: 12))
                 Spacer()
                 Button("다시 찾기") { Task { await model.connect() } }
+            }
+
+            Divider()
+            Text("메뉴바 속도").font(.system(size: 14, weight: .bold))
+            speedToggle("Droid 속도", "이 앱이 쓰는 트래픽", $showDroid)
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("기기 속도").font(.system(size: 12))
+                    Text(model.deviceSpeedAvailable
+                         ? "폰 전체 트래픽" : "서버 지원 대기 중 — 켜도 값이 나오지 않습니다")
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(model.deviceSpeedAvailable ? .secondary : Color.orange)
+                }
+                Spacer()
+                Toggle("", isOn: $showDevice)
+                    .labelsHidden()
+                    .disabled(!model.deviceSpeedAvailable)
             }
 
             Divider()
@@ -186,6 +291,17 @@ struct PopoverContainer: View {
         }
         .padding(20)
         .frame(width: 420)
+    }
+
+    private func speedToggle(_ t: String, _ h: String, _ binding: Binding<Bool>) -> some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(t).font(.system(size: 12))
+                Text(h).font(.system(size: 10.5)).foregroundStyle(.secondary)
+            }
+            Spacer()
+            Toggle("", isOn: binding).labelsHidden()
+        }
     }
 
     /// 실패해도 앱은 죽지 않는다 — 사유를 설정 화면에 남기고 스위치를 원래대로 되돌린다.

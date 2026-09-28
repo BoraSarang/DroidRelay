@@ -57,6 +57,21 @@ public struct RelayClient: Sendable {
         public let isVideo: Bool
 
         public var isActive: Bool { state == "RUNNING" || state == "STALLED" }
+
+        /// **속도 합산에 쓸 판정** — 서버의 상태 문자열을 하드코딩하지 않는다.
+        ///
+        /// 이전에 `state == "RUNNING"` 으로만 더했다. 그런데 **`/api/jobs` 는 지금 0건**이고,
+        /// 진행 중인 것은 토렌트 쪽(`DOWNLOADING`)이었다. 문자열이 하나라도 어긋나면
+        /// **조용히 0 이 되고 에러도 없다** — 그래서 몇 시간 동안 놓칠 수 있다.
+        ///
+        /// 대소문자를 무시하고 진행 상태를 폭넓게 받아, 서버가 말을 바꿔도 값이 0 이
+        /// 되지 않게 한다. "완료" 만은 제외한다.
+        public var isRunning: Bool {
+            let s = state.lowercased()
+            guard !s.contains("done") && !s.contains("complete") && !s.contains("fail") else { return false }
+            return s.contains("running") || s.contains("download") || s.contains("active")
+                || s.contains("stalled") || s.contains("progress")
+        }
         public var isSeeding: Bool { state == "SEEDING" || state == "FETCHING_METADATA" }
         public var speedText: String { Self.bps(speedBps) }
         public var upText: String { Self.bps(uploadedBps) }
@@ -82,6 +97,39 @@ public struct RelayClient: Sendable {
               let o = any as? [[String: Any]]
         else { return [] }
         return o.compactMap(Self.job(from:))
+    }
+
+    // MARK: - 속도 (M-14)
+
+    /// Droid(앱) 속도 — 잡+토렌트를 **서버가 준 값에서 합산**한다.
+    /// 웹 대시보드가 하던 계산과 동일하다(그때도 클라이언트 합산).
+    public func droidSpeed() async -> SpeedReading {
+        async let j = jobs()
+        async let t = torrents()
+        let (jobs, torrents) = await (j, t)
+        let jobsDown = jobs.filter { $0.state == "RUNNING" }.reduce(0) { $0 + $1.speedBps }
+        let active = torrents.filter { $0.isActive }
+        return SpeedReading(
+            downBps: jobsDown + active.reduce(0) { $0 + $1.downloadBps },
+            upBps: active.reduce(0) { $0 + $1.uploadBps }
+        )
+    }
+
+    /// 기기(폰 전체) 속도 — **서버가 아직 제공하지 않는다.**
+    /// nil 을 돌려주는 게 아니라 Optional 로 표현하는 이유: `0` 은 "지원하지만 지금 0" 과
+    /// "지원하지 않는다" 를 구분할 수 없어, 스위치를 켰는데 항상 0 이 나오는
+    /// "고장 난 기능" 이 되기 때문이다. 서버에 TrafficStats 엔드포인트가 생기면 채운다.
+    public func deviceSpeed() async -> SpeedReading? {
+        guard let o = try? await getJSON("api/net/speed") else { return nil }
+        return SpeedReading(downBps: o["downBps"] as? Int ?? 0, upBps: o["upBps"] as? Int ?? 0)
+    }
+
+    private func getJSON(_ path: String) async -> [String: Any]? {
+        guard let d = try? await get(path),
+              let any = try? JSONSerialization.jsonObject(with: d, options: [.fragmentsAllowed]),
+              let o = any as? [String: Any]
+        else { return nil }
+        return o
     }
 
     // MARK: - 토렌트 · 보관함 (M3)
