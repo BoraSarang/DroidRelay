@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import DroidRelayCore
+import ServiceManagement
 
 /// 앱 진입점.
 ///
@@ -28,6 +29,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if CommandLine.arguments.contains("--diagnose") {
             Task { await Diagnostics.run() }
             return
+        }
+        // 로그인 항목 등록/해제 — UI 는 메뉴바 안에 숨어 있어 자동화로 누르기 어렵고,
+        // 이 기능은 **설치본에서만** 성립하므로 유일한 검증 수단이다.
+        if CommandLine.arguments.contains("--login-item=on") {
+            print("[DroidRelay] 로그인 항목 등록 → \(LoginItem.set(true).message)  (실제: \(LoginItem.isEnabled))")
+            NSApp.terminate(nil); return
+        }
+        if CommandLine.arguments.contains("--login-item=off") {
+            print("[DroidRelay] 로그인 항목 해제 → \(LoginItem.set(false).message)  (실제: \(LoginItem.isEnabled))")
+            NSApp.terminate(nil); return
         }
         NSApp.setActivationPolicy(.accessory)   // Dock 아이콘 숨김
 
@@ -94,6 +105,19 @@ enum Diagnostics {
             for e in storage.prefix(5) {
                 print("  - \(e.isDirectory ? "📁" : "📄") \(e.name)  \(e.sizeText)  \(e.modifiedText)")
             }
+            // 로그인 항목 — **설치본에서만** 성립한다. `swift run` 컨텍스트면 .notFound 가
+            // 나오는데 그게 정답이다(경로가 안정적이지 않아 등록 대상이 될 수 없다).
+            // 스위치가 왜 안 먹는지 확인할 수단이 여기뿐이라 diagnose 에 노출한다.
+            let st = SMAppService.mainApp.status
+            let stName = switch st {
+                case .notRegistered: "미등록"
+                case .enabled: "켜짐"
+                case .requiresApproval: "승인 필요 — 시스템 설정에서 허용하세요"
+                case .notFound: "앱 없음"
+                @unknown default: "알 수 없음"
+            }
+            print("로그인 항목  : \(stName)  [status=\(st.rawValue)]"
+                  + (LoginItem.isBundled ? "" : "  ← 번들 밖(설치본 아님) — 등록 불가"))
             if let info = await c.serverInfo() {
                 print("저장공간    : \(RelayClient.format(bytes: info.storageFree)) 여유 / \(RelayClient.format(bytes: info.storageTotal))")
             }
