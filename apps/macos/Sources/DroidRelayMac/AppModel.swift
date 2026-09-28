@@ -661,6 +661,55 @@ final class AppModel {
         Task { await refresh() }
     }
 
+    /// **보관함 동영상을 브라우저로 실시간 재생한다** — `▶`.
+    ///
+    /// ## 왜 브라우저로 여는가 — "맥 기본 프로그램"의 함정
+    ///
+    /// "맥 기본 프로그램에 연결해서 바로 플레이" 라는 요구는 **http URL 에서는
+    /// QuickTime·IINA 로 불가능하다.** 실측(Launch Services):
+    /// ```
+    /// http://…/stream/x.mp4  →  Safari.app                ← 기본
+    /// ~/x.mp4 (로컬 파일)     →  /Applications/IINA.app    ← 사용자 기본 플레이어
+    /// http URL 을 열 수 있는 앱: Safari, Chrome, Edge, Whale, iTerm  (IINA 없음)
+    /// ```
+    /// IINA 가 받으려면 **4 GB 를 전부 내려받은 뒤** 로컬 파일로 열어야 한다 —
+    /// 그건 "실시간 플레이" 가 아니다. 그래서 재생은 브라우저로만 한다.
+    ///
+    /// 이 엔드포인트는 `inline` + `Range(206)` 지원이라 **즉시 첫 화면이 뜨고
+    /// 탐색(seek)도 된다.** 저장 없이 재생된다.
+    func playStream(_ entry: StorageEntry) {
+        guard !entry.isDirectory else { return }
+        guard let s = server, let u = RelayClient.streamURL(base: s.baseURL, path: entry.path) else {
+            lastResult = "재생 실패 — 서버 주소를 모릅니다"
+            return
+        }
+        // **실패를 말하지 않으면 "눌렀는데 아무 일도 없었다" 가 된다.**
+        // `open` 은 `Bool` 을 주는데 버리면 누른 사실조차 알 수 없다.
+        if NSWorkspace.shared.open(u) {
+            lastResult = "재생 — \(entry.name) (브라우저에서 재생됩니다)"
+        } else {
+            lastResult = "재생 실패 — \(entry.name) 을 브라우저로 열지 못했습니다"
+        }
+    }
+
+    /// **보관함 파일을 내려받는다** — `받기`.
+    ///
+    /// 브라우저가 **재생하지 못하는 형식**(`mkv` `avi` `dmg` …)에 ▶ 대신 이걸 띄운다.
+    /// 내려받으면 로컬 파일이 되고 그때는 **사용자 기본 프로그램(IINA) 이 열게 된다.**
+    /// 이 경로가 없으면 ▶ 가 없는 줄은 아무 방법도 없어서 막다른 길이 된다.
+    func downloadStorage(_ entry: StorageEntry) {
+        guard !entry.isDirectory else { return }
+        guard let s = server, let u = RelayClient.downloadURL(base: s.baseURL, path: entry.path) else {
+            lastResult = "받기 실패 — 서버 주소를 모릅니다"
+            return
+        }
+        if NSWorkspace.shared.open(u) {
+            lastResult = "받는 중 — \(entry.name)"
+        } else {
+            lastResult = "받기 실패 — \(entry.name) 을 브라우저로 열지 못했습니다"
+        }
+    }
+
     /// **한 단계 위로.** 루트면 아무 일도 없다.
     func storageUp() {
         guard !storagePath.isEmpty else { return }

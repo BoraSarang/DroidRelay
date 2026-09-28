@@ -237,4 +237,50 @@ public enum ActionRules {
     /// 서버 `JobAction` 이 `cancel` 이기 때문이다(웹 1180행이 같은 값을 보낸다).
     /// UI 는 **이 변환을 거치지 않고 라벨을 그대로 경로로 쓰면 안 된다.**
     public static func rawAction(_ a: JobAction) -> String { a.rawAction }
+
+    // MARK: - 보관함
+
+    /// **브라우저로 바로 재생할 수 있는 확장자.**
+    ///
+    /// ## 이 목록을 어떻게 정했나
+    ///
+    /// 두 목록의 **교집합**이다. 하나라도 빠져도 "누르면 안 된다" 가 된다.
+    /// 1. **서버가 Content-Type 으로 주는 것** (`StreamContentType.forName`, RelayServer 728행)
+    /// 2. **브라우저가 실제로 재생하는 것** — 이 Mac 의 http 기본 프로그램은 Safari 라
+    ///    Safari 기준으로 판정했다(Launch Services 실측: `http://…mp4 → Safari.app`).
+    ///
+    /// ```
+    /// mp4  → video/mp4        ✅ Safari·Chrome·Firefox
+    /// m4v  → video/mp4        ✅
+    /// mov  → video/quicktime  ✅
+    /// webm → video/webm       ✅
+    /// ─────────────────────────────────────────
+    /// mkv  → video/x-matroska ❌ 아무 브라우저도 못 한다
+    /// ogv  → video/ogg        ❌ Safari 가 못 한다
+    /// avi  → octet-stream     ❌
+    /// dmg  → octet-stream     ❌
+    /// ```
+    ///
+    /// ## 왜 이걸 안 넣었나 — 오디오
+    ///
+    /// 서버는 `mp3·m4a·wav·flac` 에 `audio/*` 를 주고 이것들은 **누구나 재생한다.**
+    /// 기술적으로 충분하지만 넣지 않았다. 요구가 "동영상" 이었고,
+    /// **검증하지 않은 동작을 버튼으로 내놓지 않기 위해** 제외했다.
+    /// 오디오까지 넓히려면 이 목록에 4개를 더하면 되고, 그때 검증하면 된다.
+    private static let browserPlayableVideo: Set<String> = ["mp4", "m4v", "mov", "webm"]
+
+    /// **이 파일에 ▶ (실시간 재생) 를 띄워야 하는가.**
+    ///
+    /// ## 왜 `false` 여야 하는가 — "누를 수 있는데 안 되는 버튼"
+    ///
+    /// `.mkv` 에 ▶ 를 띄우고 사용자가 눌렀다면: 브라우저가 검은 화면에
+    /// "이 형식은 재생할 수 없습니다" 를 낸다. 사용자는 **"앱이 고장났다"** 고 생각한다.
+    ///
+    /// 누를 수 있는데 안 되는 버튼은 **아예 없는 것보다 나쁘다**(앱에서 이미 한 번 겪은 종류).
+    /// 그래서 **재생 불가 형식에는 ▶ 를 띄우지 않고 `받기` 로 대체한다.**
+    /// 브라우저가 못 읽는 파일은 **받아야** 하고, 받으면 IINA 가 열어 준다.
+    public static func isBrowserPlayableVideo(_ fileName: String) -> Bool {
+        let ext = (fileName as NSString).pathExtension.lowercased()
+        return browserPlayableVideo.contains(ext)
+    }
 }
