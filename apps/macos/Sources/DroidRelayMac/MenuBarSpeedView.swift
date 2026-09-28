@@ -115,12 +115,25 @@ final class MenuBarSpeedView: NSView {
         layout()
     }
 
+    /// **오른쪽 정렬을 문자열에 명시해야 한다.**
+    ///
+    /// `NSTextField.alignment = .right` 만으로는 **안 먹는다**(실측: 왼쪽에 붙었다).
+    /// `attributedStringValue` 에 **문단 정렬이 없으면** 필드 정렬이 적용되지 않고
+    /// 문자열의 기본 정렬이 쓰인다. → `.paragraphStyle` 로 같이 지정한다.
+    private static let rightStyle: NSParagraphStyle = {
+        let st = NSMutableParagraphStyle()
+        st.alignment = .right
+        return st
+    }()
+
     private func set(_ f: NSTextField, _ v: String) {
         // 같은 값이면 건드리지 않는다 — 매초 대입하면 레이아웃이 흔들린다.
         if f.attributedStringValue.string != v {
-            f.attributedStringValue = NSAttributedString(
-                string: v, attributes: [.font: Self.valueFont, .foregroundColor: NSColor.labelColor]
-            )
+            f.attributedStringValue = NSAttributedString(string: v, attributes: [
+                .font: Self.valueFont,
+                .foregroundColor: NSColor.labelColor,
+                .paragraphStyle: Self.rightStyle,   // ← 이것이 실제 정렬을 결정한다
+            ])
         }
     }
 
@@ -143,9 +156,11 @@ final class MenuBarSpeedView: NSView {
         let col1X = arrowX + Self.arrowSize + Self.gap
         let cw = Self.colWidth
 
-        // 1줄: 앱 아이콘 + 위 방향. 2줄: 빈칸(아이콘 자리) + 아래 방향.
-        //     아이콘은 1줄에만 둔다 — 두 줄에 반복하면 앱 아이콘이 2개로 보인다.
-        appIcon.frame = NSRect(x: iconX, y: baseY + lineH, width: Self.iconSize, height: lineH)
+        // **아이콘은 두 줄을 걸친다**(사용자 지정). 1줄에만 두면 ↑ 줄에만 속한 것처럼
+        // 보여서, ↓ 줄이 "누군가의 것" 처럼 읽힌다.
+        // 프레임을 2줄 높이로 주고 `scaleProportionallyDown` 이 aspect 를 유지하므로
+        // 이미지는 가운데로 오면서 두 줄 전체를 대표한다.
+        appIcon.frame = NSRect(x: iconX, y: baseY, width: Self.iconSize, height: lineH * 2)
         upArrow.frame = NSRect(x: arrowX, y: baseY + lineH, width: Self.arrowSize, height: lineH)
         downArrow.frame = NSRect(x: arrowX, y: baseY, width: Self.arrowSize, height: lineH)
 
@@ -185,6 +200,11 @@ final class MenuBarSpeedView: NSView {
             "필요 높이   : \(Int(need)) (줄당 \(Int(lineH)) × 2) / 메뉴바 \(Int(h))",
             "잘림(높이)  : " + (need <= h + 0.5 ? "없음" : "**있음**"),
             "열 개수     : \(columns)  열폭 \(Int(Self.colWidth))pt (고정)",
+            "정렬 확인   : 필드=\(droidUp.alignment == .right ? "right" : "OTHER")"
+                + " 문단=\(Self.rightStyle.alignment == .right ? "right" : "OTHER")"
+                + " (둘 다 right 여야 오른쪽 정렬된다)",
+            "아이콘 프레임: h=\(Int(appIcon.frame.height)) (=\(Int(lineH * 2)) 이면 두 줄)"
+                + " y=\(Int(appIcon.frame.origin.y))",
             "업   Droid  : |\(droidUp.attributedStringValue.string)| \(fit(droidUp))",
             "다운 Droid  : |\(droidDown.attributedStringValue.string)| \(fit(droidDown))",
             "업   기기   : |\(devUp.attributedStringValue.string)| \(fit(devUp))",
