@@ -137,3 +137,51 @@ final class BrowserPlayableRuleTests: XCTestCase {
         }
     }
 }
+
+/// **재생 앱 선택 순서** — `MediaOpener.resolve`.
+///
+/// ## 왜 이걸 테스트로 두나
+///
+/// 처음엔 "http 는 브라우저만 연다" 고 단정했다. 근거가
+/// `urlForApplication(toOpen:)` 였는데, **그건 Launch Services 등록 목록이지
+/// 앱의 실제 능력이 아니었다.** IINA 를 직접 지정하니 실제로 재생됐다.
+///
+/// 그래서 **"무엇을 먼저 시도하는가" 를 시스템에 의존하지 않는 규칙으로 고정한다.**
+/// `lookup` 을 주입하므로 이 Mac 에 IINA 가 있어도 없어도 **같은 판단**을 검증한다.
+final class MediaOpenerTests: XCTestCase {
+
+    /// **IINA 가 설치돼 있으면 그걸 고른다** — 브라우저로 가지 않는다.
+    func test_IINA가_있으면_IINA를_고른다() {
+        let iina = URL(fileURLWithPath: "/Applications/IINA.app")
+        let got = MediaOpener.resolve { $0 == MediaOpener.iinaBundleID ? iina : nil }
+        XCTAssertEqual(got, iina, "설치돼 있으면 IINA 로 연다")
+    }
+
+    /// **IINA 가 없으면 `nil`** — 호출부가 이걸 보고 브라우저로 물러난다.
+    func test_IINA가_없으면_nil을_돌려준다() {
+        let got = MediaOpener.resolve { _ in nil }
+        XCTAssertNil(got, "설치 안 돼 있으면 폴백 신호가 필요하다")
+    }
+
+    /// **목록 순서가 우선순위다** — 앞의 것이 있으면 뒤를 보지 않는다.
+    func test_목록_순서가_우선순위다() {
+        let a = URL(fileURLWithPath: "/Applications/A.app")
+        let b = URL(fileURLWithPath: "/Applications/B.app")
+        let got = MediaOpener.resolve(bundleIDs: ["a", "b"]) { id in
+            id == "a" ? a : (id == "b" ? b : nil)
+        }
+        XCTAssertEqual(got, a, "앞쪽 번들이 있으면 그걸 고른다")
+    }
+
+    /// **뒤쪽에 있는 것만 있으면 그걸 고른다** — "첫 항목이 없으면 무조건 실패" 가 아니다.
+    func test_앞쪽이_없으면_뒤쪽을_고른다() {
+        let b = URL(fileURLWithPath: "/Applications/B.app")
+        let got = MediaOpener.resolve(bundleIDs: ["a", "b"]) { $0 == "b" ? b : nil }
+        XCTAssertEqual(got, b)
+    }
+
+    /// **기본 우선순위는 IINA 다** — 이 기기에 실제로 설치돼 있다.
+    func test_기본_우선순위는_IINA() {
+        XCTAssertEqual(MediaOpener.preferredBundleIDs.first, MediaOpener.iinaBundleID)
+    }
+}

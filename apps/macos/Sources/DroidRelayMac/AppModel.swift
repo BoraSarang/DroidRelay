@@ -661,34 +661,74 @@ final class AppModel {
         Task { await refresh() }
     }
 
-    /// **보관함 동영상을 브라우저로 실시간 재생한다** — `▶`.
+    /// **보관함 동영상을 재생한다** — `▶`. **IINA 가 있으면 IINA 로, 없으면 브라우저로.**
     ///
-    /// ## 왜 브라우저로 여는가 — "맥 기본 프로그램"의 함정
+    /// ## 왜 IINA 를 먼저 시도하나
     ///
-    /// "맥 기본 프로그램에 연결해서 바로 플레이" 라는 요구는 **http URL 에서는
-    /// QuickTime·IINA 로 불가능하다.** 실측(Launch Services):
-    /// ```
-    /// http://…/stream/x.mp4  →  Safari.app                ← 기본
-    /// ~/x.mp4 (로컬 파일)     →  /Applications/IINA.app    ← 사용자 기본 플레이어
-    /// http URL 을 열 수 있는 앱: Safari, Chrome, Edge, Whale, iTerm  (IINA 없음)
-    /// ```
-    /// IINA 가 받으려면 **4 GB 를 전부 내려받은 뒤** 로컬 파일로 열어야 한다 —
-    /// 그건 "실시간 플레이" 가 아니다. 그래서 재생은 브라우저로만 한다.
+    /// 처음에 "http URL 은 브라우저만 연다" 고 단정했다. 근거는
+    /// `urlForApplication(toOpen:)` 였는데, **그건 Launch Services 등록 목록이고
+    /// 앱의 실제 능력이 아니다.** IINA 를 http 로 직접 열면 **실제로 재생된다**
+    /// (서버 로그 `206 부분` + 창 제목이 파일명으로 바뀐다).
     ///
-    /// 이 엔드포인트는 `inline` + `Range(206)` 지원이라 **즉시 첫 화면이 뜨고
-    /// 탐색(seek)도 된다.** 저장 없이 재생된다.
+    /// IINA 를 쓰는 실질적 이유는 **버퍼링**이다. 이 기기의 총 대역폭은 ~600KB/s 라
+    /// 1080p 를 브라우저로 보면 계속 멈춘다. IINA 는 mpv 기반이라 **버퍼를 앞서 쌓는다.**
+    ///
+    /// ## 왜 `open(_:)` 대신 `open(_:withApplicationAt:)` 인가
+    ///
+    /// `open(u)` 는 **Launch Services 기본 처리자**로 간다. http 의 기본은 Safari 다.
+    /// IINA 를 쓰려면 앱 경로를 **명시적으로** 줘야 한다.
+    /// 반대로 **IINA 가 없는 다른 Mac** 에서는 이 길이 없으므로 **브라우저로 물러난다.**
+    ///
+    /// 어느 쪽으로 열었는지 배너에 **항상 말한다** — 어느 앱이 떴는지 모르면
+    /// "왜 브라우저가 떴지?" 를 되묻게 되고, 실제로 그런 일이 벌어진다.
     func playStream(_ entry: StorageEntry) {
         guard !entry.isDirectory else { return }
         guard let s = server, let u = RelayClient.streamURL(base: s.baseURL, path: entry.path) else {
             lastResult = "재생 실패 — 서버 주소를 모릅니다"
             return
         }
-        // **실패를 말하지 않으면 "눌렀는데 아무 일도 없었다" 가 된다.**
-        // `open` 은 `Bool` 을 주는데 버리면 누른 사실조차 알 수 없다.
+
+        // **설치된 재생 앱을 우선순위대로 찾는다** (없으면 브라우저 폴백).
+        let app = MediaOpener.resolve {
+            NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0)
+        }
+
+        guard let app else {
+            openInBrowser(u, entry: entry, reason: "재생 앱이 없어 브라우저로")
+            return
+        }
+
+        // **열기 결과를 버리지 않는다.** 성공/실패를 알지 못하면
+        // "누른 사실조차 알 수 없다" — 배너가 거짓말을 한다.
+        //
+        // 이 API 의 성공은 `NSRunningApplication` 다(`Bool` 이 아니다).
+        // 즉 **"띄워진 앱 인스턴스"** 를 돌려준다. 앱이 이미 떠 있으면 그것이 온다.
+        let cfg = NSWorkspace.OpenConfiguration()
+        cfg.activates = true
+        NSWorkspace.shared.open([u], withApplicationAt: app, configuration: cfg) { proc, err in
+            Task { @MainActor in
+                if proc != nil {
+                    let n = app.deletingPathExtension().lastPathComponent
+                    self.lastResult = "재생 — \(entry.name) (\(n))"
+                } else {
+                    // **지정한 앱이 안 열렸으면 브라우저로 다시 시도한다.**
+                    // "IINA 로 안 열려서 아무 일도 안 됐다" 로 끝내지 않는다.
+                    self.openInBrowser(u, entry: entry, reason: "\(app.lastPathComponent) 로 안 열려")
+                    if let e = err {
+                        NSLog("[DroidRelay] 재생 지정 앱 실패 %@: %@",
+                              app.lastPathComponent, e.localizedDescription)
+                    }
+                }
+            }
+        }
+    }
+
+    /// **브라우저(Launch Services 기본 처리자)로 연다** — 재생 폴백이 함께 쓴다.
+    private func openInBrowser(_ u: URL, entry: StorageEntry, reason: String) {
         if NSWorkspace.shared.open(u) {
-            lastResult = "재생 — \(entry.name) (브라우저에서 재생됩니다)"
+            lastResult = "\(reason) — \(entry.name)"
         } else {
-            lastResult = "재생 실패 — \(entry.name) 을 브라우저로 열지 못했습니다"
+            lastResult = "열기 실패 — \(entry.name)"
         }
     }
 
