@@ -12,8 +12,21 @@ BIN=$(swift build --show-bin-path)/DroidRelayMac
 
 "$BIN"                 # 메뉴바 앱 실행 (Dock 아이콘 없음)
 "$BIN" --diagnose      # 진단 — 서버 찾기·연결·SSE 생존을 확인하고 종료
-swift test             # 순수 로직 25건
+swift test             # 순수 로직 39건
 ```
+
+### 빌드 스크립트 (권장)
+
+```bash
+./build_and_run.sh debug macos     # swift build + .app 번들 → /Applications 설치
+./build_and_run.sh run macos       # 실행 (프로세스 생존 확인까지)
+./build_and_run.sh diagnose macos  # 서버 탐색 · SSE 생존
+./build_and_run.sh test macos      # swift test
+./build_and_run.sh uninstall macos # 제거
+```
+
+`.app` **번들**으로 설치해야 한다. `Info.plist` 의 `LSUIElement` 가 없으면
+Dock 아이콘이 뜨고(메뉴바 앱인데) macOS 가 경고를 띄운다.
 
 `--diagnose` 가 중요하다. 메뉴바 앱은 화면이 없으므로 실패 원인을 볼 수단이 이것뿐이다.
 M1 개발 중 **실제 버그 5건 중 3건이 이 경로에서만 드러났다.**
