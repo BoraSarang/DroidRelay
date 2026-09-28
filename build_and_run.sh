@@ -169,7 +169,25 @@ case "$CMD" in
   debug)
     if [ "$PLATFORM" = "macos" ]; then
       echo "🔨 swift build (release) 중…"
-      swift build -c release 2>&1 | tail -3
+      # ## 컴파일 실패를 절대 삼키지 않는다
+      #
+      # 원래 `swift build -c release 2>&1 | tail -3` 뿐이었다. 파이프의 종료 코드는
+      # **`tail` 의 것**이라 빌드가 실패해도 0 이고, 그 다음 `BIN` 이 **옛 바이너리**를
+      # 가리켜서 그대로 설치·실행됐다.
+      #
+      # 실측: `Self.` 누락으로 컴파일이 실패했는데도 스크립트가 "✅ 설치 완료" 를
+      # 출력해서, 옛 코드가 계속 실행됐다. **한참을 고치면서 아무 변화가 없는 이유**가
+      # 이것이었다. 화면/레이아웃 문제가 아니라 빌드가 안 반영된 것이었다.
+      if ! swift build -c release 2>&1 | tail -3; then
+        echo "❌ 컴파일 실패 — 설치·실행하지 않습니다 (옛 바이너리를 띄우면 안 된다)"
+        exit 1
+      fi
+      # 파이프로는 종료 코드를 못 받으므로 직접 한 번 더 확인한다.
+      if ! swift build -c release >/dev/null 2>&1; then
+        echo "❌ 컴파일 실패 — 설치·실행하지 않습니다"
+        swift build -c release 2>&1 | rg "^.*error:" | head -5
+        exit 1
+      fi
       BIN=$(swift build -c release --show-bin-path)/$MACOS_TARGET
       if [ ! -x "$BIN" ]; then echo "❌ 바이너리 생성 실패: $BIN"; exit 1; fi
       echo "📦 .app 번들 생성 중…"
