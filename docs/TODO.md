@@ -619,6 +619,9 @@ T-001~T-008 전부 완료 (커밋 7574486).
 | M-09 | **PR 생성** — `feat/macos-menubar-m1` → main — **PR #17 머지 완료** (`e05d0d4`) | ✅ |
 | M-13 | **M3 — 독립 창 + 탭바** — 팝오버에 3탭(다운로드/토렌트/보관함) + 탭별 진행 배지 · `Torrent`/`StorageEntry` 모델(순수 파싱) · 탭별 통계 · `torrentControl`/`torrentDelete` · `--diagnose` 확장. 테스트 25 → **39건** | ✅ |
 | M-10 | 목업 리뷰 4건 반영 (팝오버 폭 · 통계 행 · 팔레트 단계 · 탭바) | ⏸ |
+| M-14 | **팝오버 속도 그래프** — `SpeedGraph`(SwiftUI Canvas, 4계열 공유 Y축) + `AppModel.graphSeries` 시간축 균등 재구성 · 출처별 이력 분리(Droid ⊇ 기기이므로 **같은 축**) | ✅ |
+| M-14 | **팝오버가 아예 안 뜨던 회귀 2건** — ① `statusItem.view` 전환 후 `statusItem.button` 이 nil → 팝오버 위치 `guard` 에서 조용히 return ② `contentSize` 와 `contentViewController` **충돌** → 그래프를 넣자 팝오버가 안 뜸 | ✅ |
+| M-14 | **진단 추가** `--popover-check` (팝오버 표시 여부) — diagnose 는 `StatusItem` 을 안 만들어서 팝오버를 검증할 수 없었다 | ✅ |
 | M-11 | 탐색 상태 표시 추가 여부 확정 (`🔌 10.38.120.211 자동 발견 ✓`) | ⏸ |
 | M-12 | M2 — 팔레트 (Carbon 핫키 `⌘⇧D` · `.nonactivatingPanel` · IME 입력 소스 캡처) | ⏸ |
 | M-13 | M3 — 독립 창 + 탭바 | ✅ |

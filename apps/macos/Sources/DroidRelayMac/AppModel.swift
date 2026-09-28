@@ -51,8 +51,43 @@ final class AppModel {
     private var lastDeviceTraffic: (t: DeviceTraffic, at: Date)?
     /// 서버가 기기 카운터를 지원하는가 — 스위치를 이 값으로 켜고 끈다.
     var deviceSpeedAvailable = false
-    /// 그래프용 이력 — 1초 주기로 스스로 채운다
-    let history = SpeedHistory(capacity: 300)
+    /// **출처별 이력** — 그래프의 4계열이 각각 이걸 쓴다.
+    ///
+    /// **출처마다 따로 둬야 한다.** 하나로 공유하면 Droid 와 기기 샘플이 같은 배열에
+    /// 번갈아 들어가서 **선이 뒤섞여** 어느 출처가 움직였는지 알 수 없다.
+    ///
+    /// **`@ObservationIgnored` 필수** — 이건 그래프가 읽는 **저장소**일 뿐 화면 상태가
+    /// 아니다. 관찰 대상이면 `push()` 때마다 뷰가 리로드돼 1초마다 그래프가 새로 그려진다.
+    @ObservationIgnored private var histories: [SpeedSource: SpeedHistory] = [
+        .droid: SpeedHistory(capacity: 300), .device: SpeedHistory(capacity: 300)
+    ]
+    /// 그래프 표시 창(초) — 메뉴바 속도와 같은 간격 기준
+    private static let historySpan: TimeInterval = 60
+
+    /// 출처의 이력 — **읽기 전용.** 새 항목을 만들지 않는다.
+    ///
+    /// **여기서 지연 생성을 하면 안 된다(실제 사고).** 이 함수가 `body` 평가 중에
+    /// 불리면 **뷰 갱신 중에 상태를 변형**하는 것이 되어 SwiftUI 가 예기치 않게
+    /// 동작한다 — 실제로 팝오버가 뜨지 않게 됐다. 생성은 `init` 에서 끝내 둔다.
+    func history(for source: SpeedSource) -> SpeedHistory {
+        histories[source] ?? SpeedHistory(capacity: 300)
+    }
+
+    /// 그래프가 그릴 최근 N 초치 (샘플).
+    ///
+    /// **배열 전체를 주지 않는 이유** — 최대 300샘플을 그대로 그리면 화면 폭보다
+    /// 촘촘해져 aliasing 이 생기고, 1초 샘플링이 잠시 멈췄다가 복구되면 x 간격이
+    /// 왜곡된다(과거가 오른쪽에 몰린다). **시간 축을 균등하게** 재구성한다.
+    func graphSeries(_ source: SpeedSource, down: Bool, now: Date = Date()) -> [Int] {
+        let h = history(for: source)
+        let raw = h.series(down)
+        guard !raw.isEmpty else { return [] }
+        let points = Int(Self.historySpan)             // 60점
+        guard raw.count >= 2 else { return raw }
+        // 최근 points 개만 취하고, 부족하면 앞을 0 으로 채워 왼쪽(=과거) 부터 그린다.
+        let tail = raw.suffix(points)
+        return Array(repeating: 0, count: max(0, points - tail.count)) + tail
+    }
     /// 속도 샘플러 — 서버 tick(가변 간격)으로 부하를 늘리지 않고 1초에 한 번만 뽑는다
     private var speedTask: Task<Void, Never>?
     var storageTotal: Int = 0
@@ -125,7 +160,7 @@ final class AppModel {
         let tDown = active.reduce(0) { $0 + $1.downloadBps }
         let tUp = active.reduce(0) { $0 + $1.uploadBps }
         droidSpeed = SpeedReading(downBps: jobsDown + tDown, upBps: tUp)
-        history.push(droidSpeed)
+        history(for: .droid).push(droidSpeed)
     }
 
     // MARK: - 탐색
@@ -283,7 +318,7 @@ final class AppModel {
             previous: lastDeviceTraffic?.t, current: cur, elapsed: dt
         )
         lastDeviceTraffic = (cur, now)
-        history.push(deviceSpeed)
+        history(for: .device).push(deviceSpeed)
     }
 
     func disconnect() {

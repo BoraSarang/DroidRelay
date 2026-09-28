@@ -13,6 +13,27 @@ struct PopoverView: View {
         VStack(spacing: 0) {
             header
             Divider().opacity(0.5)
+            // ── 속도 그래프 ──
+            // 메뉴바는 2줄 요약이고 **자세한 추이는 여기.** 그래프가 없으면 메뉴바가
+            // 숫자만 반복해서 보여주는 셈이 된다.
+            // DR_NO_GRAPH 로 그래프를 끄면 팝오버가 뜨는지 비교할 수 있다.
+            if !model.visibleSpeedSources.isEmpty && ProcessInfo.processInfo.environment["DR_NO_GRAPH"] == nil {
+                SpeedGraph(
+                    sources: model.visibleSpeedSources,
+                    droidDown: model.graphSeries(.droid, down: true),
+                    droidUp: model.graphSeries(.droid, down: false),
+                    deviceDown: model.deviceSpeedAvailable
+                        ? model.graphSeries(.device, down: true) : [],
+                    deviceUp: model.deviceSpeedAvailable
+                        ? model.graphSeries(.device, down: false) : []
+                )
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                // **폭을 명시한다.** Canvas 는 제안된 크기를 그대로 쓰는데, VStack 안에서
+                // 제안 폭이 0 이면 그래프가 0 폭이 되고 팝오버 전체가 사라진다.
+                .frame(width: 328)
+                Divider().opacity(0.5)
+            }
             tabBar
             Divider().opacity(0.5)
             content
