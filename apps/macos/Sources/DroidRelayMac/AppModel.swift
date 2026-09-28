@@ -22,6 +22,23 @@ private enum Prefs {
     static func setShowFinishedJobs(_ v: Bool) {
         UserDefaults.standard.set(v, forKey: finishedKey)
     }
+
+    /// **SSE 안전망 폴링 주기(초)** — 설정 화면에서 고른다.
+    static let pollKey = "backupPollSeconds"
+
+    /// **저장값을 읽되 허용 범위로 눌러서 준다.**
+    ///
+    /// 왜 클램프하냐면 — `UserDefaults` 는 손으로 편집할 수 있다.
+    /// **화면에서 고를 수 없는 값이 저장되어 있더라도 앱이 폭발하지 않아야 한다.**
+    static var backupPollSeconds: Int {
+        let raw = UserDefaults.standard.object(forKey: pollKey) == nil
+            ? BackupPoll.defaultSeconds
+            : UserDefaults.standard.integer(forKey: pollKey)
+        return BackupPoll.clamp(raw)
+    }
+    static func setBackupPollSeconds(_ v: Int) {
+        UserDefaults.standard.set(BackupPoll.clamp(v), forKey: pollKey)
+    }
 }
 
 /// 앱 전역 상태. @Observable 이므로 view 가 자동으로 갱신된다.
@@ -391,6 +408,27 @@ final class AppModel {
         }
     }
 
+    /// **SSE 안전망 폴링 주기(초)** — 설정 화면에서 고른다.
+    ///
+    /// ## 왜 바꾸면 바로 반영되나
+    ///
+    /// 이 값은 `subscribe()` 안에서 이미 돌고 있는 루프의 **슬립 시간**이다.
+    /// 저장만 하고 끝내면 **"설정을 바꿨는데 아무 일도 없다"** 가 되는데,
+    /// 그건 사용자가 화면을 닫았다 다시 열어야만 바뀐다 — 발견하기 어렵다.
+    /// 그래서 바꾸는 즉시 **루프를 새로 시작**한다.
+    ///
+    /// **1초 속도 샘플링은 건드리지 않는다.** 그건 안전망이 아니라 그래프용이라
+    /// `BackupPoll` 에 설명이 있다.
+    var backupPollSeconds = Prefs.backupPollSeconds {
+        didSet {
+            let v = BackupPoll.clamp(backupPollSeconds)
+            // **클램프가 실제로 값을 바꾼 경우에도 저장은 정상값으로 한다.**
+            if v != backupPollSeconds { backupPollSeconds = v; return }
+            Prefs.setBackupPollSeconds(v)
+            restartBackupPoll()
+        }
+    }
+
     /// **실제로 그릴 수 있는 출처** — 설정이 켠 것 중 **서버가 값을 주는 것만.**
     ///
     /// `speedSetting.sources` 를 그대로 쓰면 안 된다. 기기 속도는 서버가 아직
@@ -661,6 +699,95 @@ final class AppModel {
         Task { await refresh() }
     }
 
+    /// **보관함 동영상을 재생한다** — `▶`. **IINA 가 있으면 IINA 로, 없으면 브라우저로.**
+    ///
+    /// ## 왜 IINA 를 먼저 시도하나
+    ///
+    /// 처음에 "http URL 은 브라우저만 연다" 고 단정했다. 근거는
+    /// `urlForApplication(toOpen:)` 였는데, **그건 Launch Services 등록 목록이고
+    /// 앱의 실제 능력이 아니다.** IINA 를 http 로 직접 열면 **실제로 재생된다**
+    /// (서버 로그 `206 부분` + 창 제목이 파일명으로 바뀐다).
+    ///
+    /// IINA 를 쓰는 실질적 이유는 **버퍼링**이다. 이 기기의 총 대역폭은 ~600KB/s 라
+    /// 1080p 를 브라우저로 보면 계속 멈춘다. IINA 는 mpv 기반이라 **버퍼를 앞서 쌓는다.**
+    ///
+    /// ## 왜 `open(_:)` 대신 `open(_:withApplicationAt:)` 인가
+    ///
+    /// `open(u)` 는 **Launch Services 기본 처리자**로 간다. http 의 기본은 Safari 다.
+    /// IINA 를 쓰려면 앱 경로를 **명시적으로** 줘야 한다.
+    /// 반대로 **IINA 가 없는 다른 Mac** 에서는 이 길이 없으므로 **브라우저로 물러난다.**
+    ///
+    /// 어느 쪽으로 열었는지 배너에 **항상 말한다** — 어느 앱이 떴는지 모르면
+    /// "왜 브라우저가 떴지?" 를 되묻게 되고, 실제로 그런 일이 벌어진다.
+    func playStream(_ entry: StorageEntry) {
+        guard !entry.isDirectory else { return }
+        guard let s = server, let u = RelayClient.streamURL(base: s.baseURL, path: entry.path) else {
+            lastResult = "재생 실패 — 서버 주소를 모릅니다"
+            return
+        }
+
+        // **설치된 재생 앱을 우선순위대로 찾는다** (없으면 브라우저 폴백).
+        let app = MediaOpener.resolve {
+            NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0)
+        }
+
+        guard let app else {
+            openInBrowser(u, entry: entry, reason: "재생 앱이 없어 브라우저로")
+            return
+        }
+
+        // **열기 결과를 버리지 않는다.** 성공/실패를 알지 못하면
+        // "누른 사실조차 알 수 없다" — 배너가 거짓말을 한다.
+        //
+        // 이 API 의 성공은 `NSRunningApplication` 다(`Bool` 이 아니다).
+        // 즉 **"띄워진 앱 인스턴스"** 를 돌려준다. 앱이 이미 떠 있으면 그것이 온다.
+        let cfg = NSWorkspace.OpenConfiguration()
+        cfg.activates = true
+        NSWorkspace.shared.open([u], withApplicationAt: app, configuration: cfg) { proc, err in
+            Task { @MainActor in
+                if proc != nil {
+                    let n = app.deletingPathExtension().lastPathComponent
+                    self.lastResult = "재생 — \(entry.name) (\(n))"
+                } else {
+                    // **지정한 앱이 안 열렸으면 브라우저로 다시 시도한다.**
+                    // "IINA 로 안 열려서 아무 일도 안 됐다" 로 끝내지 않는다.
+                    self.openInBrowser(u, entry: entry, reason: "\(app.lastPathComponent) 로 안 열려")
+                    if let e = err {
+                        NSLog("[DroidRelay] 재생 지정 앱 실패 %@: %@",
+                              app.lastPathComponent, e.localizedDescription)
+                    }
+                }
+            }
+        }
+    }
+
+    /// **브라우저(Launch Services 기본 처리자)로 연다** — 재생 폴백이 함께 쓴다.
+    private func openInBrowser(_ u: URL, entry: StorageEntry, reason: String) {
+        if NSWorkspace.shared.open(u) {
+            lastResult = "\(reason) — \(entry.name)"
+        } else {
+            lastResult = "열기 실패 — \(entry.name)"
+        }
+    }
+
+    /// **보관함 파일을 내려받는다** — `받기`.
+    ///
+    /// 브라우저가 **재생하지 못하는 형식**(`mkv` `avi` `dmg` …)에 ▶ 대신 이걸 띄운다.
+    /// 내려받으면 로컬 파일이 되고 그때는 **사용자 기본 프로그램(IINA) 이 열게 된다.**
+    /// 이 경로가 없으면 ▶ 가 없는 줄은 아무 방법도 없어서 막다른 길이 된다.
+    func downloadStorage(_ entry: StorageEntry) {
+        guard !entry.isDirectory else { return }
+        guard let s = server, let u = RelayClient.downloadURL(base: s.baseURL, path: entry.path) else {
+            lastResult = "받기 실패 — 서버 주소를 모릅니다"
+            return
+        }
+        if NSWorkspace.shared.open(u) {
+            lastResult = "받는 중 — \(entry.name)"
+        } else {
+            lastResult = "받기 실패 — \(entry.name) 을 브라우저로 열지 못했습니다"
+        }
+    }
+
     /// **한 단계 위로.** 루트면 아무 일도 없다.
     func storageUp() {
         guard !storagePath.isEmpty else { return }
@@ -778,13 +905,24 @@ final class AppModel {
             await self?.refresh()
         } }
         startSpeedSampling()
-        // SSE 가 조용히 죽어도 진행률이 멈추면 안 된다 — 10초 백업 폴링
-        // (웹 대시보드가 쓰는 것과 동일한 계약)
+        restartBackupPoll()
+    }
+
+    /// **SSE 안전망 폴링을 (재)시작한다** — 주기는 `backupPollSeconds`.
+    ///
+    /// ## 왜 따로 떼어냈나
+    ///
+    /// `subscribe()` 에서 인라인으로 두면 **설정을 바꿀 때 재사용할 수가 없다.**
+    /// 설정값이 바뀔 때마다 SSE 와 속도 샘플러까지 전부 다시 걸 필요는 없다 —
+    /// **안전망 하나만 다시 건다.** 그게 이 메서드의 존재 이유다.
+    private func restartBackupPoll() {
         pollTask?.cancel()
+        let seconds = BackupPoll.clamp(backupPollSeconds)
         pollTask = Task {
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(10))
-                if !Task.isCancelled { await refresh() }
+                try? await Task.sleep(for: .seconds(seconds))
+                if Task.isCancelled { break }
+                await refresh()
             }
         }
     }

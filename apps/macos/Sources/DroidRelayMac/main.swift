@@ -128,6 +128,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             return
         }
+        if CommandLine.arguments.contains("--ui-settings") {
+            // **설정 창을 곧장 열어 둔다** — `--ui-hold` 의 설정 판.
+            //
+            // 왜 필요한가: 설정은 이제 **별도 NSWindow** 다. 팝오버와 달리
+            // "메뉴바를 눌러서 팝오버를 열고 그 안에서 설정을 눌러야" 도달했는데,
+            // 그 경로는 **사람 손이 두 번 필요**하고 **AX 로는 메뉴바를 못 건드린다.**
+            // 플래그가 없으면 이 창은 눈으로만 검증된다 — 그러면 "뜨나 안 뜨나" 를
+            // 추측으로만 말하게 되고, 실제로 그렇게 실패했다.
+            let m = AppModel(storedAddress: UserDefaults.standard.string(forKey: "serverAddress"))
+            let c = StatusItemController(model: m)
+            model = m; controller = c
+            c.install()
+            Task {
+                await m.connect()
+                try? await Task.sleep(for: .seconds(1.2))
+                await MainActor.run { c.showSettingsWindow() }
+                // 종료하지 않는다 — 덤프/타이핑 확인이 끝날 때까지 열린 상태를 유지한다
+            }
+            return
+        }
         if CommandLine.arguments.contains("--ui-dump") {
             let m = AppModel(storedAddress: UserDefaults.standard.string(forKey: "serverAddress"))
             let c = StatusItemController(model: m)

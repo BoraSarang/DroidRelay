@@ -428,6 +428,8 @@ struct PopoverView: View {
                     ForEach(model.storage) { e in
                         StorageRow(entry: e,
                                    onOpen: { model.storageEnter(e) },
+                                   onPlay: { model.playStream(e) },
+                                   onDownload: { model.downloadStorage(e) },
                                    onRename: { model.askConfirm(.init(kind: .rename(e))) },
                                    onMove: { model.askConfirm(.init(kind: .move(e))) },
                                    onTrash: { model.askStorageTrash(e) })
@@ -1020,22 +1022,33 @@ struct TorrentRow: View {
 ///
 /// **행을 누르면 폴더면 내려가고, 오른쪽 메뉴에서 조작한다.**
 ///
-/// ## 왜 행 전체를 버튼으로 두지 않나
+/// ## 왜 조작은 행 전체에 걸지 않나
 ///
 /// 352pt 폭에 이름·크기·날짜·버튼 3개를 다 넣으면 이름이 두 글자만 보인다.
 /// 그리고 **파괴 동작(휴지통)을 한 번의 클릭으로 단추에 걸어두면 안 된다** —
 /// 사고의 대가가 크다. 그래서 조작은 메뉴로 숨기고, `누르면 들어가기` 만 직접 누른다.
+///
+/// **단, 이름 영역은 좁혀 두지 않았다** — 사용자가 누르는 곳이 반응 없는 곳이 되면
+/// 그게 더 큰 문제다. 이름·아이콘·크기 어느 쪽을 눌러도 폴더로 들어간다.
 struct StorageRow: View {
     let entry: StorageEntry
     /// **폴더를 열기** — 파일이면 호출되지 않는다.
     let onOpen: () -> Void
+    /// **브라우저로 실시간 재생** — `▶` 가 뜰 때만 눌린다.
+    let onPlay: () -> Void
+    /// **Mac 으로 내려받기** — `받기` 가 뜰 때만 눌린다.
+    let onDownload: () -> Void
     let onRename: () -> Void
     let onMove: () -> Void
     let onTrash: () -> Void
 
-    var body: some View {
+    /// **브라우저가 실제로 재생할 수 있는 파일인가** — 서버 타입 ∩ Safari 지원.
+    private var playable: Bool { ActionRules.isBrowserPlayableVideo(entry.name) }
+
+    /// 아이콘 + 이름 + 크기/날짜
+    private var entryLabel: some View {
         HStack(spacing: 7) {
-            Image(systemName: entry.isDirectory ? "folder.fill" : "doc.fill")
+            Image(systemName: entry.isDirectory ? "folder.fill" : mediaIcon)
                 .font(.system(size: 10.5))
                 .foregroundStyle(entry.isDirectory ? Color.accentColor : Color.secondary)
             VStack(alignment: .leading, spacing: 1) {
@@ -1050,6 +1063,42 @@ struct StorageRow: View {
                 .foregroundStyle(.tertiary)
             }
             Spacer(minLength: 0)
+        }
+        .contentShape(Rectangle())
+    }
+
+    /// **재생되는 파일은 영화 아이콘** — ▶ 가 있는 줄임을 모양도로 알린다.
+    private var mediaIcon: String { playable ? "play.rectangle.fill" : "doc.fill" }
+
+    var body: some View {
+        HStack(spacing: 7) {
+            // **폴더는 이름·크기·날짜 어느 쪽을 눌러도 들어간다.**
+            //
+            // ## 왜 이름을 버튼으로 만들었나
+            //
+            // 원래는 오른쪽의 작은 `▸` **하나만** 버튼이었다. 폴더 이름과 아이콘은
+            // 그냥 글자였다. 그래서 **사용자가 자연스럽게 누르는 곳(폴더 이름)이
+            // 아무 일도 안 일어나는** 상태가 되었다.
+            //
+            // 실제로 확인했다 — 폴더 이름은 `AXStaticText` 로 노출되고
+            // `▸` 만 `AXButton` 이었다. "누르면 들어가는데 왜 안 들어가나" 의 정체.
+            //
+            // 파일 탐색기의 관습대로 **이름을 누르면 들어간다** 를 지킨다.
+            //
+            // ## 왜 파일의 이름은 버튼이 아닌가
+            //
+            // 처음엔 `.disabled(!isDirectory)` 로 파일의 이름도 버튼으로 뒀다.
+            // 그러면 **누를 수 있어 보이면서 실제로는 못 누르는** 줄이
+            // AX 에 "[비활성]" 으로 남는다. 누르는 데 실패하는 버튼은
+            // 없는 것보다 나쁘다. 그래서 **파일의 이름은 글자 그대로** 둔다 —
+            // 동작은 오른쪽 `▶`/`받기` 가 맡는다.
+            if entry.isDirectory {
+                Button(action: onOpen) { entryLabel }
+                    .buttonStyle(.plain)
+                    .help("열기")
+            } else {
+                entryLabel
+            }
 
             if entry.isDirectory {
                 // **폴더는 열기가 유일한 기본 동작.** 모양(▸)도 같이 줘서
@@ -1061,9 +1110,73 @@ struct StorageRow: View {
                 }
                 .buttonStyle(.plain)
                 .help("열기")
+            } else if playable {
+                // **브라우저가 진짜 재생하는 파일에만 ▶ 를 띄운다.**
+                //
+                // `.mkv` `.avi` `.dmg` 에 ▶ 를 주면 사용자가 눌렀을 때
+                // 브라우저가 **검은 화면**을 낸다 → "앱이 고장났다" 는 인상.
+                // 누를 수 있는데 안 되는 버튼은 없는 것보다 나쁘다.
+                Button(action: onPlay) {
+                    Image(systemName: "play.fill")
+                        .font(.system(size: 9.5))
+                        .foregroundStyle(Color.accentColor)
+                }
+                .buttonStyle(.plain)
+                .help("재생 — 브라우저에서 실시간으로 봅니다")
+
+                // **재생할 수 있는 파일도 반드시 받아야 할 수 있다.**
+                //
+                // ## 왜 ▶ 만으로는 부족했나
+                //
+                // 처음엔 ▶ 만 뒀다. 그랬더니 **"보관함에 있는 동영상을 내 Mac 에
+                // 가져올 수 없다"** 는 말이 성립했다. 스트리밍은 보기만 가능하고
+                // 파일은 서버 안에 남는다. 오프라인으로 보존할 방법이 없다.
+                //
+                // 더 어이없는 건, **재생 못하는 `.mkv` 에는 `받기` 가 있는데
+                // 재생하는 `.mp4` 에는 없다는** 반대 상태가 됐다.
+                // 잘 되는 파일만 못 받는 셈이다.
+                //
+                // → **재생과 받기를 나란히 둔다.** 둘 다 "가져오기" 라 같은 급의 동작이다.
+                Button(action: onDownload) {
+                    Text("받기")
+                        .font(.system(size: 10.5, weight: .medium))
+                        .foregroundStyle(Color.accentColor)
+                }
+                .buttonStyle(.plain)
+                .help("Mac 으로 내려받기")
+            } else {
+                // **재생 못 하는 형식은 ▶ 대신 받기만 둔다.**
+                //
+                // 내려받으면 로컬 파일이 되고 **사용자 기본 프로그램(IINA) 이 열어 준다.**
+                // 막다른 길이 없도록 — ▶ 는 진짜 재생되는 파일에만.
+                Button(action: onDownload) {
+                    Text("받기")
+                        .font(.system(size: 10.5, weight: .medium))
+                        .foregroundStyle(Color.accentColor)
+                }
+                .buttonStyle(.plain)
+                .help("Mac 으로 내려받기")
             }
 
             Menu {
+                // **가져오기(재생·받기)를 맨 위에 둔다.**
+                //
+                // 이 메뉴는 "조작" 이라는 한마디로 이름이 붙어 있고, 원래는
+                // 이름 변경 / 이동 / 휴지통 — **전부 보관함 안을 고치는 동작**이었다.
+                // 여기에 재생과 받기를 아래에 붙이면, **무해한 "가져오기" 가
+                // 가장 위험한 "휴지통" 바로 아래에 나란히 놓인다.** 순서가 틀렸다.
+                //
+                // 그리고 재생 가능한 파일은 행에 ▶ 가 있어서 **메뉴의 재생은 중복**이다.
+                // 중복은 의도했다 — **▶ 를 눌러 재생만 하고, 저장은 못 하는 상태를
+                // 만들지 않으려는 것**이 목적이다. 동영상도 `받기` 로 Mac 에 저장돼야 한다.
+                //
+                // 재생 불가 형식은 행에 `받기` 가 이미 있으므로 메뉴에 다시 넣지 않는다.
+                if playable {
+                    Button { onPlay() } label: { Label("재생", systemImage: "play.fill") }
+                    Button { onDownload() } label: { Label("받기", systemImage: "arrow.down.circle") }
+                    Divider()
+                }
+
                 Button { onRename() } label: { Label("이름 변경", systemImage: "pencil") }
                 Button { onMove() } label: { Label("이동", systemImage: "folder") }
                 Divider()

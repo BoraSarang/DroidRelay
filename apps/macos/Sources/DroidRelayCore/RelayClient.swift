@@ -33,6 +33,67 @@ public struct RelayClient: Sendable {
         c.path = "/file/\(id)"
         return c.url
     }
+
+    // MARK: - 보관함 파일 주소
+
+    /// **경로 조각 하나만 인코딩할 때 남겨둘 문자** — `/` `%` `?` `#` 는 뺀다.
+    ///
+    /// `CharacterSet.urlPathAllowed` 에는 `/` 가 **들어 있다.** 그대로 쓰면
+    /// 하위 폴더 구분자가 인코딩되어 `M%2Fa.mp4` 가 되고, 서버는 그것을
+    /// "폴더가 아니라 이름에 슬래시가 든 파일" 로 읽어 404 를 준다.
+    ///
+    /// `%` 를 빼는 이유 — 이미 인코딩된 문자열에 다시 걸면 `%` 가 `%25` 가 되어
+    /// 이중 인코딩이 된다. `path` 는 서버에서 받은 원본이므로 아직 인코딩 전이다.
+    private static let pathSegmentAllowed: CharacterSet = {
+        var s = CharacterSet.urlPathAllowed
+        s.remove(charactersIn: "/%?#")
+        return s
+    }()
+
+    /// **보관함 경로를 URL 조각들로 조립한다** — `/` 는 구분자로 남기고 각 조각만 인코딩.
+    ///
+    /// 실측으로 두 방식을 다 확인했다:
+    /// - 슬래시 리터럴 + 조각 인코딩 → `M/4k688.com@T38-072.mp4` **200**
+    /// - 조각 안에서 `/` 까지 인코딩 → **404**
+    private static func encodedPath(_ path: String) -> String {
+        path.split(separator: "/", omittingEmptySubsequences: true)
+            .map { $0.addingPercentEncoding(withAllowedCharacters: pathSegmentAllowed) ?? String($0) }
+            .joined(separator: "/")
+    }
+
+    /// **보관함 동영상을 브라우저로 실시간 재생할 주소** — `GET /stream/{경로}`.
+    ///
+    /// ## 왜 브라우저로 여는가
+    ///
+    /// "맥 기본 프로그램으로 열어" 라는 요구를 충돌 없이 만족시키는 유일한 길이다.
+    /// 실측(Launch Services):
+    /// ```
+    /// http://…/stream/x.mp4  →  Safari.app            ← 기본
+    /// ~/x.mp4 (로컬 파일)     →  /Applications/IINA.app  ← 사용자 기본 플레이어
+    /// ```
+    /// **IINA·QuickTime 은 http URL 을 열 수 없다**(IINA 는 후보 목록에 아예 없다).
+    /// 그래서 "기본 프로그램"은 **URL 이냐 파일이냐에 따라 갈리고**,
+    /// http 로는 **브라우저만 가능하다.** IINA 로 내려받으려면 전체를 받아야 한다.
+    ///
+    /// 이 엔드포인트는 `Content-Disposition: inline` + **`Range`(206) 지원**이라
+    /// 브라우저에서 **탐색(seek)** 이 되고, 언제든 그 자리에서 멈출 수 있다.
+    /// (실측: `bytes=0-1023` → `206 Partial Content`)
+    public static func streamURL(base: URL, path: String) -> URL? {
+        guard var c = URLComponents(url: base, resolvingAgainstBaseURL: false) else { return nil }
+        c.path = "/stream/\(encodedPath(path))"
+        return c.url
+    }
+
+    /// **보관함 파일을 내려받는 주소** — `GET /dl-file/{경로}`.
+    ///
+    /// `Content-Disposition: attachment` 라 **저장**이 되고 재생은 안 된다.
+    /// 브라우저가 못 재생하는 형식(`.mkv` `.avi` `.dmg` …)은 이쪽이 유일한 길이다.
+    public static func downloadURL(base: URL, path: String) -> URL? {
+        guard var c = URLComponents(url: base, resolvingAgainstBaseURL: false) else { return nil }
+        c.path = "/dl-file/\(encodedPath(path))"
+        return c.url
+    }
+
     private let session: URLSession
 
     public init(base: URL, session: URLSession = .shared) {
