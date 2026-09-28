@@ -43,6 +43,16 @@ final class AppModel {
     var torrents: [Torrent] = []
     var storage: [StorageEntry] = []
     var storageFree: Int = 0
+    /// Droid(앱) 속도 — 잡+토렌트를 서버가 준 값에서 합산한다(웹 대시보드와 동일 계산)
+    var droidSpeed: SpeedReading = .init(downBps: 0, upBps: 0)
+    /// 기기(폰 전체) 속도 — 서버가 `TrafficStats` 로 잰다. 없으면 0 유지.
+    var deviceSpeed: SpeedReading = .init(downBps: 0, upBps: 0)
+    /// 그래프용 이력 — 1초 주기로 스스로 채운다
+    let history = SpeedHistory(capacity: 300)
+    /// 속도 샘플러 — 서버 tick(가변 간격)으로 부하를 늘리지 않고 1초에 한 번만 뽑는다
+    private var speedTask: Task<Void, Never>?
+    /// 기기 속도를 제공할지 여부 — 서버에 엔드포인트가 생기기 전엔 항상 false
+    var deviceSpeedAvailable = false
     var storageTotal: Int = 0
     var lastUpdate: Date?
 
@@ -70,6 +80,28 @@ final class AppModel {
     /// 배지는 **탭과 무관하게** 전체 활성 수를 센다 — 어느 탭에 있든 진행 중임을 알린다.
     var activeTorrents: [Torrent] { torrents.filter { $0.isActive } }
     var badgeCount: Int { activeJobs.count + activeTorrents.count }
+
+    /// 메뉴바에 표시할 출처 — 설정으로 고른다
+    var speedSetting = SpeedDisplaySetting.default {
+        didSet { speedSetting.save() }
+    }
+
+    func speed(for source: SpeedSource) -> SpeedReading {
+        switch source {
+        case .droid: return droidSpeed
+        case .device: return deviceSpeed
+        }
+    }
+
+    /// Droid 속도 = HTTP 잡(다운로드만) + 활성 토렌트(다운/업)
+    private func recomputeDroidSpeed() {
+        let jobsDown = jobs.filter { $0.state == "RUNNING" }.reduce(0) { $0 + $1.speedBps }
+        let active = torrents.filter { $0.isActive }
+        let tDown = active.reduce(0) { $0 + $1.downloadBps }
+        let tUp = active.reduce(0) { $0 + $1.uploadBps }
+        droidSpeed = SpeedReading(downBps: jobsDown + tDown, upBps: tUp)
+        history.push(droidSpeed)
+    }
 
     // MARK: - 탐색
 
@@ -128,6 +160,7 @@ final class AppModel {
         self.jobs = jobs
         self.torrents = torrents
         self.storage = storage
+        recomputeDroidSpeed()
         if let info {
             storageFree = info.storageFree
             storageTotal = info.storageTotal
@@ -173,6 +206,7 @@ final class AppModel {
         Task { await stream.run(base: s.baseURL) { @Sendable [weak self] in
             await self?.refresh()
         } }
+        startSpeedSampling()
         // SSE 가 조용히 죽어도 진행률이 멈추면 안 된다 — 10초 백업 폴링
         // (웹 대시보드가 쓰는 것과 동일한 계약)
         pollTask?.cancel()
@@ -184,10 +218,28 @@ final class AppModel {
         }
     }
 
+    /// 속도 샘플러 — **1초 주기로 스스로 시작한다.**
+    ///
+    /// 서버 tick 으로 부르지 않는 이유: 서버는 상태가 바뀔 때만 tick 을 보내고 평소엔
+    /// 15초 beat 이다. 그걸로 그래프를 그리면 평소엔 직선이 되어 첨부 목업처럼
+    /// 촘촘한 곡선이 나오지 않는다. 1초 폴링 1회로 클라이언트가 직접 쌓는다.
+    private func startSpeedSampling() {
+        speedTask?.cancel()
+        speedTask = Task {
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(1))
+                if Task.isCancelled { break }
+                await refresh()
+            }
+        }
+    }
+
     func disconnect() {
         Task { await stream.stop() }
         pollTask?.cancel()
         pollTask = nil
+        speedTask?.cancel()
+        speedTask = nil
     }
 
     // MARK: - 표시용

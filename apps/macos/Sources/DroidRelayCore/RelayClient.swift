@@ -84,6 +84,39 @@ public struct RelayClient: Sendable {
         return o.compactMap(Self.job(from:))
     }
 
+    // MARK: - 속도 (M-14)
+
+    /// Droid(앱) 속도 — 잡+토렌트를 **서버가 준 값에서 합산**한다.
+    /// 웹 대시보드가 하던 계산과 동일하다(그때도 클라이언트 합산).
+    public func droidSpeed() async -> SpeedReading {
+        async let j = jobs()
+        async let t = torrents()
+        let (jobs, torrents) = await (j, t)
+        let jobsDown = jobs.filter { $0.state == "RUNNING" }.reduce(0) { $0 + $1.speedBps }
+        let active = torrents.filter { $0.isActive }
+        return SpeedReading(
+            downBps: jobsDown + active.reduce(0) { $0 + $1.downloadBps },
+            upBps: active.reduce(0) { $0 + $1.uploadBps }
+        )
+    }
+
+    /// 기기(폰 전체) 속도 — **서버가 아직 제공하지 않는다.**
+    /// nil 을 돌려주는 게 아니라 Optional 로 표현하는 이유: `0` 은 "지원하지만 지금 0" 과
+    /// "지원하지 않는다" 를 구분할 수 없어, 스위치를 켰는데 항상 0 이 나오는
+    /// "고장 난 기능" 이 되기 때문이다. 서버에 TrafficStats 엔드포인트가 생기면 채운다.
+    public func deviceSpeed() async -> SpeedReading? {
+        guard let o = try? await getJSON("api/net/speed") else { return nil }
+        return SpeedReading(downBps: o["downBps"] as? Int ?? 0, upBps: o["upBps"] as? Int ?? 0)
+    }
+
+    private func getJSON(_ path: String) async -> [String: Any]? {
+        guard let d = try? await get(path),
+              let any = try? JSONSerialization.jsonObject(with: d, options: [.fragmentsAllowed]),
+              let o = any as? [String: Any]
+        else { return nil }
+        return o
+    }
+
     // MARK: - 토렌트 · 보관함 (M3)
 
     /// JSON 숫자 필드 안전 추출 — 서버가 `null` 이나 문자열을 줘도 0 으로 떨어지게.

@@ -108,6 +108,16 @@ enum Diagnostics {
             // 로그인 항목 — **설치본에서만** 성립한다. `swift run` 컨텍스트면 .notFound 가
             // 나오는데 그게 정답이다(경로가 안정적이지 않아 등록 대상이 될 수 없다).
             // 스위치가 왜 안 먹는지 확인할 수단이 여기뿐이라 diagnose 에 노출한다.
+            // 속도 — 메뉴바 2줄이 실제로 이런 문자열이 된다
+            let droid = await c.droidSpeed()
+            let dev = await c.deviceSpeed()
+            print("Droid 속도  : ↓ \(SpeedFormat.text(droid.downBps))  ↑ \(SpeedFormat.text(droid.upBps))")
+            if dev == nil {
+                print("기기 속도   : (서버 미지원 — TrafficStats 엔드포인트 신설 필요)")
+            } else {
+                let d = dev!
+                print("기기 속도   : ↓ \(SpeedFormat.text(d.downBps))  ↑ \(SpeedFormat.text(d.upBps))")
+            }
             let st = SMAppService.mainApp.status
             let stName = switch st {
                 case .notRegistered: "미등록"

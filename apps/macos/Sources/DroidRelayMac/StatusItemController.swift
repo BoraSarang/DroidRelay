@@ -61,6 +61,7 @@ final class StatusItemController {
     }
 
     func updateBadge() {
+        renderTitle()
         guard let b = statusItem?.button else { return }
         let n = model.badgeCount
         if n == 0 {
@@ -110,6 +111,39 @@ final class StatusItemController {
         statusItem?.menu = nil     // 좌클릭 동작 복구
     }
 
+    /// 메뉴바 제목 — 앱 아이콘 + (켜진 출처별로) ↑/다운 2줄.
+    ///
+    /// **2줄이 메뉴바를 실제로 늘린다**(26px → 40px). 그래도 쓰는 이유는
+    /// 방향을 ↑↓ 로 눈으로 잡는 게 1줄보다 훨씬 빠르고, 1줄로 접으면
+    /// "이게 업인지 다운인지" 매번 읽어야 한다. 4값이 열로 늘어날수록 2줄이 더 그렇다.
+    private func renderTitle() {
+        guard let b = statusItem?.button else { return }
+        let sources = model.speedSetting.sources
+        guard !model.speedSetting.isOff else {
+            b.attributedTitle = NSAttributedString(string: Self.appIcon)
+            return
+        }
+        var lines: [String] = []
+        for (dir, isDown) in [("\u{2193}", true), ("\u{2191}", false)] {
+            let cells = sources.map { s -> String in
+                SpeedFormat.text(isDown ? model.speed(for: s).downBps : model.speed(for: s).upBps)
+            }
+            lines.append("\(dir) " + cells.joined(separator: "  "))
+        }
+        // 값 열이 어긋나지 않게 고정폭 글꼴 — 자리수가 바뀌면 줄이 좌우로 흔들린다
+        let attr = NSMutableAttributedString(string: lines.joined(separator: "\n"))
+        let full = NSRange(location: 0, length: attr.length)
+        attr.addAttribute(.font, value: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium),
+                          range: full)
+        attr.addAttribute(.font, value: NSFont.systemFont(ofSize: 12), range: full)
+        b.attributedTitle = attr
+        b.toolTip = sources.map { "\($0.label) " + SpeedFormat.text(model.speed(for: $0).downBps)
+                                + " / " + SpeedFormat.text(model.speed(for: $0).upBps) }
+                        .joined(separator: "   ·   ")
+    }
+
+    private static let appIcon = "\u{1F4E1}"
+
     @objc private func openDash() { model.openDashboard() }
     @objc private func openSettings() { NSApp.activate(ignoringOtherApps: true) }
     @objc private func quit() { NSApp.terminate(nil) }
@@ -122,6 +156,8 @@ struct PopoverContainer: View {
     @State private var address = ""
     /// 로그인 시 자동 실행 — **Launch Services 를 직접 조회**한다(UserDefaults 플래그가 아니라).
     @State private var loginOn = LoginItem.isEnabled
+    @State private var showDroid = true
+    @State private var showDevice = false
     @State private var loginMsg: String? = nil
 
     var body: some View {
@@ -130,6 +166,8 @@ struct PopoverContainer: View {
             onSettings: {
                 address = model.storedAddress ?? ""
                 loginOn = LoginItem.isEnabled   // 시트를 열 때마다 실제 상태로 새로고침
+                showDroid = model.speedSetting.showDroid
+                showDevice = model.speedSetting.showDevice
                 loginMsg = nil
                 showSettings = true
             },
@@ -142,6 +180,14 @@ struct PopoverContainer: View {
         .onChange(of: model.badgeCount) { _, _ in
             NotificationCenter.default.post(name: .drBadgeChanged, object: nil)
         }
+        .onChange(of: showDroid) { _, _ in
+            model.speedSetting.showDroid = showDroid
+        }
+        .onChange(of: showDevice) { _, _ in
+            model.speedSetting.showDevice = showDevice
+        }
+        .onChange(of: model.droidSpeed) { _, _ in NotificationCenter.default.post(name: .drBadgeChanged, object: nil) }
+        .onChange(of: model.deviceSpeed) { _, _ in NotificationCenter.default.post(name: .drBadgeChanged, object: nil) }
     }
 
     private var settingsSheet: some View {
@@ -160,6 +206,23 @@ struct PopoverContainer: View {
                 Text("자동 검색으로 다시 시도").font(.system(size: 12))
                 Spacer()
                 Button("다시 찾기") { Task { await model.connect() } }
+            }
+
+            Divider()
+            Text("메뉴바 속도").font(.system(size: 14, weight: .bold))
+            speedToggle("Droid 속도", "이 앱이 쓰는 트래픽", $showDroid)
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("기기 속도").font(.system(size: 12))
+                    Text(model.deviceSpeedAvailable
+                         ? "폰 전체 트래픽" : "서버 지원 대기 중 — 켜도 값이 나오지 않습니다")
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(model.deviceSpeedAvailable ? .secondary : Color.orange)
+                }
+                Spacer()
+                Toggle("", isOn: $showDevice)
+                    .labelsHidden()
+                    .disabled(!model.deviceSpeedAvailable)
             }
 
             Divider()
@@ -186,6 +249,17 @@ struct PopoverContainer: View {
         }
         .padding(20)
         .frame(width: 420)
+    }
+
+    private func speedToggle(_ t: String, _ h: String, _ binding: Binding<Bool>) -> some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(t).font(.system(size: 12))
+                Text(h).font(.system(size: 10.5)).foregroundStyle(.secondary)
+            }
+            Spacer()
+            Toggle("", isOn: binding).labelsHidden()
+        }
     }
 
     /// 실패해도 앱은 죽지 않는다 — 사유를 설정 화면에 남기고 스위치를 원래대로 되돌린다.
