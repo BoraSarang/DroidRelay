@@ -115,13 +115,21 @@ public struct RelayClient: Sendable {
         )
     }
 
-    /// 기기(폰 전체) 속도 — **서버가 아직 제공하지 않는다.**
-    /// nil 을 돌려주는 게 아니라 Optional 로 표현하는 이유: `0` 은 "지원하지만 지금 0" 과
-    /// "지원하지 않는다" 를 구분할 수 없어, 스위치를 켰는데 항상 0 이 나오는
-    /// "고장 난 기능" 이 되기 때문이다. 서버에 TrafficStats 엔드포인트가 생기면 채운다.
-    public func deviceSpeed() async -> SpeedReading? {
+    /// 기기(폰 전체) 트래픽 **누적 카운터** — 속도가 아니다.
+    ///
+    /// **누적값을 받는 이유** — 서버가 초당 속도로 나눠 보내면 폴링 주기가 흔들릴 때
+    /// 표시가 출렁인다(같은 트래픽이라도 1초 간격과 5초 간격의 값이 다르다).
+    /// 누적값을 받고 **클라이언트가 자기 타이머로** 나누면 오차가 0 이다.
+    ///
+    /// `nil` 은 **서버가 미지원** 이라는 뜻이다. `0` 과 구분해야 한다 — 구분 못 하면
+    /// 스위치를 켰는데 항상 0 이 나오는 "고장 난 기능" 이 된다.
+    public func deviceTraffic() async -> DeviceTraffic? {
         guard let o = try? await getJSON("api/net/speed") else { return nil }
-        return SpeedReading(downBps: o["downBps"] as? Int ?? 0, upBps: o["upBps"] as? Int ?? 0)
+        guard (o["supported"] as? Bool) == true else { return nil }
+        return DeviceTraffic(
+            rxTotal: (o["rxTotal"] as? NSNumber)?.intValue ?? 0,
+            txTotal: (o["txTotal"] as? NSNumber)?.intValue ?? 0
+        )
     }
 
     private func getJSON(_ path: String) async -> [String: Any]? {

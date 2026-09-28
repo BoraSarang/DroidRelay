@@ -170,13 +170,12 @@ enum Diagnostics {
             // 스위치가 왜 안 먹는지 확인할 수단이 여기뿐이라 diagnose 에 노출한다.
             // 속도 — 메뉴바 2줄이 실제로 이런 문자열이 된다
             let droid = await c.droidSpeed()
-            let dev = await c.deviceSpeed()
             print("Droid 속도  : ↓ \(SpeedFormat.text(droid.downBps))  ↑ \(SpeedFormat.text(droid.upBps))")
-            if dev == nil {
-                print("기기 속도   : (서버 미지원 — TrafficStats 엔드포인트 신설 필요)")
+            // 기기 = 누적 카운터. 속도는 클라이언트가 시간 차로 나눈다.
+            if let t = await c.deviceTraffic() {
+                print("기기 카운터 : rx=\(t.rxTotal) tx=\(t.txTotal) (누적 — 속도는 클라이언트가 계산)")
             } else {
-                let d = dev!
-                print("기기 속도   : ↓ \(SpeedFormat.text(d.downBps))  ↑ \(SpeedFormat.text(d.upBps))")
+                print("기기 카운터 : (서버 미지원 — /api/net/speed 없거나 supported=false)")
             }
             let st = SMAppService.mainApp.status
             let stName = switch st {

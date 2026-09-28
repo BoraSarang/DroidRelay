@@ -566,7 +566,7 @@ private fun Application.relayRoutes(context: Context, serverRef: RelayServer) {
     // API 호출 자동 기록 — Call 단계 (응답 후 status 캡처)
     // 폴링(정보 획득용 GET) 엔드포인트는 웹의 refresh()로 빈번히 호출되어 버퍼/로그를 채우므로 제외
     val pollExempt = setOf(
-        "/api/info", "/api/jobs", "/api/torrents", "/api/guard/status"
+        "/api/info", "/api/jobs", "/api/torrents", "/api/guard/status", "/api/net/speed"
     )
     intercept(ApplicationCallPipeline.Call) {
         val pathRaw = call.request.path()
@@ -610,6 +610,9 @@ private fun Application.relayRoutes(context: Context, serverRef: RelayServer) {
         debugRoutes(context, serverRef)
 
         statsRoutes(context, serverRef)
+
+        // 기기 전체 네트워크 속도 (macOS 메뉴바 '기기' 열의 선행 조건)
+        netSpeedRoutes(context, serverRef)
 
         jobRoutes(context, serverRef)
 

@@ -223,6 +223,64 @@ final class SpeedFormatTests: XCTestCase {
         XCTAssertGreaterThan(h.peak(true), 0)
     }
 
+    // ── DeviceTrafficRate (기기 누적 카운터 → 속도) ──────────
+
+    private func t(_ rx: Int, _ tx: Int) -> DeviceTraffic { .init(rxTotal: rx, txTotal: tx) }
+
+    /// **첫 샘플은 속도가 아니다** — 직전 값이 없으니 나눌 분모가 없다.
+    /// 0 을 내는 게 정답이다. 값이 큰 첫 샘플을 그대로 속도로 쓰면 존재하지 않는
+    /// 속도가 메뉴바에 뜬다.
+    func test_첫_카운터는_속도가_아니다() {
+        let r = DeviceTrafficRate.rate(previous: nil, current: t(16_000_000_000, 33_000_000_000),
+                                       elapsed: 1)
+        XCTAssertEqual(r.downBps, 0)
+        XCTAssertEqual(r.upBps, 0)
+    }
+
+    /// 누적값의 **차이**를 경과 시간으로 나눈다 — 절대값이 아니라.
+    func test_차이를_경과_시간으로_나눈다() {
+        let prev = t(1_000_000, 500_000)
+        let cur = t(1_030_400, 500_000)     // rx 가 30,400 증가
+        // 30,400 / 2초 = 15,200 B/s
+        let r = DeviceTrafficRate.rate(previous: prev, current: cur, elapsed: 2)
+        XCTAssertEqual(r.downBps, 15_200)
+        XCTAssertEqual(r.upBps, 0)
+    }
+
+    /// **간격이 달라도 같은 값이어야 한다** — 30,400 바이트가 흐르는 동안
+    /// 1초로 재면 30,400, 4초로 재면 7,600. 실제 속도는 둘 다 같다.
+    func test_간격이_달라도_실제_속도는_같다() {
+        let prev = t(0, 0)
+        let cur = t(40_000, 0)
+        XCTAssertEqual(DeviceTrafficRate.rate(previous: prev, current: cur, elapsed: 1).downBps, 40_000)
+        XCTAssertEqual(DeviceTrafficRate.rate(previous: prev, current: cur, elapsed: 4).downBps, 10_000)
+    }
+
+    /// **경과 0초는 0 으로 나눠야 한다** — `elapsed > 0` 가드가 없으면 `Double` 나눗셈이
+    /// `inf`/`NaN` 이 되고, `Int(NaN)` 변환이 예외를 던지거나 임의값이 된다.
+    ///
+    /// 속도 0 은 "아무것도 흐르지 않음" 이고 `SpeedFormat` 은 그걸 `—` 로 보여준다.
+    /// 그래서 표기가 `—` 인 **것이 정상** — NaN 이면 표기도 `—` 로 같아 보이지만
+    /// `downBps` 가 0 이 아니므로 그것으로 구분한다.
+    func test_경과_0초는_0이다() {
+        let r = DeviceTrafficRate.rate(previous: t(0, 0), current: t(99_000, 0), elapsed: 0)
+        XCTAssertEqual(r.downBps, 0, "0 이 아니면 NaN/inf 가 들어갔다")
+        XCTAssertTrue(r.isIdle, "휴지 상태여야 한다")
+    }
+
+    /// **카운터 되감김을 방어한다** — 기기 재부팅·SIM 교체로 값이 줄면 음수 속도가 나온다.
+    /// 방어하지 않으면 그래프가 바닥 아래로 뚫린다.
+    /// (`SpeedHistory` 의 같은 이름 테스트와 구분하려고 접미어를 붙였다)
+    func test_기기_카운터_되감김_방어() {
+        let r = DeviceTrafficRate.rate(previous: t(50_000_000, 0), current: t(100, 0), elapsed: 1)
+        XCTAssertEqual(r.downBps, 0, "카운터가 줄었는데 양(+) 속도가 나왔다")
+    }
+
+    /// 음수 카운터가 들어와도 0 으로 떨어뜨린다.
+    func test_음수_카운터는_0으로_떨어뜨린다() {
+        XCTAssertEqual(DeviceTraffic(rxTotal: -5, txTotal: -1).rxTotal, 0)
+    }
+
     // ── 설정 ───────────────────────────────────────────────
 
     func test_출처_토글에_따라_열_개수가_달라진다() {

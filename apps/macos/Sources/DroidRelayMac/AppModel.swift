@@ -45,14 +45,16 @@ final class AppModel {
     var storageFree: Int = 0
     /// Droid(앱) 속도 — 잡+토렌트를 서버가 준 값에서 합산한다(웹 대시보드와 동일 계산)
     var droidSpeed: SpeedReading = .init(downBps: 0, upBps: 0)
-    /// 기기(폰 전체) 속도 — 서버가 `TrafficStats` 로 잰다. 없으면 0 유지.
+    /// 기기(폰 전체) 속도 — 서버의 누적 카운터를 **여기서** 시간 차로 나눈 값.
     var deviceSpeed: SpeedReading = .init(downBps: 0, upBps: 0)
+    /// 직전 기기 카운터와 그 시각 — 속도 계산에 쓴다.
+    private var lastDeviceTraffic: (t: DeviceTraffic, at: Date)?
+    /// 서버가 기기 카운터를 지원하는가 — 스위치를 이 값으로 켜고 끈다.
+    var deviceSpeedAvailable = false
     /// 그래프용 이력 — 1초 주기로 스스로 채운다
     let history = SpeedHistory(capacity: 300)
     /// 속도 샘플러 — 서버 tick(가변 간격)으로 부하를 늘리지 않고 1초에 한 번만 뽑는다
     private var speedTask: Task<Void, Never>?
-    /// 기기 속도를 제공할지 여부 — 서버에 엔드포인트가 생기기 전엔 항상 false
-    var deviceSpeedAvailable = false
     var storageTotal: Int = 0
     var lastUpdate: Date?
 
@@ -257,8 +259,31 @@ final class AppModel {
                 try? await Task.sleep(for: .seconds(1))
                 if Task.isCancelled { break }
                 await refresh()
+                await sampleDeviceTraffic()
             }
         }
+    }
+
+    /// 기기 트래픽을 읽어 속도로 바꾼다.
+    ///
+    /// **서버가 값을 안 주면 `deviceSpeedAvailable = false` 로 두고 열을 만들지 않는다.**
+    /// `0` 으로 대체하면 "지원하지만 지금 0" 과 "지원 안 함" 이 구분되지 않아,
+    /// 스위치를 켜놓고 항상 0 이 보이는 **고장 난 기능** 이 된다.
+    private func sampleDeviceTraffic() async {
+        guard let s = server else { return }
+        let cur = await RelayClient(base: s.baseURL).deviceTraffic()
+        guard let cur else {
+            if deviceSpeedAvailable { deviceSpeedAvailable = false; deviceSpeed = .init(downBps: 0, upBps: 0) }
+            return
+        }
+        deviceSpeedAvailable = true
+        let now = Date()
+        let dt = now.timeIntervalSince(lastDeviceTraffic?.at ?? now)
+        deviceSpeed = DeviceTrafficRate.rate(
+            previous: lastDeviceTraffic?.t, current: cur, elapsed: dt
+        )
+        lastDeviceTraffic = (cur, now)
+        history.push(deviceSpeed)
     }
 
     func disconnect() {

@@ -61,6 +61,19 @@ public enum SpeedSource: String, CaseIterable, Identifiable, Sendable {
     public var label: String { self == .droid ? "Droid" : "기기" }
 }
 
+/// 기기(폰 전체) 트래픽 **누적 카운터**.
+///
+/// **속도가 아니라 누적값**이라는 점이 중요하다. 서버가 나눠 보내면 폴링 주기가
+/// 흔들릴 때 표시가 출렁인다 — 클라이언트가 `SpeedHistory` 로 시간 차를 재야 한다.
+public struct DeviceTraffic: Equatable, Sendable {
+    public var rxTotal: Int
+    public var txTotal: Int
+    public init(rxTotal: Int, txTotal: Int) {
+        self.rxTotal = max(0, rxTotal)
+        self.txTotal = max(0, txTotal)
+    }
+}
+
 /// (출처, 방향) 한 쌍 — 메뉴바의 4칸과 그래프의 4계열이 이 값을 쓴다.
 public struct SpeedReading: Equatable, Sendable {
     public var downBps: Int
@@ -123,6 +136,36 @@ public final class SpeedHistory: @unchecked Sendable {
     /// 그래프 Y축 최대값 — 0 이면 축이 무너지므로 최소값을 건다.
     public func peak(_ down: Bool) -> Int {
         max(series(down).max() ?? 0, 1024)
+    }
+}
+
+/// 누적 카운터 → 속도. **클라이언트가 직접 나눠야 한다.**
+///
+/// ## 왜 서버가 나눠서 안 보내는가
+///
+/// 서버가 초당 속도로 보내면 **폴링 주기가 흔들릴 때 표시가 출렁인다.** 같은 트래픽이라도
+/// 1초 간격으로 물으면 A 라고, 5초 간격으로 물으면 B 라고 나온다. 무엇이 맞는 답인지
+/// 정할 수 없다.
+///
+/// 누적값을 주고 **여기서** 나누면, 간격이 얼마든 실측 속도와 일치한다. 간격이 0 이면
+/// 0 으로 나눠야 한다(0 나눗셈).
+public enum DeviceTrafficRate {
+    /// 직전 값과 현재 값의 차이를 경과 시간으로 나눈다.
+    public static func rate(
+        previous: DeviceTraffic?,
+        current: DeviceTraffic,
+        elapsed: TimeInterval
+    ) -> SpeedReading {
+        guard let prev = previous, elapsed > 0 else {
+            // **첫 샘플은 속도가 아니다** — 나눌 분모가 없다. 존재하지 않는 속도를
+            // 그려내지 않고 0 을 낸다.
+            return SpeedReading(downBps: 0, upBps: 0)
+        }
+        // **카운터 되감김을 방어한다** — 기기 재부팅·SIM 교체로 값이 줄면 음수 속도가
+        // 나온다. 방어하지 않으면 그래프가 바닥 아래로 뚫린다.
+        let dn = max(0, current.rxTotal - prev.rxTotal)
+        let up = max(0, current.txTotal - prev.txTotal)
+        return SpeedReading(downBps: Int(Double(dn) / elapsed), upBps: Int(Double(up) / elapsed))
     }
 }
 
