@@ -1,5 +1,52 @@
 # Changelog
 
+## [v0.44.0] — macOS 보관함 ▶ 재생 규칙 축소 (mp4·mp3)
+
+> M-19 · 테스트 206 → **208건 0 failures** · 성능·캐시 영향 없음 (순수 판정 함수)
+
+### Changed [macos] — ▶ 를 `mp4`·`mp3` 만 띄운다
+
+**요청**: 재생 버튼은 `mp4`, `mp3` 만.
+
+**목록**: `mp4 m4v mov webm` → **`mp4 mp3`**
+
+`m4v` `mov` `webm` 은 **실제로 재생된다.** IINA 가 모두 연다. 그런데 뺐다.
+넓힐 이유가 "사용자가 못 하는 것" 이 아니라 "편리할 것" 이었고, **받기는 모든 파일에
+있으므로(M-16) 잃는 방법이 하나도 없다.** 받으면 로컬 파일이 되고 그때는 기본
+프로그램이 열어 준다.
+
+> **넓히는 것은 되돌리기 쉽고, 좁히는 것은 되돌리기 어렵다.**
+> 실수로 넣었다가 빼면 그 사이에 생긴 "이건 되는데 이건 안 되네" 의 혼란은 남는다.
+> 처음부터 최소로 시작해 **증거가 생길 때만** 넓힌다.
+
+### Renamed [macos] — `isBrowserPlayableVideo` → `isStreamPlayable`
+
+M-17 에서 재생 앱이 **IINA** 로 바뀐 뒤 이 이름이 **거짓말**이 됐다. 브라우저는 폴백일
+뿐이다. 게다가 `mp3` 를 넣으면서 **"Video" 도 아니다** — 영상 파일이 아니니까.
+
+프로젝트 원칙("거짓말인 이름은 나중에 그 필터로 목록을 그리는 코드를 다시 쓴다")대로
+고쳤다. 저장소 상수도 `browserPlayableVideo` → `streamPlayable` 로 함께 변경.
+
+### Fixed [macos] — 대문자 확장자 판정 명시
+
+`HOME.MP4` 도 재생된다. `pathExtension.lowercased()` 가 이미 처리했지만 **서버와 Finder
+는 대소문자를 구분하지 않으므로** 사용자 쪽에서만 다른 파일로 취급되면 안 된다.
+테스트로 고정.
+
+### Changed [macos] — 도움말 문구
+
+`▶` help 이 "브라우저에서 실시간으로 봅니다" 였다. M-17 이후로 틀렸으므로
+"IINA 로 실시간으로 봅니다(없으면 브라우저)" 로 고쳤다. `downloadStorage` 주석도 동일.
+
+### 검증
+
+- macOS 테스트 **208건 0 실패** (신규 2건 — `mp4`/`mp3` 확정 · 대문자 확장자)
+- `swift build` 통과 · `~/Applications/DroidRelay.app` 설치 · 실행 (pid 15114)
+- `--diagnose` — 서버 `10.38.120.211:3000 v0.43.0` · SSE tick 2건/21.1초 · 재직전과 동일
+- `/stream` Range 실측 — **206** + `video/mp4` (mp3 도 같은 경로)
+- 서버 `mp3` → `audio/mpeg` (`StreamContentType` + 기존 `StreamContentTypeTest` 확인)
+- **보관함 실측: mp3 는 현재 0개** (mp4 · dmg · tar.gz만) — 규칙은 코드·서버 양쪽으로 뒷받침
+
 ## [v0.43.0] — 토렌트 보관함 이동 + 웹 삭제 복구 (v0.42 회귀 2건)
 
 > T-1085 · 테스트 300 → **313건 0 failures** (`TorrentStorageMoveContractTest` 신규 13건)

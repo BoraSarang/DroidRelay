@@ -68,36 +68,59 @@ final class StorageMediaURLTests: XCTestCase {
     }
 }
 
-/// **▶ 를 띄워도 되는 확장자 판정** — `ActionRules.isBrowserPlayableVideo`.
+/// **▶ 를 띄워도 되는 확장자 판정** — `ActionRules.isStreamPlayable`.
 ///
 /// ## 왜 이게 중요한가
 ///
-/// `.mkv` 에 ▶ 를 띄우면 사용자가 눌렀을 때 브라우저가 검은 화면을 낸다.
+/// `.mkv` 에 ▶ 를 띄우면 사용자가 눌렀을 때 재생 앱이 검은 화면을 낸다.
 /// **"누를 수 있는데 안 되는 버튼"** 이다. 그래서 판정을 Core 에 고정한다.
-final class BrowserPlayableRuleTests: XCTestCase {
+///
+/// 목록이 2026-09-29 에 `mp4`·`mp3` 두 개로 좁혀진 것도 여기서 고정한다.
+/// **"넣었다가 빼는" 를 반복하면 그 사이에 생긴 혼란은 되돌릴 수 없다.**
+final class StreamPlayableRuleTests: XCTestCase {
 
-    /// **실제 보관함에 있는 것들** — 전부 mp4 라 ▶ 가 떠야 한다.
-    func test_보관함의_mp4는_재생된다() {
-        XCTAssertTrue(ActionRules.isBrowserPlayableVideo("4k688.com@T38-072.mp4"))
-        XCTAssertTrue(ActionRules.isBrowserPlayableVideo("예편.m4v"))
-        XCTAssertTrue(ActionRules.isBrowserPlayableVideo("홈영상.MOV"),
-                      "대문자 확장자도 같아야 한다")
+    /// **유일하게 재생되는 두 형식** — 2026-09-29 확정.
+    func test_mp4와_mp3만_재생된다() {
+        XCTAssertTrue(ActionRules.isStreamPlayable("4k688.com@T38-072.mp4"))
+        XCTAssertTrue(ActionRules.isStreamPlayable("아이바의 노래.mp3"),
+                      "mp3 는 이 기기에 있는 파일이다 — IINA(mpv) 가 연다")
     }
 
-    /// **브라우저가 못 재생하는 형식에는 ▶ 가 없어야 한다.**
-    func test_브라우저가_못_재생하는_형식은_제외된다() {
-        for name in ["영화.mkv", "옛날영상.avi", "방송.ts", "화면.flv", "dmg파일.dmg"] {
-            XCTAssertFalse(ActionRules.isBrowserPlayableVideo(name),
-                           "\(name) 은 브라우저가 못 재생한다 — ▶ 를 띄우면 안 된다")
+    /// **대문자 확장자도 같아야 한다** — 서버와 Finder 는 구분하지 않는다.
+    func test_확장자_대소문자를_구분하지_않는다() {
+        XCTAssertTrue(ActionRules.isStreamPlayable("홈영상.MP4"))
+        XCTAssertTrue(ActionRules.isStreamPlayable("노래.MP3"))
+    }
+
+    /// **넓혔던 형식이 좁혀졌다 — 이건 버그가 아니라 결정이다.**
+    ///
+    /// `m4v` `mov` `webm` 은 **실제로 재생된다.** IINA 가 모두 연다.
+    /// 그런데 ▶ 를 늘릴 이유가 "못 하는 것" 이 아니라 "편리할 것" 이었고,
+    /// **받기는 모든 파일에 있으므로 없어진 방법이 없다.**
+    ///
+    /// → 최소로 시작하고 **증거가 생길 때만** 넓힌다.
+    /// 되돌리고 싶으면 여기 세 개를 다시 넣으면 된다.
+    func test_넓혔던_형식은_의도적으로_제외했다() {
+        for name in ["예편.m4v", "홈영상.mov", "화면.webm"] {
+            XCTAssertFalse(ActionRules.isStreamPlayable(name),
+                           "\(name) 은 재생이 되지만 ▶ 를 두지 않기로 했다 — 받기로 연다")
         }
     }
 
-    /// **`ogv` 는 Chrome 이 되지만 Safari 가 안 된다** — 이 Mac 의 기본은 Safari 다.
+    /// **브라우저가 못 재생하는 형식에는 ▶ 가 없어야 한다.**
+    func test_재생이_안_되는_형식은_제외된다() {
+        for name in ["영화.mkv", "옛날영상.avi", "방송.ts", "화면.flv", "dmg파일.dmg"] {
+            XCTAssertFalse(ActionRules.isStreamPlayable(name),
+                           "\(name) 은 재생이 안 된다 — ▶ 를 띄우면 안 된다")
+        }
+    }
+
+    /// **비디오 컨테이너가 아닌데 겉보기만 영상처럼 보이는 것** — `ogv`.
     ///
-    /// 브라우저가 "하나라도 되면" 으로 고르면 사용자의 기본 브라우저에서 깨진다.
-    /// **모두 되는 것만** 넣는 이유다.
+    /// Chrome 은 되지만 Safari 가 안 된다. "하나라도 되면" 으로 고르면
+    /// **사용자의 기본 브라우저에서 깨진다.** 모두 되는 것만 넣는다.
     func test_safari가_못_하는_형식은_제외된다() {
-        XCTAssertFalse(ActionRules.isBrowserPlayableVideo("영상.ogv"))
+        XCTAssertFalse(ActionRules.isStreamPlayable("영상.ogv"))
     }
 
     /// **폴더 이름에 점이 있어도 확장자로 오해하지 않는다.**
@@ -105,13 +128,11 @@ final class BrowserPlayableRuleTests: XCTestCase {
     /// `꾹.새 폴더` 처럼 이름에만 점이 있는 **폴더** 는 `pathExtension` 이 빈 문자열이라
     /// 자동으로 걸러진다. 그래도 디렉토리는 애초에 판정을 부르지 않는다.
     func test_확장자가_없으면_재생이_아니다() {
-        XCTAssertFalse(ActionRules.isBrowserPlayableVideo("M"))
-        XCTAssertFalse(ActionRules.isBrowserPlayableVideo("제목.없는.확장자"))
+        XCTAssertFalse(ActionRules.isStreamPlayable("M"))
+        XCTAssertFalse(ActionRules.isStreamPlayable("제목.없는.확장자"))
     }
 
-    /// **받기가 playback 판정과 무관하게 항상 있다** — 이게 이번 단계에서 고친 실제 결함이다.
-    ///
-    /// ## 무엇이 잘못됐나
+    /// **받기가 playback 판정과 무관하게 항상 있다** — M-16 에서 고친 실제 결함.
     ///
     /// 처음엔 재생 가능한 파일에 `▶` 만 뒀다. 그래서 이런 상태가 됐다:
     /// ```
@@ -121,13 +142,15 @@ final class BrowserPlayableRuleTests: XCTestCase {
     /// **재생 못하는 파일만 받을 수 있다** 는 모순이다. 사용자가 그대로 물었다.
     ///
     /// → **받기는 모든 파일에 있다.** 판단 대상이 아니다.
+    ///
+    /// 이 성질이 ▶ 목록을 좁힐 수 있게 만든 근거다 — **넓혀도 잃을 게 없다.**
     func test_받기는_재생_판정과_무관하다() {
-        // 재생 가능 → ▶ + 받기 (둘 다)
+        // ▶ 있음 → ▶ + 받기 (둘 다)
         let mp4 = "4k688.com@T38-072.mp4"
-        XCTAssertTrue(ActionRules.isBrowserPlayableVideo(mp4), "mp4 는 재생된다")
-        // 재생 불가 → 받기만
+        XCTAssertTrue(ActionRules.isStreamPlayable(mp4), "mp4 는 재생된다")
+        // ▶ 없음 → 받기만
         let mkv = "영화.mkv"
-        XCTAssertFalse(ActionRules.isBrowserPlayableVideo(mkv), "mkv 는 재생 안 된다")
+        XCTAssertFalse(ActionRules.isStreamPlayable(mkv), "mkv 는 재생 안 된다")
 
         // 두 경우 모두 **경로는 만든다** — 판정이 어쨌든 받는 길은 있어야 한다.
         let base = URL(string: "http://10.38.120.211:3000")!
