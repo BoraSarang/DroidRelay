@@ -82,6 +82,18 @@ enum Diagnostics {
             for j in jobs.prefix(5) {
                 print("  - \(j.name)  \(j.state)  \(j.progress)%  \(j.speedText)")
             }
+            // M3 — 탭 3개가 같은 서버를 본다. 탭 데이터가 안 내려오면 그 탭은 그냥 비어 보인다.
+            // 메뉴바 앱에 화면이 없으므로 **여기서라도** 확인되어야 원인을 알 수 있다.
+            let torrents = await c.torrents()
+            print("토렌트      : \(torrents.count)건")
+            for t in torrents.prefix(5) {
+                print("  - \(t.name)  \(t.stateLabel)  \(t.percent)%  \(t.speedText)  시드\(t.seeds)/피어\(t.peers)")
+            }
+            let storage = await c.storage()
+            print("보관함      : \(storage.count)개 항목 (폴더 \(storage.filter { $0.isDirectory }.count))")
+            for e in storage.prefix(5) {
+                print("  - \(e.isDirectory ? "📁" : "📄") \(e.name)  \(e.sizeText)  \(e.modifiedText)")
+            }
             if let info = await c.serverInfo() {
                 print("저장공간    : \(RelayClient.format(bytes: info.storageFree)) 여유 / \(RelayClient.format(bytes: info.storageTotal))")
             }

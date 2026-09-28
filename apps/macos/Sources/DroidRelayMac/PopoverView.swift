@@ -13,13 +13,65 @@ struct PopoverView: View {
         VStack(spacing: 0) {
             header
             Divider().opacity(0.5)
-            list
+            tabBar
+            Divider().opacity(0.5)
+            content
             Divider().opacity(0.5)
             stats
             Divider().opacity(0.5)
             footer
         }
         .frame(width: 352)
+    }
+
+    // MARK: - 탭바 (M3)
+
+    private var tabBar: some View {
+        HStack(spacing: 4) {
+            ForEach(AppModel.Tab.allCases) { t in
+                let on = model.selectedTab == t
+                Button { Task { await model.selectTab(t) } } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: t.icon).font(.system(size: 10.5))
+                        Text(t.title).font(.system(size: 11.5, weight: on ? .semibold : .regular))
+                        if let n = badge(t), n > 0 {
+                            Text("\(n)").font(.system(size: 9.5, weight: .bold))
+                                .padding(.horizontal, 4).padding(.vertical, 1)
+                                .background(Capsule().fill(on ? Color.accentColor.opacity(0.25) : Color.secondary.opacity(0.25)))
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 5)
+                    .background {
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(on ? Color.accentColor.opacity(0.16) : .clear)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(t.title)
+            }
+        }
+        .padding(.horizontal, 5)
+        .padding(.vertical, 4)
+    }
+
+    /// 탭별 배지 — "이 탭에 진행 중이 몇 개나 있는가"
+    private func badge(_ t: AppModel.Tab) -> Int? {
+        switch t {
+        case .downloads: return model.activeJobs.isEmpty ? nil : model.activeJobs.count
+        case .torrents: return model.activeTorrents.isEmpty ? nil : model.activeTorrents.count
+        case .storage: return nil
+        }
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        switch model.selectedTab {
+        case .downloads: jobList
+        case .torrents: torrentList
+        case .storage: storageList
+        }
     }
 
     // MARK: - 헤더
@@ -40,13 +92,13 @@ struct PopoverView: View {
         .padding(.vertical, 10)
     }
 
-    // MARK: - 목록
+    // MARK: - 목록 (다운로드)
 
-    private var list: some View {
+    private var jobList: some View {
         ScrollView {
             LazyVStack(spacing: 2) {
                 if model.activeJobs.isEmpty && model.seedingJobs.isEmpty {
-                    empty
+                    empty("진행 중인 작업이 없습니다", tip: model.phase == .failed ? "설정에서 주소를 확인하세요" : nil)
                 }
                 ForEach(model.activeJobs) { j in
                     JobRow(job: j) { act in model.control(j.id, act) }
@@ -60,13 +112,52 @@ struct PopoverView: View {
         .frame(maxHeight: 300)
     }
 
-    private var empty: some View {
+    // MARK: - 목록 (토렌트)
+
+    private var torrentList: some View {
+        ScrollView {
+            LazyVStack(spacing: 2) {
+                if model.torrents.isEmpty {
+                    empty("토렌트 목록이 없습니다", tip: "웹에서 magnet 를 추가하세요")
+                }
+                ForEach(model.torrents) { t in
+                    TorrentRow(
+                        torrent: t,
+                        onPause: { model.torrentControl(t.id, "pause") },
+                        onResume: { model.torrentControl(t.id, "resume") },
+                        onDelete: { model.torrentDelete(t.id) }
+                    )
+                }
+            }
+            .padding(5)
+        }
+        .frame(maxHeight: 300)
+    }
+
+    // MARK: - 목록 (보관함)
+
+    private var storageList: some View {
+        ScrollView {
+            LazyVStack(spacing: 1) {
+                if model.storage.isEmpty {
+                    empty("보관함이 비어 있습니다", tip: nil)
+                }
+                ForEach(model.storage) { e in
+                    StorageRow(entry: e)
+                }
+            }
+            .padding(5)
+        }
+        .frame(maxHeight: 300)
+    }
+
+    private func empty(_ title: String, tip: String?) -> some View {
         VStack(spacing: 4) {
-            Text(model.phase == .discovering ? "서버를 찾는 중…" : "진행 중인 작업이 없습니다")
+            Text(model.phase == .discovering && title.contains("서버") ? "서버를 찾는 중…" : title)
                 .font(.system(size: 12.5))
                 .foregroundStyle(.secondary)
-            if model.phase == .failed {
-                Text("설정에서 주소를 확인하세요").font(.system(size: 11))
+            if let tip {
+                Text(tip).font(.system(size: 11))
                     .foregroundStyle(.tertiary)
             }
         }
@@ -76,11 +167,24 @@ struct PopoverView: View {
 
     // MARK: - 통계
 
+    /// 탭마다 의미가 다르다 — 항상 "다운로드 진행/시딩"을 보여주면
+    /// 토렌트·보관함 탭에서 엉뚱한 숫자가 떠 보인다.
     private var stats: some View {
         HStack(spacing: 0) {
-            stat("진행", "\(model.activeJobs.count)")
-            stat("시딩", "\(model.seedingJobs.count)")
-            stat("여유", model.storageFree > 0 ? RelayClient.format(bytes: model.storageFree) : "—")
+            switch model.selectedTab {
+            case .downloads:
+                stat("진행", "\(model.activeJobs.count)")
+                stat("시딩", "\(model.seedingJobs.count)")
+                stat("여유", model.storageFree > 0 ? RelayClient.format(bytes: model.storageFree) : "—")
+            case .torrents:
+                stat("진행", "\(model.activeTorrents.count)")
+                stat("전체", "\(model.torrents.count)")
+                stat("완료", "\(model.torrents.filter { $0.isDone }.count)")
+            case .storage:
+                stat("항목", "\(model.storage.count)")
+                stat("폴더", "\(model.storage.filter { $0.isDirectory }.count)")
+                stat("여유", model.storageFree > 0 ? RelayClient.format(bytes: model.storageFree) : "—")
+            }
         }
         .padding(.vertical, 8)
     }
@@ -235,5 +339,106 @@ struct JobRow: View {
                 .foregroundStyle(c)
         }
         .buttonStyle(.plain)
+    }
+}
+
+// MARK: - 토렌트 행
+
+struct TorrentRow: View {
+    let torrent: Torrent
+    let onPause: () -> Void
+    let onResume: () -> Void
+    let onDelete: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 7) {
+                Image(systemName: torrent.isDone ? "checkmark.circle.fill" : "arrow.triangle.2.circlepath")
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(torrent.isDone ? Color.green : Color.accentColor)
+                Text(torrent.name)
+                    .font(.system(size: 12.5, weight: .medium))
+                    .lineLimit(1).truncationMode(.middle)
+                Spacer(minLength: 4)
+                if torrent.uploadBps > 0 {
+                    Text("▲\(torrent.upText)").font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.orange)
+                } else {
+                    Text(torrent.speedText).font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.cyan)
+                }
+            }
+
+            GeometryReader { g in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(.quaternary)
+                    Capsule().fill(torrent.isDone ? Color.green : Color.accentColor)
+                        .frame(width: g.size.width * CGFloat(torrent.progress))
+                }
+            }
+            .frame(height: 4)
+
+            HStack(spacing: 8) {
+                Text(torrent.stateLabel).foregroundStyle(.secondary)
+                Text(torrent.sizeText).foregroundStyle(.tertiary)
+                Spacer()
+                if torrent.seeds > 0 || torrent.peers > 0 {
+                    Text("▲\(torrent.seeds) ▼\(torrent.peers)").foregroundStyle(.tertiary)
+                }
+            }
+            .font(.system(size: 10.5))
+            .monospacedDigit()
+            .lineLimit(1)
+
+            HStack(spacing: 5) {
+                if torrent.isDone {
+                    Text("완료 — 보관함으로 이동됨").font(.system(size: 10.5))
+                        .foregroundStyle(.tertiary)
+                } else {
+                    small("일시정지", .primary, onPause)
+                    small("재개", .primary, onResume)
+                    small("삭제", .red, onDelete)
+                }
+            }
+            .padding(.top, 1)
+        }
+        .padding(8)
+    }
+
+    private func small(_ t: String, _ c: Color, _ a: @escaping () -> Void) -> some View {
+        Button(action: a) {
+            Text(t).font(.system(size: 10.5))
+                .padding(.horizontal, 7).padding(.vertical, 2)
+                .background(.quaternary, in: Capsule())
+                .foregroundStyle(c)
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+struct StorageRow: View {
+    let entry: StorageEntry
+
+    var body: some View {
+        HStack(spacing: 7) {
+            Image(systemName: entry.isDirectory ? "folder.fill" : "doc.fill")
+                .font(.system(size: 10.5))
+                .foregroundStyle(entry.isDirectory ? Color.accentColor : Color.secondary)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(entry.name)
+                    .font(.system(size: 12.5))
+                    .lineLimit(1).truncationMode(.middle)
+                HStack(spacing: 6) {
+                    Text(entry.sizeText)
+                    if !entry.modifiedText.isEmpty { Text(entry.modifiedText) }
+                }
+                .font(.system(size: 10.5))
+                .foregroundStyle(.tertiary)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .contentShape(Rectangle())
     }
 }

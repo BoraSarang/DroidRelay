@@ -84,6 +84,60 @@ public struct RelayClient: Sendable {
         return o.compactMap(Self.job(from:))
     }
 
+    // MARK: - 토렌트 · 보관함 (M3)
+
+    /// JSON 숫자 필드 안전 추출 — 서버가 `null` 이나 문자열을 줘도 0 으로 떨어지게.
+    /// `as? Int` 는 NSNumber 가 아니면 **nil** 이라 조용히 0 이 되고, 그게 의도다.
+    /// 단위 테스트 대상 — 서버가 값을 바꿔도 화면이 이상한 숫자를 보여주지 않아야 한다.
+    static func int(_ any: Any?) -> Int {
+        if let n = any as? Int { return n }
+        if let d = any as? Double, d.isFinite { return Int(d) }
+        if let s = any as? String, let v = Int(s) { return v }
+        return 0
+    }
+
+    public func torrents() async -> [Torrent] {
+        let d: Data? = try? await get("api/torrents")
+        guard let d, let any = try? JSONSerialization.jsonObject(with: d, options: [.fragmentsAllowed]),
+              let arr = any as? [Any]
+        else { return [] }
+        return arr.compactMap { Torrent(json: $0) }
+    }
+
+    public func storage(path: String = "") async -> [StorageEntry] {
+        var p = "api/storage"
+        if !path.isEmpty {
+            p += "?path=" + (path.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "")
+        }
+        let d: Data? = try? await get(p)
+        guard let d, let any = try? JSONSerialization.jsonObject(with: d, options: [.fragmentsAllowed]),
+              let arr = any as? [Any]
+        else { return [] }
+        return arr.compactMap { StorageEntry(json: $0) }
+    }
+
+    /// 토렌트 제어 — 본문 없이 POST. 서버의 Content-Type 가드는 **본문이 있을 때만**
+    /// 적용하므로 헤더를 붙일 필요가 없다(붙여도 무방).
+    public func torrentControl(_ id: String, _ action: String) async -> Bool {
+        var req = URLRequest(url: base.appendingPathComponent("api/torrents/\(id)/\(action)"))
+        req.httpMethod = "POST"
+        req.timeoutInterval = 5
+        _ = try? await session.data(for: req)
+        return true
+    }
+
+    /// 토렌트 삭제 — `POST /{action}` 이 **아니라** `DELETE /api/torrents/{id}` 다.
+    /// 서버는 torrent/{id}/{action} 에 pause·resume·files·limit 만 분기한다.
+    /// 완성 torrent 를 지우면 **목록에서만** 빠지고 보관함 파일은 남는다(서버 설계).
+    public func torrentDelete(_ id: String) async -> Bool {
+        var req = URLRequest(url: base.appendingPathComponent("api/torrents/\(id)"))
+        req.httpMethod = "DELETE"
+        req.timeoutInterval = 5
+        let (d, r) = (try? await session.data(for: req)) ?? (nil, nil)
+        guard let http = r as? HTTPURLResponse else { return false }
+        return (200..<300).contains(http.statusCode)
+    }
+
     static func job(from o: [String: Any]) -> Job? {
         guard let id = o["id"] as? String else { return nil }
         let pct = (o["progress"] as? Double) ?? 0
