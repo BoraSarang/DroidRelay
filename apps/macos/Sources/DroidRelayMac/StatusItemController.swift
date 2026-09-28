@@ -152,22 +152,53 @@ final class StatusItemController {
         let p = NSPopover()
         p.behavior = .transient          // 바깥 클릭 시 닫힘
         p.animates = true
-        p.contentSize = NSSize(width: 352, height: 420)
+        // **그래프(≈60pt) + 탭/목록/통계가 함께 들어가야 한다.**
+        // 420 으로 고정하면 아래 내용이 잘린다 — 고정 높이를 유지하는 편이 덜 깜빡인다.
+        p.contentSize = NSSize(width: 352, height: 520)
         p.contentViewController = NSHostingController(rootView: PopoverContainer(model: model))
         popover = p
         return p
     }
 
+    /// 팝오버를 띄운다.
+    ///
+    /// ## `statusItem.button` 을 쓰면 안 된다 — 이게 회귀의 원인
+    ///
+    /// `statusItem.view` 로 전환하면 **`statusItem.button` 이 nil 이 된다.**(시스템이
+    /// 버튼을 만들지 않으므로) 그런데 여기서 `button` 으로 위치를 잡으려고 해서
+    /// `guard` 에서 조용히 `return` — **클릭해도 아무 일도 일어나지 않았다.**
+    ///
+    /// → **`speedView` 를 기준 뷰로** 쓴다. 직접 배치한 뷰이므로 항상 있다.
     private func togglePopover() {
         let p = ensurePopover()
         if p.isShown {
             p.performClose(nil)
         } else {
-            guard let b = statusItem?.button else { return }
-            p.show(relativeTo: b.bounds, of: b, preferredEdge: .minY)
+            guard let v = speedView else { return }
+            p.show(relativeTo: v.bounds, of: v, preferredEdge: .minY)
             // 팝오버 안의 컨트롤이 키보드를 받을 수 있게 활성화
             NSApp.activate(ignoringOtherApps: true)
         }
+    }
+
+    /// 팝오버가 실제로 붙어 있는지 — `--watch` 로 확인한다.
+    ///
+    /// **팝오버가 안 뜨는 버그를 diagnose 로는 못 잡는다.** `statusItem` 을 만들지
+    /// 않으므로. "클릭했는데 아무것도 없음" 을 눈으로만 확인하게 되던 문제다.
+    var debugPopover: [String] {
+        guard let p = popover else { return ["팝오버      : **nil — install() 이 안 돌았다**"] }
+        return [
+            "팝오버      : 생성됨",
+            "기준 뷰     : " + (speedView == nil ? "**nil — 팝오버가 뜨지 않는다**" : "speedView (ok)"),
+            "표시 중     : \(p.isShown)",
+            "컨트롤러    : \(p.contentViewController == nil ? "nil" : "ok")",
+        ]
+    }
+
+    /// **고정 소스에서 팝오버를 띄워 본다** — 클릭 없이 경로를 검증한다.
+    /// 위치가 안 잡히는지, 콘텐츠가 붙는지, 화면 안에 뜨는지 눈으로 확인할 수 있다.
+    func showPopoverForCheck() {
+        togglePopover()
     }
 
     /// 우클릭 — 시스템 표준 메뉴
@@ -177,9 +208,10 @@ final class StatusItemController {
         m.addItem(withTitle: "설정…", action: #selector(openSettings), keyEquivalent: ",").target = self
         m.addItem(.separator())
         m.addItem(withTitle: "DroidRelay 종료", action: #selector(quit), keyEquivalent: "q").target = self
-        statusItem?.menu = m
-        statusItem?.button?.performClick(nil)
-        statusItem?.menu = nil     // 좌클릭 동작 복구
+        // **버튼이 아니라 view 로 메뉴를 연다.** `statusItem.view` 로 전환한 뒤
+        // `statusItem.button` 은 nil 이라 `performClick` 이 조용히 안 된다.
+        guard let v = speedView else { return }
+        m.popUp(positioning: nil, at: NSPoint(x: 0, y: v.bounds.maxY + 4), in: v)
     }
 
     @objc private func openDash() { model.openDashboard() }

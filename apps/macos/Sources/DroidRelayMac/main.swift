@@ -6,6 +6,19 @@ import ServiceManagement
 
 /// `--watch` 로그 위치
 let agentWatchLog = NSString(string: "~/.agent-droidrelay-watch.log").expandingTildeInPath
+let popoverLog = NSString(string: "~/.agent-droidrelay-popover.log").expandingTildeInPath
+
+/// 로그 파일에 **덧붙인다.** `String.write(atomically:false)` 는 파일을 잘라서
+/// 마지막 1줄만 남는다(실제로 그랬다).
+func appendLog(_ msg: String, to path: String) {
+    if !FileManager.default.fileExists(atPath: path) {
+        FileManager.default.createFile(atPath: path, contents: nil)
+    }
+    guard let fh = FileHandle(forWritingAtPath: path) else { return }
+    fh.seekToEndOfFile()
+    fh.write(Data(msg.utf8))
+    try? fh.close()
+}
 
 /// 프로세스 진입점 — `@main` 대신 직접 부팅한다(씬 없이).
 ///
@@ -67,6 +80,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         //
         // `--title-check` 는 별도 프로세스라 상태 항목이 "살아 있는" 앱과 다르다.
         // 사용자가 보는 건 이 프로세스인데, 여기를 안 보면 또 같은 착각을 한다.
+        // **팝오버가 실제로 뜨는지** 클릭 없이 확인한다.
+        //
+        // "클릭했는데 아무것도 안 뜬다" 는 종류의 버그가 diagnose 로는 잡히지 않는다 —
+        // diagnose 는 StatusItem 을 만들지 않으므로. `statusItem.view` 로 전환하면서
+        // `statusItem.button` 이 nil 이 된 걸 놓친 것이 딱 이 경고 사례다.
+        if CommandLine.arguments.contains("--popover-check") {
+            let m = AppModel(storedAddress: UserDefaults.standard.string(forKey: "serverAddress"))
+            let c = StatusItemController(model: m)
+            model = m; controller = c
+            c.install()
+            Task {
+                await m.connect()
+                await MainActor.run { c.showPopoverForCheck() }
+                // 팝오버 애니메이션이 끝날 때까지 기다린다 — 바로 재면 isShown 이 false 다.
+                for wait in [0.3, 0.8, 1.5] {
+                    try? await Task.sleep(for: .seconds(wait))
+                    await MainActor.run {
+                        let msg = "\(String(format: "%4.1fs", wait)) "
+                            + c.debugPopover.joined(separator: " / ") + "\n"
+                        appendLog(msg, to: popoverLog)
+                    }
+                }
+                await MainActor.run { NSApp.terminate(nil) }
+            }
+            return
+        }
         if CommandLine.arguments.contains("--watch") {
             let m = AppModel(storedAddress: UserDefaults.standard.string(forKey: "serverAddress"))
             let c = StatusItemController(model: m)
