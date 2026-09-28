@@ -623,9 +623,11 @@ T-001~T-008 전부 완료 (커밋 7574486).
 | M-12 | M2 — 팔레트 (Carbon 핫키 `⌘⇧D` · `.nonactivatingPanel` · IME 입력 소스 캡처) | ⏸ |
 | M-13 | M3 — 독립 창 + 탭바 | ⏸ |
 | M-14 | M4 — 설정 영속화 + **DMG 배포 경로** | ⏸ |
-| M-14 | **메뉴바 속도 표시** — 2줄(↑다운) × 출처 열, 열 개수는 설정의 토글이 결정 · `SpeedFormat`(MB·KB·B/s) · `SpeedHistory`(경과시간 기반 델타, 되감김 방어) · Droid 속도는 잡+토렌트 합산 · 1초 자체 샘플러. 테스트 45 → **64건** | ✅ |
+| M-14 | **메뉴바 속도 표시** — `MenuTitleView`(커스텀 뷰로 직접 그림) + `MenuBarTitle`(그릴 줄을 정하는 순수 로직) + `SpeedFormat.compact`(`450K` 압축) · Droid 속도는 잡+토렌트 합산 · 1초 자체 샘플러 · `--title-check` 로 실제 그려지는 문자열·프레임 검증. 테스트 64 → **85건** | ✅ |
+| M-14 | **2줄 → 1줄로 변경** — 메뉴바 두께 22pt, 10.5pt 글꼴 1줄이 13pt 라 2줄(27pt)은 5pt 잘림. `↑9K ↓450K` 로 압축 | ✅ |
+| M-14 | **설정 시 "DroidRelay Settings" 창이 뜸** — `Settings { EmptyView() }` 씬 하나만 있으면 활성화될 때 자동 표시. 씬 없이 `NSApplication` 직접 부팅으로 교체. 창 0개 확인 | ✅ |
+| M-14 | **기기 속도 — 서버 미지원** (`api/net/speed` 없음). `TrafficStats` 엔드포인트 신설이 선행. 켜져 있어도 **빈 열을 만들지 않는다** (`MenuBarTitle` 가 `device: nil` 이면 제외) | ⏸ |
 | — | **앱 설치 위치 = `~/Applications`** (사용자 지정). `/Applications` 는 시스템 영역이라 승인·권한이 붙는다 | ✅ |
-| M-14 | **기기 속도 — 서버 미지원** (`api/net/speed` 없음). `TrafficStats` 엔드포인트 신설이 선행되어야 기기 열을 켤 수 있다 (스위치는 그때까지 비활성) | ⏸ |
 | M-14 | **로그인 시 자동 실행** — `SMAppService.mainApp` (구식 `SMLoginItemSetEnabled` 는 macOS 13 deprecated) · 상태는 플래그가 아니라 Launch Services 조회 · 실패 사유를 설정 화면에 노출 · `--login-item=on/off` 진단 플래그 · `--diagnose` 에 상태 출력. 테스트 39 → **45건** | ✅ |
 
 > **M-14 배포 방식 결정 (2026-09-28, 사용자)** — **DMG 로 배포**한다.

@@ -81,6 +81,66 @@ final class SpeedFormatTests: XCTestCase {
         }
     }
 
+    /// **메뉴바 압축 표기** — 폭이 우선이라 소수점을 버린다.
+    ///
+    /// 단위는 유지한다: `450K` 와 `450` 는 사람이 읽을 때 전혀 다르다.
+    func test_압축_표기() {
+        XCTAssertEqual(SpeedFormat.compact(0), "—")
+        XCTAssertEqual(SpeedFormat.compact(-1), "—")
+        XCTAssertEqual(SpeedFormat.compact(512), "512")
+        XCTAssertEqual(SpeedFormat.compact(1024), "1K")
+        XCTAssertEqual(SpeedFormat.compact(460_390), "450K")
+        XCTAssertEqual(SpeedFormat.compact(1_048_576), "1M")
+        XCTAssertEqual(SpeedFormat.compact(1_073_741_824), "1G")
+    }
+
+    /// **압축해도 값이 뒤집히면 안 된다** — `1020K` 다음 `1M` 이 순서대로 와야 한다.
+    /// 숫자만 비교하면(1020 vs 1) 역전으로 오판하므로 환산해서 비교한다.
+    func test_압축_표기도_단위가_역전되지_않는다() {
+        func bytes(_ s: String) -> Double {
+            let n = Double(s.dropLast()) ?? 0
+            switch s.last {
+            case "K": return n * 1024
+            case "M": return n * 1_048_576
+            case "G": return n * 1_073_741_824
+            default: return n
+            }
+        }
+        var prev = 0.0
+        for b in stride(from: 1, through: 40_000_000, by: 9_973) {
+            let shown = SpeedFormat.compact(b)
+            let back = bytes(shown)
+            XCTAssertGreaterThanOrEqual(back, prev, "\(b) → \(shown) 로 값이 줄었다 (이전 \(prev))")
+            prev = back
+        }
+    }
+
+    /// **표시가 실제보다 클 수 있는 오차는 그 단위의 절반 이하여야 한다.**
+    ///
+    /// **B 단위는 예외다** — 1023B 를 "1K" 로 올리면 1024배 오차가 된다.
+    /// 그래서 1024 **미만은 바이트로 그대로** 쓴다(테스트가 처음 이걸 잡았다).
+    func test_압축_표기의_오차가_단위의_절반_이내() {
+        for b in [1024, 1025, 1_047_000, 1_048_575, 1_048_576, 999_999_999, 1_073_741_824] {
+            let s = SpeedFormat.compact(b)
+            let n = Double(s.dropLast()) ?? 0
+            let unit: Double = s.hasSuffix("K") ? 1024 : (s.hasSuffix("M") ? 1_048_576
+                : (s.hasSuffix("G") ? 1_073_741_824 : 1))
+            // 절댓값으로 비교한다. 부호를 나눠 비교하면 **아래쪽(내림) 오차와
+            // 위쪽(올림) 오차의 허용치가 뒤집혀서** 정상적인 1.0K 같은 값이 실패한다.
+            // (테스트를 두 번 잘못 썼다 — 두 번째가 이거였다)
+            let err = abs(n * unit - Double(b))
+            XCTAssertLessThanOrEqual(err, unit / 2, "\(b) → \(s) : 반올림이 단위의 절반을 넘었다")
+        }
+    }
+
+    /// **1023B 를 "1K" 로 올리면 1024배 오차** — 이게 실제로 터졌던 케이스다.
+    func test_1KiB_미만은_바이트로_그린다() {
+        for b in [1, 512, 1023] {
+            XCTAssertFalse(SpeedFormat.compact(b).hasSuffix("K"), "\(b)B 를 K 로 올렸다")
+            XCTAssertEqual(SpeedFormat.compact(b), "\(b)")
+        }
+    }
+
     func test_눈금_형식은_자리수를_줄인다() {
         XCTAssertEqual(SpeedFormat.axis(1_073_741_824), "1.0 GB/s")
         XCTAssertEqual(SpeedFormat.axis(1_048_576), "1.0 MB/s")

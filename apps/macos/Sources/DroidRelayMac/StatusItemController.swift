@@ -22,18 +22,31 @@ final class StatusItemController {
 
     init(model: AppModel) { self.model = model }
 
+    private var titleView: MenuTitleView?
+
     func install() {
         seedPositionOnce()
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem = item
 
         if let b = item.button {
-            b.image = NSImage(systemSymbolName: "antenna.radiowaves.left.and.right",
-                              accessibilityDescription: "DroidRelay")
-            b.image?.isTemplate = true
+            // **내용은 비운다.** `image` 를 지정한 `NSStatusBarButton` 은 `title` 을
+            // 그리지 않고, `title` 에 줄바꿈을 넣어도 `NSButton` 이 여러 줄을
+            // 렌더링하지 않는다. 둘 다 넣으면 결과적으로 **아이콘만 보인다.**
+            b.image = nil
+            b.title = ""
             b.target = self
             b.action = #selector(clicked(_:))
             b.sendAction(on: [.leftMouseUp, .rightMouseUp])
+
+            // 그림은 서브뷰가 맡는다. autoresizing 으로 붙인다 —
+            // Auto Layout 을 걸면 `NSStatusBarButton` 이 높이를 자기 마음대로 잡아
+            // 줄이 잘린다(실측).
+            let v = MenuTitleView()
+            v.translatesAutoresizingMaskIntoConstraints = true
+            v.autoresizingMask = [.minYMargin, .maxYMargin]
+            b.addSubview(v)
+            titleView = v
         }
         updateBadge()
 
@@ -62,12 +75,71 @@ final class StatusItemController {
 
     /// 배지와 속도를 **한 번에** 그린다.
     ///
-    /// **왜 합쳤나** — AppKit 에서 `button.title` 을 대입하면 `attributedTitle` 이
-    /// **지워진다**. 배지만 갱신하려고 `b.title = " \(n)"` 를 대입하면, 바로 앞에서
-    /// 넣어 둔 속도가 **즉시 사라진다**(실측: 배지만 보이고 속도 행이 안 뜬다).
-    /// 그래서 둘을 하나의 attributed 문자열로 합쳐 한 번만 대입한다.
+    /// **버튼의 `title` 을 만지지 않는 이유** — `attributedTitle` 을 지우기 때문이다.
+    /// 한 번 더 상처를 냈다: 처음엔 `attributedTitle` 에 넣고 배지만 `b.title` 로 갱신했는데,
+    /// AppKit 이 `attributedTitle` 을 **삭제**해서 속도가 사라졌다(배지만 남음).
+    /// 지금은 버튼에도 뷰에도 대입하지 않고 **뷰 하나만** 갱신한다.
     func updateBadge() {
-        renderTitle()
+        guard let v = titleView else { return }
+        let src = model.speedSetting
+        let d = model.droidSpeed
+        let dev = model.deviceSpeedAvailable ? model.deviceSpeed : nil
+
+        // **못 쓰는 출처는 열을 만들지 않는다** — 서버가 값을 안 주는데 0 을 넣으면
+        // 사용자는 "고장 났구나" 를 화면에서 읽는다.
+        v.setLines(MenuBarTitle.lines(
+            badge: model.badgeCount,
+            droid: d,
+            device: dev,
+            includeDroid: src.showDroid,
+            includeDevice: src.showDevice
+        ))
+
+        if let b = statusItem?.button {
+            b.needsLayout = true
+            b.layoutSubtreeIfNeeded()
+            let s = v.intrinsicContentSize
+            v.frame = NSRect(x: 0, y: 0, width: s.width, height: s.height)
+            b.frame.size.height = s.height
+            statusItem?.length = s.width
+        }
+        renderTooltip()
+    }
+
+    /// 실제로 그리는 줄 — `--title-check` 검증용.
+    var debugLines: [String] { titleView?.debugLines ?? [] }
+
+    /// 상태 항목의 실제 프레임 — **요청한 높이를 시스템이 지켰는지** 확인한다.
+    ///
+    /// **잘림 판정의 기준은 뷰 자신이 아니라 메뉴바 두께다.** 뷰 프레임이
+    /// intrinsic 과 같아도 **버튼이 22pt 면 더 큰 뷰는 시스템이 잘라낸다.**
+    /// 뷰끼리만 비교하면 "잘림 없음" 이라는 잘못된 안락함을 준다(실제로 그랬다).
+    var debugFrames: [String] {
+        guard let b = statusItem?.button, let v = titleView else { return [] }
+        let need = v.intrinsicContentSize.height
+        let room = NSStatusBar.system.thickness
+        let shown = min(need, b.frame.height, room)
+        let fit = need <= room + 0.5
+        return [
+            "버튼 프레임 : w=\(Int(b.frame.width)) h=\(Int(b.frame.height))",
+            "뷰 프레임   : w=\(Int(v.frame.width)) h=\(Int(v.frame.height))",
+            "필요 높이   : \(Int(need))",
+            "메뉴바 두께  : \(Int(room))  ← 이게 실제 한계",
+            "보이는 줄   : \(v.debugLines.count)줄 중 \(max(0, Int((shown / max(need / CGFloat(v.debugLines.count), 1)).rounded(.down))) )줄",
+            "잘림        : " + (fit
+                ? "없음 — 전부 들어감"
+                : "**있음 — \(Int(need - room))pt 가 잘린다. 마지막 \(Int(ceil((need - room) / 13)))줄 이 배 밖으로 나간다**")
+        ]
+    }
+
+    /// 값은 상태로 **한 곳에만** 조립한다 — 메뉴바와 툴팁이 같은 값을 쓴다.
+    private func renderTooltip() {
+        guard let b = statusItem?.button else { return }
+        let sources = model.visibleSpeedSources
+        b.toolTip = sources.isEmpty ? "DroidRelay" :
+            sources.map { "\($0.label) ↓ \(SpeedFormat.text(model.speed(for: $0).downBps))"
+                        + " ↑ \(SpeedFormat.text(model.speed(for: $0).upBps))" }
+                   .joined(separator: "\n")
     }
 
     @objc private func clicked(_ sender: NSStatusBarButton) {
@@ -109,49 +181,6 @@ final class StatusItemController {
         statusItem?.button?.performClick(nil)
         statusItem?.menu = nil     // 좌클릭 동작 복구
     }
-
-    /// 메뉴바 제목 — 앱 아이콘 + (켜진 출처별로) ↑/다운 2줄.
-    ///
-    /// **2줄이 메뉴바를 실제로 늘린다**(26px → 40px). 그래도 쓰는 이유는
-    /// 방향을 ↑↓ 로 눈으로 잡는 게 1줄보다 훨씬 빠르고, 1줄로 접으면
-    /// "이게 업인지 다운인지" 매번 읽어야 한다. 4값이 열로 늘어날수록 2줄이 더 그렇다.
-    private func renderTitle() {
-        guard let b = statusItem?.button else { return }
-        let sources = model.speedSetting.sources
-
-        // 1줄 = 아이콘 + 배지
-        var lines = [Self.appIcon + (model.badgeCount > 0 ? " \(model.badgeCount)" : "")]
-        var ranges: [NSRange] = []   // 속도 부분만 고정폭 글꼴로
-
-        if !model.speedSetting.isOff {
-            for (dir, isDown) in [("\u{2191}", false), ("\u{2193}", true)] {
-                let head = "\(dir) "
-                let cells = sources.map { s -> String in
-                    SpeedFormat.text(isDown ? model.speed(for: s).downBps : model.speed(for: s).upBps)
-                }
-                let body = cells.joined(separator: "  ")
-                let start = lines[0].count + head.count
-                lines[0] += head + body
-                ranges.append(NSRange(location: start, length: body.count))
-                lines[0] += "\n"
-            }
-            lines.removeLast()
-        }
-
-        let attr = NSMutableAttributedString(string: lines.joined(separator: "\n"))
-        let full = NSRange(location: 0, length: attr.length)
-        attr.addAttribute(.font, value: NSFont.systemFont(ofSize: 12), range: full)
-        // 값 부분만 고정폭 숫자로 — 자리수가 바뀌면 줄이 좌우로 흔들린다
-        for r in ranges {
-            attr.addAttribute(.font, value: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium), range: r)
-        }
-        b.attributedTitle = attr
-        b.toolTip = sources.map { "\($0.label) " + SpeedFormat.text(model.speed(for: $0).downBps)
-                                + " / " + SpeedFormat.text(model.speed(for: $0).upBps) }
-                        .joined(separator: "   ·   ")
-    }
-
-    private static let appIcon = "\u{1F4E1}"
 
     @objc private func openDash() { model.openDashboard() }
     @objc private func openSettings() { NSApp.activate(ignoringOtherApps: true) }

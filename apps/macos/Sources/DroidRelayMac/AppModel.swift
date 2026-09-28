@@ -81,9 +81,29 @@ final class AppModel {
     var activeTorrents: [Torrent] { torrents.filter { $0.isActive } }
     var badgeCount: Int { activeJobs.count + activeTorrents.count }
 
-    /// 메뉴바에 표시할 출처 — 설정으로 고른다
-    var speedSetting = SpeedDisplaySetting.default {
-        didSet { speedSetting.save() }
+    /// 메뉴바에 표시할 출처 — 설정으로 고른다.
+    ///
+    /// **저장된 값을 로드한다** — 기본값으로 시작하면 토글을 아무리 눌러도
+    /// 재실행할 때마다 되돌아가서 "저장이 안 된다" 고 보인다.
+    /// (테스트만 저장/로드를 검증하고 실제 앱은 기본값만 쓰고 있었다)
+    var speedSetting = SpeedDisplaySetting.load() {
+        didSet {
+            speedSetting.save()
+            NotificationCenter.default.post(name: .drBadgeChanged, object: nil)
+        }
+    }
+
+    /// **실제로 그릴 수 있는 출처** — 설정이 켠 것 중 **서버가 값을 주는 것만.**
+    ///
+    /// `speedSetting.sources` 를 그대로 쓰면 안 된다. 기기 속도는 서버가 아직
+    /// 제공하지 않는데 설정은 켜져 있으므로(기본값) 열 자리가 하나 더 생기고
+    /// 그 칸은 계속 `—` 로 찬다. 즉 **"고장 난 기능" 이 화면에 그대로 노출된다** —
+    /// 내가 처음 설계할 때 경고한 바로 그 상황이다.
+    ///
+    /// 그래서 `0` 이 아니라 **열 자체를 만들지 않는다.** 못 쓰는 칸을 비워두는 게
+    /// 사용자에게는 정직하다(값이 0 인 것과 값을 모르는 것은 다르다).
+    var visibleSpeedSources: [SpeedSource] {
+        speedSetting.sources.filter { $0 != .device || deviceSpeedAvailable }
     }
 
     func speed(for source: SpeedSource) -> SpeedReading {

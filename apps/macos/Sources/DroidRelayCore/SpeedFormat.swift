@@ -23,6 +23,23 @@ public enum SpeedFormat {
         return "\(Int(b.rounded())) B/s"
     }
 
+    /// **메뉴바용 압축 표기.** 자릿수를 버려 폭을 줄인다.
+    ///
+    /// **필요한 이유** — 메뉴바 한 줄에 두 값(업/다운)을 넣어야 해서 폭이 부족하다.
+    /// `"449.6 KB/s"` 처럼 쓰면 항목이 지나치게 넓어져 다른 메뉴바 항목을 밀어낸다.
+    /// 단위를 유지하되 소수점을 없애면 정보는 유지되고 폭은 1/3 이다.
+    public static func compact(_ bytesPerSec: Int) -> String {
+        let b = Double(bytesPerSec)
+        guard b > 0, b.isFinite else { return "\u{2014}" }
+        // **G 경계도 필요하다.** M 만 두면 1TiB/s 는 "1024M" 가 되는데,
+        // 이는 오차가 아니라 단위 선택 실패다 — 사람이 "1024M" 를 보고 큰 값이라
+        // 느낄 수는 있어도 "1G" 가 더 정확하다. (테스트가 잡았다)
+        if b >= 1_073_741_824 { return "\(Int((b / 1_073_741_824).rounded()))G" }
+        if b >= 1_048_576 { return "\(Int((b / 1_048_576).rounded()))M" }
+        if b >= 1024 { return "\(Int((b / 1024).rounded()))K" }
+        return "\(Int(b.rounded()))"
+    }
+
     /// 그래프 눈금용 — 자리수가 줄도록 단위를 크게 ("1.2 MB/s").
     public static func axis(_ bytesPerSec: Int) -> String {
         let b = Double(bytesPerSec)
