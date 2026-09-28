@@ -100,6 +100,20 @@ macos_bundle() {
   cp "$bin" "$app/Contents/MacOS/$APP_NAME"
   chmod +x "$app/Contents/MacOS/$APP_NAME"
 
+  # ── 앱 아이콘 ──
+  # 없으면 DMG·Dock·Spotlight 에서 **빈 이름 아이콘**으로 보인다. SF Symbol 을 즉석에서
+  # 그려 icns 를 만든다(리포에 PNG 10장을 커밋하지 않는다).
+  if [ ! -f "$app/Contents/Resources/AppIcon.icns" ] || [ "${DR_REBUILD_ICON:-}" = "1" ]; then
+    echo "  🎨 앱 아이콘 생성 중…"
+    local icset="$app/Contents/Resources/DroidRelay.iconset"
+    swift "$MACOS_DIR/Tools/MakeIcon.swift" "$icset" >/dev/null 2>&1 \
+      || echo "  ⚠️ 아이콘 생성 실패 — 아이콘 없는 앱으로 진행"
+    if [ -d "$icset" ]; then
+      iconutil -c icns "$icset" -o "$app/Contents/Resources/AppIcon.icns" 2>/dev/null
+      rm -rf "$icset"
+    fi
+  fi
+
   # LSUIElement = 앱이 Dock/Cmd-Tab 에 뜨지 않는다(메뉴바 전용).
   # 코드가 NSApp.setActivationPolicy(.accessory) 로도 설정하지만 그건 **실행 뒤**이므로
   # 번들로는 이 플래그가 있어야 첫 프레임부터 Dock 에 안 뜬다.
@@ -113,8 +127,9 @@ macos_bundle() {
     <key>CFBundleExecutable</key><string>$APP_NAME</string>
     <key>CFBundleIdentifier</key><string>$APP_ID</string>
     <key>CFBundlePackageType</key><string>APPL</string>
-    <key>CFBundleShortVersionString</key><string>0.1.0</string>
-    <key>CFBundleVersion</key><string>1</string>
+    <key>CFBundleShortVersionString</key><string>$APP_VERSION</string>
+    <key>CFBundleVersion</key><string>$APP_BUILD</string>
+    <key>CFBundleIconFile</key><string>AppIcon</string>
     <key>LSMinimumSystemVersion</key><string>14.0</string>
     <key>LSUIElement</key><true/>
     <key>NSHighResolutionCapable</key><true/>
@@ -133,6 +148,16 @@ PLIST
 # 승인 프롬프트·권한 문제가 붙고, 사용자 폴더는 본인만 다루는 영역이라
 # 빌드 스크립트가 건드려도 된다. (사용자 지정)
 MACOS_APPS_DIR="$HOME/Applications"
+
+# 버전을 **Android 와 같은 값**으로 쓴다.
+#
+# 하드코딩해 두니 macOS 는 0.1.0, 서버는 0.43.0 이었다. 메뉴바의 "기기" 같은 새
+# 기능이 안 뜰 때 "클라이언트가 구버전이라 지원 안 하나" 하고 추적할 수 없다 —
+# 실제로 그렇게 헤맸다. 한 곳에 있어야 한다.
+APP_VERSION=$(grep -E '^versionName=' "$ROOT/apps/android/gradle.properties" 2>/dev/null | cut -d= -f2)
+APP_BUILD=$(grep -E '^versionCode=' "$ROOT/apps/android/gradle.properties" 2>/dev/null | cut -d= -f2)
+[ -z "$APP_VERSION" ] && APP_VERSION="0.0.0"
+[ -z "$APP_BUILD" ] && APP_BUILD="0"
 
 macos_install() {
   mkdir -p "$MACOS_APPS_DIR"
@@ -212,6 +237,64 @@ case "$CMD" in
     echo "📲 $SERIAL 에 설치 중…"
     adb -s "$SERIAL" install -r "$APK" 2>&1 | tail -1
     echo "✅ 빌드·설치 완료"
+    ;;
+  dmg)
+    if [ "$PLATFORM" = "macos" ]; then
+      # ── 배포용 DMG ──
+      #
+      # `debug`/`run` 은 `~/Applications` 에 직접 깔아서 쓰기 위한 것이고, 남에게
+      # 넘기려면 **끌어다 놓을 수 있는 DMG** 가 필요하다. 특히 게이트키퍼 우회(서명
+      # 공증 미완성) 경로가 DMG 이다.
+      OUT_DIR="$ROOT/dist"
+      mkdir -p "$OUT_DIR"
+      DMG="$OUT_DIR/$APP_NAME-$APP_VERSION.dmg"
+      rm -f "$DMG"
+
+      echo "📦 앱 번들 빌드 중…"
+      BIN=$(swift build -c release --show-bin-path 2>/dev/null)/$MACOS_TARGET
+      if [ ! -x "$BIN" ]; then
+        echo "❌ 먼저 debug 로 빌드하세요: ./build_and_run.sh debug macos"; exit 1
+      fi
+      STAGE=$(mktemp -d)
+      macos_bundle "$BIN" "$STAGE/$APP_NAME.app" release
+
+      echo "💿 DMG 생성 중… ($APP_NAME-$APP_VERSION)"
+      # Applications 바로가기 — 사용자가 드래그해서 옮기는 일반적인 형태
+      ln -s /Applications "$STAGE/Applications"
+      if command -v create-dmg >/dev/null 2>&1; then
+        # **인자 순서가 `<출력> <소스폴더>` 다** — 반대로 주면 소스폴더가 DMG 경로로
+        # 해석돼 `cd: …/out.dmg: No such file or directory` 로 조용히 실패한다.
+        #
+        # `set -e` 때문에 실패하면 뒤의 "✅/❌" 메시지조차 안 찍히고 스크립트가 죽는다.
+        # 그래서 **실패를 감지해 직접 처리**한다.
+        if ! create-dmg --volname "$APP_NAME $APP_VERSION" --window-size 460 260 \
+             --icon-size 96 --icon "$APP_NAME.app" 140 130 \
+             --app-drop-link 460 130 --no-internet-enable "$DMG" "$STAGE" 2>&1 | tail -3; then
+          echo "  ⚠️ create-dmg 실패 — 파일 확인 후 계속"
+        fi
+      else
+        echo "  (create-dmg 없음 — hdiutil 로 최소 구성 생성)"
+        hdiutil create -srcfolder "$STAGE" -volname "$APP_NAME" \
+          -fs HFS+ -format UDRW -ov "$DMG" >/dev/null 2>&1 || true
+      fi
+      rm -rf "$STAGE"
+
+      if [ ! -f "$DMG" ]; then
+        echo "❌ DMG 생성 실패"
+        exit 1
+      fi
+      # 실제 DMG 이 열리고 앱이 들어 있는지 확인 — 크기만 보고 넘어가지 않는다
+      if hdiutil verify "$DMG" >/dev/null 2>&1; then
+        SIZE=$(du -h "$DMG" | cut -f1 | tr -d ' ')
+        echo "✅ DMG: $DMG  ($SIZE)"
+        echo "   배포 시 사용자는 이 파일을 열고 Applications 로 끌어다 놓습니다."
+      else
+        echo "⚠️  DMG 는 생성됐지만 검증에 실패했습니다: $DMG"
+      fi
+      exit 0
+    fi
+    echo "❌ dmg 는 macOS 만 지원합니다"
+    exit 1
     ;;
   run)
     if [ "$PLATFORM" = "macos" ]; then
@@ -314,7 +397,7 @@ case "$CMD" in
     echo "✅ a11y 덤프 완료"
     ;;
   *)
-    echo "usage: ./build_and_run.sh [debug|run|test|diagnose|uninstall|clean|a11y|devices] [android|macos]"
+    echo "usage: ./build_and_run.sh [debug|run|dmg|test|diagnose|uninstall|clean|a11y|devices] [android|macos]"
     echo
     echo "  android (기본)"
     echo "    debug      빌드·설치        run     재시작         log     logcat"
@@ -322,10 +405,11 @@ case "$CMD" in
     echo "    a11y       덤프 수집        devices 연결 목록"
     echo
     echo "  macos"
-    echo "    debug      swift build + .app 번들 → ~/Applications 설치"
+    echo "    debug      swift build + .app 번들(아이콘 포함) → ~/Applications 설치"
     echo "    run        설치본 실행 (프로세스 생존 확인까지)"
     echo "    diagnose   서버 탐색 · SSE 생존 (메뉴바 앱의 유일한 진단 수단)"
     echo "    test       swift test       clean   .build 클린"
+    echo "    dmg        배포용 DMG 생성 → dist/  (macOS 전용)"
     echo "    uninstall  ~/Applications 에서 제거"
     echo
     echo "  DRD_SERIAL=<시리얼> 로 Android 대상 기기 지정 (여러 대 연결 시 필수)"
