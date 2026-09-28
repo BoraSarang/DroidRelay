@@ -19,7 +19,7 @@ final class LoginItemTests: XCTestCase {
     }
 
     /// 번들 판정은 자기 자신에 대해 정확해야 한다 — 스위치를 켜기 전에
-    /// "이게 설���본이 아닌데" 를 아는 게 첫 단계다.
+    /// "이게 설정이 아닌데" 를 아는 게 첫 단계다.
     func test_번들_판단은_자기_경로에_대해_정확하다() {
         let ext = Bundle.main.bundleURL.pathExtension
         XCTAssertEqual(LoginItem.isBundled, ext == "app",
@@ -45,7 +45,7 @@ final class LoginItemTests: XCTestCase {
         XCTAssertFalse(LoginItem.Result.notBundled.message.isEmpty)
     }
 
-    /// 원래 사유가 있으면 그걸 보여준다 — 정규화는 빈 값 가互换만 한다.
+    /// 원래 사유가 있으면 그걸 보여준다 — 정규화는 빈 값 교체만 한다.
     func test_사유는_원문_을_보존한다() {
         XCTAssertEqual(LoginItem.Result.failed("서명이 필요합니다").message, "서명이 필요합니다")
     }

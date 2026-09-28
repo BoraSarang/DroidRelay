@@ -168,6 +168,39 @@ final class ActionRulesTests: XCTestCase {
         }
     }
 
+    /// **`받기` 는 `DONE` 에만 나온다** — 웹 1174행.
+    ///
+    /// 서버 `GET /file/{id}` 는 `DONE` 이 아니면 400 "아직 완료되지 않았습니다" 다
+    /// (JobRoutes 240행). 넓게 두면 **누를 수 있는데 안 되는** 버튼이 된다.
+    func test_받기는_완료한_잡에서만_나온다() {
+        XCTAssertTrue(ActionRules.jobDownloadable("DONE"))
+        for s in ["QUEUED", "RUNNING", "PAUSED", "FAILED", "STALLED", "CANCELED"] {
+            XCTAssertFalse(ActionRules.jobDownloadable(s),
+                           "\(s) 는 아직 다 안 받았으니 '받기'가 뜨면 안 된다")
+        }
+    }
+
+    /// **완료 잡도 목록에 보여야 한다** — 웹 `jobs.forEach` 처럼 전부 그린다.
+    ///
+    /// 원래는 `!isFinished` 로 필터했다. 그래서 **1초짜리 파일을 추가하면
+    /// 잡이 눈앞에서 사라졌다** — "추가했는데 안 보인다 → 실패한 줄 안다".
+    func test_완료된_잡도_진행중_잡도_모두_끝나지_않은_것으로_보인다() {
+        for s in ["QUEUED", "RUNNING", "PAUSED", "STALLED", "FAILED"] {
+            XCTAssertTrue(ActionRules.isUnfinished(s), "\(s) 는 진행 중으로 세야 한다")
+        }
+        for s in ["DONE", "CANCELED"] {
+            XCTAssertFalse(ActionRules.isUnfinished(s), "\(s) 는 끝났으니 배지에서 빠진다")
+        }
+    }
+
+    /// **`QUEUED` 를 빠뜨리면 추가 직후 잡이 사라진다** — 서버는 받는 즉시 `QUEUED`.
+    ///
+    /// 이건 실제로 겪은 버그라 회귀 테스트로 남긴다.
+    func test_대기중_잡도_배지에_남는다() {
+        XCTAssertTrue(ActionRules.isUnfinished("QUEUED"),
+                      "추가하자마자 QUEUED 가 되는데 이걸 빼면 '추가했는데 안 보인다' 가 된다")
+    }
+
     /// 상태 표기 — 웹 999행 `label()` 과 동일해야 혼동이 없다
     func test_상태표기가_웹과_같다() {
         XCTAssertEqual(ActionRules.State.running.korean, "진행 중")

@@ -82,18 +82,27 @@ public enum ActionRules {
         [State.done.rawValue, State.canceled.rawValue].contains(s)
     }
 
-    /// **목록 행을 만들어야 하는 상태인가.**
+    /// **아직 끝나지 않은 잡인가** — 배지와 "진행" 숫자를 세는 기준.
     ///
-    /// ## 왜 별도 판정인가
+    /// ## 왜 이름이 중요했나
     ///
-    /// `isActive`(속도 합산) 과 `isListable`(화면에 표시) 은 **목적이 다르다.**
-    /// - 속도 합산: 지금 실제로 네트워크를 쓰는가 → `RUNNING`/`DOWNLOADING` 만
-    /// - 목록 표시: 사용자가 알아야 하는가 → **`QUEUED` 도 포함**
+    /// 원래 이름은 `isListable`("목록에 뜨는가") 이었다. 하지만 **완료 잡도
+    /// 목록에 보여야 한다** 고 정해져(웹과 동일) 이 이름이 **거짓말**이 되었다.
+    /// 거짓말인 이름은 나중에 "이 필터로 목록을 그린다" 는 코드를 다시 쓴다.
     ///
-    /// `QUEUED` 를 빼면 **다운로드를 추가한 직후 잡이 화면에서 사라진다.**
-    /// 서버가 받는 즉시 `QUEUED` 로 시작하기 때문에, 사용자가 보는 건
-    /// "추가했는데 안 보임" 이고 실패로 오해한다. (실제 버그였다)
-    public static func isListable(_ s: String) -> Bool {
+    /// 그래서 목적을 이름에 그대로 넣었다. **"그릴 것인가" 가 아니라
+    /// "끝났는가" 다.**
+    ///
+    /// ## 왜 `QUEUED` 도 포함인가
+    ///
+    /// 원래는 `RUNNING`/`STALLED` 뿐이었다. 그 결과 **다운로드를 추가하자마자
+    /// 잡이 화면에서 사라졌다** — 서버가 받는 즉시 `QUEUED` 로 시작하는데
+    /// 그것이 필터에 없었기 때문이다.
+    ///
+    /// 사용자가 하는 일이 "추가했는데 안 보인다 → 실패한 줄 안다" 다.
+    /// **다만 이 값은 `isRunning`(속도 합산용) 과 목적이 다르다.**
+    /// 대기 중인 잡은 아직 네트워크를 쓰지 않으므로 속도 합산에는 넣으면 안 된다.
+    public static func isUnfinished(_ s: String) -> Bool {
         !isFinished(s)
     }
 
@@ -145,6 +154,20 @@ public enum ActionRules {
 
     /// **잡 삭제를 보일지** — 웹 1180행: 상태와 무관하게 항상 있다.
     public static func jobDeletable(_ s: String) -> Bool { true }
+
+    /// **완료 잡의 파일을 내려받을 수 있는가** — 웹 1174행.
+    /// ```javascript
+    /// var act = j.state==='DONE' ? '<a href="/file/'+j.id+'" download>📥 받기</a>' : '';
+    /// ```
+    ///
+    /// ## 왜 `DONE` 뿐인가
+    ///
+    /// 서버 `GET /file/{id}` 는 **`state != DONE` 이면 400 "아직 완료되지 않았습니다"**
+    /// 로 거절한다(JobRoutes 240행). 버튼을 넓게 두면 **누를 수 있는데 안 되는**
+    /// 버튼이 된다 — 앱에서 이미 한 번 겪은 종류의 버그다.
+    public static func jobDownloadable(_ s: String) -> Bool {
+        s == State.done.rawValue
+    }
 
     /// 잡 행의 속도 제한 선택기를 **보여줄지** — 웹 1181행과 동일.
     ///

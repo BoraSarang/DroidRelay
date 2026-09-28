@@ -3,6 +3,27 @@ import SwiftUI
 import DroidRelayCore
 import AppKit
 
+/// **화면에만 있고 서버에는 안 쓰는 값들.**
+///
+/// `static let` 은 **저장 프로퍼티의 초기화식에서 참조할 수 없다**(`Self` 제약).
+/// 초기화식에서 바로 읽어야 하는 키는 여기 둔다.
+private enum Prefs {
+    static let finishedKey = "showFinishedJobs"
+
+    /// **키가 없으면 `true`(펼침).**
+    ///
+    /// `bool(forKey:)` 만 쓰면 **키가 없는 사용자 = 접힘** 이 되어,
+    /// "아무것도 안 한 사람"의 기본값이 "숨김"이 된다. 기본은 보여야 한다.
+    static var showFinishedJobs: Bool {
+        UserDefaults.standard.object(forKey: finishedKey) == nil
+            ? true
+            : UserDefaults.standard.bool(forKey: finishedKey)
+    }
+    static func setShowFinishedJobs(_ v: Bool) {
+        UserDefaults.standard.set(v, forKey: finishedKey)
+    }
+}
+
 /// 앱 전역 상태. @Observable 이므로 view 가 자동으로 갱신된다.
 @Observable
 @MainActor
@@ -312,11 +333,51 @@ final class AppModel {
         }
     }
 
-    var activeJobs: [RelayClient.Job] { jobs.filter { $0.isActive } }
+    /// **진행 중 잡** — 배지와 "진행" 숫자의 기준.
+    var ongoingJobs: [RelayClient.Job] { jobs.filter { $0.isUnfinished } }
     var seedingJobs: [RelayClient.Job] { jobs.filter { $0.isSeeding } }
-    /// 배지는 **탭과 무관하게** 전체 활성 수를 센다 — 어느 탭에 있든 진행 중임을 알린다.
+    /// **끝난 잡** (`DONE`/`CANCELED`).
+    var finishedJobs: [RelayClient.Job] { jobs.filter { $0.isFinishedJob } }
+
+    /// **목록에 그릴 잡** — 진행 중을 먼저, 끝난 것을 뒤에.
+    ///
+    /// ## 왜 끝난 것도 보여주나
+    ///
+    /// 원래는 `!isFinished` 로 필터했다. 그래서 **1초짜리 파일을 추가하면
+    /// 잡이 눈앞에서 사라졌다** — 서버가 `DONE` 으로 바꾸는 순간 목록에서 빠졌다.
+    /// 사용자가 하는 일은 "추가했는데 안 보인다 → 실패한 줄 안다" 다.
+    ///
+    /// 웹 대시보드는 **전부 그린다**(`jobs.forEach`) — 완료 잡에는 `📥 받기`
+    /// 버튼이 붙는다. 앱만 다르게 하면 "웹에선 보이는데 앱에선 없다" 가 된다.
+    ///
+    /// 그래서 진행 중을 위에 두고 **끝난 것도 아래에 보여준다.**
+    var listedJobs: [RelayClient.Job] {
+        showFinishedJobs ? ongoingJobs + finishedJobs : ongoingJobs
+    }
+
+    /// **완료 잡을 접을까** — 기본은 펼침.
+    ///
+    /// ## 왜 서버를 안 건드나
+    ///
+    /// "완료만 지우기" 가 가장 직관적이지만 **`DELETE /api/jobs/{id}` 는
+    /// 받은 파일까지 지운다**(서버가 `doneFile` 을 `deleteRecursively`).
+    /// 목록을 정리하는 **버튼**이 **사용자 파일을 지우는 버튼** 이 되면 안 된다.
+    ///
+    /// 그래서 **화면에서만 접는다.** 서버에 쓰지 않으니 되돌릴 수 있고,
+    /// 실수로 지울 일도 없다. 원본은 그대로 있고 화면만 조용해진다.
+    /// **저장된 값을 로드한다** — 기본값으로 시작하면 실행할 때마다 되돌아가서
+    /// "접기가 저장이 안 된다" 고 보인다. (`speedSetting` 과 같은 이유)
+    ///
+    /// `bool(forKey:)` 는 **키가 없으면 `false` 다.** 그래서 그냥 쓰면
+    /// "한 번도 접지 않은 사용자"에게 **처음부터 접힌 목록**이 나온다 —
+    /// 아무것도 안 한 사람의 기본값이 "숨김"이 된다. 키가 있는지를 먼저 본다.
+    var showFinishedJobs = Prefs.showFinishedJobs {
+        didSet { Prefs.setShowFinishedJobs(showFinishedJobs) }
+    }
+
+    /// 배지는 **탭과 무관하게** 전체 진행 수를 센다 — 어느 탭에 있든 진행 중임을 알린다.
     var activeTorrents: [Torrent] { torrents.filter { $0.isActive } }
-    var badgeCount: Int { activeJobs.count + activeTorrents.count }
+    var badgeCount: Int { ongoingJobs.count + activeTorrents.count }
 
     /// 메뉴바에 표시할 출처 — 설정으로 고른다.
     ///
@@ -780,5 +841,42 @@ final class AppModel {
         func openDashboard() {
         guard let s = server else { return }
         NSWorkspace.shared.open(s.baseURL)
+    }
+
+    /// **완료 잡의 파일을 브라우저로 받는다** — 웹 1174행의 `📥 받기`.
+    ///
+    /// ## 왜 브라우저인가
+    ///
+    /// 웹도 `/file/{id}` 를 **브라우저가 직접 내려받는 링크**로 준다.
+    /// 앱 안에 내려받기 창을 새로 만들면 "웹에서 받던 걸 앱에서 못 받게 된다" 가 되고,
+    /// 실제로 쓰는 코드(저장 위치·이어받기·이름)를 전부 다시 만들어야 한다.
+    ///
+    /// ## 문자열을 이어 붙이면 안 된다 — 이걸 실제로 겪었다
+    ///
+    /// 처음엔 이렇게 썼다.
+    /// ```swift
+    /// URL(string: s.baseURL.absoluteString + "file/" + j.id)
+    /// ```
+    /// `baseURL` 은 **`http://10.38.120.211:3000` 으로 끝에 슬래시가 없다.**
+    /// 그래서 만들어진 문자열은 `http://10.38.120.211:3000file/…` 이고
+    /// **호스트가 `10.38.120.211:3000file` 이 되어 `URL` 이 `nil` 이 된다.**
+    ///
+    /// 그런데 `guard … else { return }` 이 조용히 끝내므로 **화면에서는 아무 일도
+    /// 안 일어나 보인다.** "받기 버튼이 눌리는데 아무 파일도 안 온다" 는
+    /// 클릭으로 확인하지 않으면 **절대 못 찾는 버그**였다.
+    ///
+    /// 조립은 `RelayClient.fileURL(base:id:)` 로 옮겼다 — **테스트로 고정돼 있다.**
+    func openJobFile(_ j: RelayClient.Job) {
+        guard let s = server, let u = RelayClient.fileURL(base: s.baseURL, id: j.id) else {
+            lastResult = "받기 실패 — 서버 주소를 모릅니다"
+            return
+        }
+        // **열지 못했다면 말해야 한다.** `open` 은 `Bool` 을 돌려주는데
+        // 무시하면 "누르는 데 실패했다" 와 "아무 일도 없었다" 가 화면에서 같다.
+        if NSWorkspace.shared.open(u) {
+            lastResult = "받는 중 — \(j.name)"
+        } else {
+            lastResult = "받기 실패 — \(j.name) 을 브라우저로 열지 못했습니다"
+        }
     }
 }

@@ -21,7 +21,7 @@ public enum LoginItem {
     /// 사용자가 시스템 설정에서 껄 수도 있으므로, 성공 여부만으로 상태를 갱신하지 않는다.
     public enum Result: Equatable {
         /// 성공. **결과 상태를 들고간다** — `ok` 로만 두면 해제 성공 뒤에도
-        /// "켜짐" 이라는 메시지가 나가 UI 가 거짓말을 한다(실제로 그렇게 나왔��).
+        /// "켜짐" 이라는 메시지가 나가 UI 가 거짓말을 한다(실제로 그렇게 나왔다).
         case applied(enabled: Bool)
         /// 아직 .app 번들이 아니다 (`swift run` 등)
         case notBundled
