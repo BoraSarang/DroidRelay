@@ -96,9 +96,13 @@ struct PopoverView: View {
     }
 
     /// 탭별 배지 — "이 탭에 진행 중이 몇 개나 있는가"
+    ///
+    /// **완료 잡은 세지 않는다.** 배지는 "지금 무언가 돌아가고 있나" 의 신호다.
+    /// 여기까지 완료까지 세면, 다 받은 다음에도 숫자가 남아
+    /// "뭐가 아직 도는 거지" 를 한 번 더 찾아게 된다.
     private func badge(_ t: AppModel.Tab) -> Int? {
         switch t {
-        case .downloads: return model.activeJobs.isEmpty ? nil : model.activeJobs.count
+        case .downloads: return model.ongoingJobs.isEmpty ? nil : model.ongoingJobs.count
         case .torrents: return model.activeTorrents.isEmpty ? nil : model.activeTorrents.count
         case .storage: return nil
         }
@@ -235,52 +239,170 @@ struct PopoverView: View {
         .padding(.vertical, 10)
     }
 
+    // MARK: - 인라인 추가 줄 (다운로드 · 토렌트)
+
+    /// **입력줄 하나 — 다운로드/토렌트가 같은 규칙을 공유한다.**
+    ///
+    /// ## 왜 함수 하나로 두는가
+    ///
+    /// 처음엔 두 곳에 따로 만들려 했다. 그런데 그 순간 이미 이런 어긋남이 예고된다.
+    /// 한쪽은 "비활성 조건"을 다르게 적고, **붙여넣기 안내가 한쪽에만 나온다.**
+    ///
+    /// → **규칙은 `AddInput` 한 곳, 화면은 이 함수 한 곳.** 차이가 생길 자리가 없다.
+    ///
+    /// ## 규칙
+    ///
+    /// | 규칙 | 이유 |
+    /// |---|---|
+    /// | `canSend == false` 면 버튼 비활성 | PR #28 "눌러도 아무 일 없다" 재발 방지 |
+    /// | 여러 개 붙여넣기 가능 | 링크 5개를 하나씩 넣는 건 현실적이지 않다 |
+    /// | Enter 로도 전송 | 클릭 이동 없이 끝나게 |
+    /// | **실패하면 입력값 유지** | 지우면 다시 타이핑해야 한다 |
+    /// | 성공하면 입력값만 비움 | 연속 추가 가능 |
+    private func addBar(_ spec: AddBarSpec) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: "plus.circle.fill")
+                .font(.system(size: 11))
+                .foregroundStyle(spec.canSend ? Color.accentColor : Color.secondary.opacity(0.5))
+            TextField(spec.placeholder, text: spec.text)
+                .textFieldStyle(.plain)
+                .font(.system(size: 11))
+                .onSubmit(spec.send)          // **Enter = 추가**
+            Button(action: spec.send) {
+                Text("추가").font(.system(size: 11, weight: .semibold))
+            }
+            .controlSize(.small)
+            .buttonStyle(.borderedProminent)
+            .disabled(!spec.canSend)
+            // **자동 검증이 구분할 수 있게 이름을 분리한다.**
+            // ("추가" 라는 이름이 화면에 몇 개 있는지 세면 알림이 아니라 구분의 문제다)
+            //
+            // **힌트는 줄마다 다르다.** 다운로드만 여러 개 붙여넣기가 되고
+            // 토렌트는 `magnet:` 하나다. 같은 문구를 두 줄에 다 붙이면
+            // **둘 중 하나가 거짓말**이 된다(실제로 그렇게 됐고 고쳤다).
+            .accessibilityLabel("\(spec.accessibleName) 추가, \(spec.hint)")
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(Color.secondary.opacity(0.06))
+        .overlay(alignment: .bottom) { Divider().opacity(0.4) }
+    }
+
+    /// **추가줄에 필요한 값들** — 뷰는 이것만 보고 그린다.
+    struct AddBarSpec {
+        let placeholder: String
+        let accessibleName: String
+        /// **붙여넣기 안내** — 줄마다 규칙이 다르므로 **각자 다르다.**
+        /// 같은 문구를 두 줄에 다 쓰면 둘 중 하나는 거짓말이 된다.
+        let hint: String
+        let text: Binding<String>
+        let canSend: Bool
+        let send: () -> Void
+    }
+
     // MARK: - 목록 (다운로드)
 
     private var jobList: some View {
-        ScrollView {
-            LazyVStack(spacing: 2) {
-                if model.activeJobs.isEmpty && model.seedingJobs.isEmpty {
-                    empty("진행 중인 작업이 없습니다", tip: model.phase == .failed ? "설정에서 주소를 확인하세요" : nil)
+        VStack(spacing: 0) {
+            // **목록이 비어도 입력줄은 항상 있다.**
+            // 없으면 "추가하려면 웹으로 가세요" 가 되는데, 그게 싫어서 만든 기능이다.
+            addBar(AddBarSpec(
+                placeholder: "URL 또는 파일 경로",
+                accessibleName: "다운로드",
+                hint: "붙여넣기하면 공백으로 구분해 여러 개 한 번에",
+                text: $model.addUrlText,
+                canSend: model.canAddUrl,
+                send: { model.addDownloads() }
+            ))
+            if !model.finishedJobs.isEmpty { finishedToggle }
+            ScrollView {
+                LazyVStack(spacing: 2) {
+                    if model.listedJobs.isEmpty {
+                        empty("진행 중인 작업이 없습니다", tip: model.phase == .failed ? "설정에서 주소를 확인하세요" : "위에 주소를 넣어 추가하세요")
+                    }
+                    ForEach(model.listedJobs) { j in
+                        JobRow(job: j,
+                               onAction: { act in model.control(j.id, act) },
+                               onDelete: { model.askJobDelete(j) },
+                               onDownload: { model.openJobFile(j) },
+                               onLimit: { bps in model.jobLimit(j.id, bps) })
+                    }
                 }
-                ForEach(model.activeJobs) { j in
-                    JobRow(job: j,
-                           onAction: { act in model.control(j.id, act) },
-                           onDelete: { model.askJobDelete(j) },
-                           onLimit: { bps in model.jobLimit(j.id, bps) })
-                }
-                ForEach(model.seedingJobs) { j in
-                    JobRow(job: j,
-                           onAction: { act in model.control(j.id, act) },
-                           onDelete: { model.askJobDelete(j) },
-                           onLimit: { bps in model.jobLimit(j.id, bps) })
-                }
+                .padding(5)
             }
-            .padding(5)
+            .frame(maxHeight: 300)
         }
-        .frame(maxHeight: 300)
+    }
+
+    /// **완료 잡 접기/펼치기.**
+    ///
+    /// ## 왜 서버를 안 건드나
+    ///
+    /// "완료만 지우기" 가 직관적이지만 **`DELETE /api/jobs/{id}` 는 받은 파일까지
+    /// 지운다.** 목록을 정리하는 버튼이 파일을 지우는 버튼이 되면 안 되므로
+    /// **화면에서만 접는다.** 값은 저장되므로 다음 실행에도 유지된다.
+    ///
+    /// ## 왜 `Button` 이지
+    ///
+    /// 처음엔 `HStack` + `onTapGesture` 로 만들었다. 그러면 **버튼이 아니라
+    /// 정적 텍스트로 노출된다**(실측: `AXImage`/`AXStaticText` 에서 이름만 나옴).
+    /// 눈에는 클릭되는 것처럼 보이지만 **VoiceOver 로는 눌릴 수 없다.**
+    ///
+    /// "누를 수 없어서 안 하는 것" 과 "누르는 법을 몰라서 안 하는 것" 은
+    /// 밖에서 보기엔 똑같다. **진짜 `Button` 으로 만들어야 두 가지가 같아진다.**
+    private var finishedToggle: some View {
+        Button { model.showFinishedJobs.toggle() } label: {
+            HStack(spacing: 4) {
+                Image(systemName: model.showFinishedJobs ? "chevron.down" : "chevron.right")
+                    .font(.system(size: 8, weight: .bold))
+                Text(model.showFinishedJobs ? "완료 \(model.finishedJobs.count)건 접기" : "완료 \(model.finishedJobs.count)건 보기")
+                    .font(.system(size: 10.5))
+                Spacer()
+            }
+            .foregroundStyle(.secondary)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 4)
+        .background(Color.secondary.opacity(0.04))
+        .help(model.showFinishedJobs ? "완료된 작업을 접습니다 (서버는 건드리지 않습니다)" : "완료된 작업을 다시 펼칩니다")
     }
 
     // MARK: - 목록 (토렌트)
 
     private var torrentList: some View {
-        ScrollView {
-            LazyVStack(spacing: 2) {
-                if model.torrents.isEmpty {
-                    empty("토렌트 목록이 없습니다", tip: "웹에서 magnet 를 추가하세요")
+        VStack(spacing: 0) {
+            addBar(AddBarSpec(
+                placeholder: "magnet: 링크",
+                accessibleName: "토렌트",
+                // **다운로드 줄과 문구를 같게 두면 거짓말이다.**
+                // 토렌트는 `AddInput.isMagnet` **하나만** 받는다 —
+                // 두 개를 붙여넣으면 버튼이 영영 안 살아난다.
+                hint: "magnet: 로 시작하는 링크 하나만",
+                text: $model.addMagnetText,
+                canSend: model.canAddMagnet,
+                send: { model.addMagnet() }
+            ))
+            ScrollView {
+                LazyVStack(spacing: 2) {
+                    if model.torrents.isEmpty {
+                        // **"웹에서 추가하세요" 는 이제 거짓말이다.** 앱에서 직접 된다.
+                        empty("토렌트 목록이 없습니다", tip: "위에 magnet 링크를 넣어 추가하세요")
+                    }
+                    ForEach(model.torrents) { t in
+                        TorrentRow(
+                            torrent: t,
+                            onAction: { act in model.torrentControl(t.id, act) },
+                            onDelete: { model.askTorrentDelete(t) },
+                            onLimit: { bps in model.torrentLimit(t.id, bps) }
+                        )
+                    }
                 }
-                ForEach(model.torrents) { t in
-                    TorrentRow(
-                        torrent: t,
-                        onAction: { act in model.torrentControl(t.id, act) },
-                        onDelete: { model.askTorrentDelete(t) },
-                        onLimit: { bps in model.torrentLimit(t.id, bps) }
-                    )
-                }
+                .padding(5)
             }
-            .padding(5)
+            .frame(maxHeight: 300)
         }
-        .frame(maxHeight: 300)
     }
 
     // MARK: - 목록 (보관함)
@@ -502,8 +624,17 @@ struct PopoverView: View {
         HStack(spacing: 0) {
             switch model.selectedTab {
             case .downloads:
-                stat("진행", "\(model.activeJobs.count)")
-                stat("시딩", "\(model.seedingJobs.count)")
+                stat("진행", "\(model.ongoingJobs.count)")
+                // **"시딩" 을 "완료" 로 바꾼다.**
+                //
+                // 잡의 상태는 서버 `JobState` 가 `QUEUED/RUNNING/PAUSED/DONE/
+                // FAILED/CANCELED` 여섯 개뿐이다. **`SEEDING` 이 없다.**
+                // 즉 여기서 "시딩" 숫자는 **항상 0** 이었고, 고장 난 자리를
+                // 고장 난 채로 화면에 내보내고 있었다.
+                //
+                // 끝난 잡을 목록에 보여주기로 했으니 **그 개수**가 실제로
+                // 알고 싶은 숫자가 됐다. 접기 줄에도 같은 수가 나온다.
+                stat("완료", "\(model.finishedJobs.count)")
                 stat("여유", model.storageFree > 0 ? RelayClient.format(bytes: model.storageFree) : "—")
             case .torrents:
                 stat("진행", "\(model.activeTorrents.count)")
@@ -613,6 +744,8 @@ struct JobRow: View {
     /// `POST /api/jobs/{id}/{action}` 이지만 삭제는 `DELETE /api/jobs/{id}` 다.
     /// 같은 클로저로 보내면 서버가 400 으로 거절한다(실측).
     var onDelete: () -> Void = {}
+    /// **받기 — `GET /file/{id}` 를 브라우저로 연다** (웹 1174행)
+    var onDownload: () -> Void = {}
     /// **속도 제한 — `POST /api/jobs/{id}/limit`** (B/s 값)
     var onLimit: (Int) -> Void = { _ in }
 
@@ -662,6 +795,17 @@ struct JobRow: View {
             // 상태가 고정이었다. 재개 경로가 화면에 없었다.
             // 규칙은 `ActionRules` 한 곳에 있다 (테스트 15건이 웹과 같은지 고정).
             HStack(spacing: 5) {
+                // **받기 — 웹 1174행.** `DONE` 에만 나온다.
+                //
+                // 완료 잡을 목록에 보여주기로 했으니 **받아갈 방법도 있어야 한다.**
+                // 없으면 "완료 목록"은 "이름만 있고 손댈 수 없는 목록"이 되고,
+                // 그건 목록이 아니라 알림이다.
+                //
+                // `DONE` 밖에서 누르면 서버가 400 "아직 완료되지 않았습니다" 다
+                // (JobRoutes 240행) → **누를 수 있는데 안 되는 버튼**이 된다.
+                if ActionRules.jobDownloadable(job.state) {
+                    small("📥 받기", .primary) { onDownload() }
+                }
                 ForEach(actions, id: \.self) { a in
                     if a == .videoNotice {
                         // 비디오는 서버가 일시정지를 400 으로 거절한다 —

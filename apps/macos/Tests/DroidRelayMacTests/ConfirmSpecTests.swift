@@ -15,22 +15,43 @@ final class ConfirmSpecTests: XCTestCase {
 
     // MARK: - 잡
 
-    /// **잡 삭제는 완전 삭제다** — 서버가 `partialFile()`·`doneFile()` 을 둘 다 지운다.
-    /// 진행 중이어도, 완료여도 같다. → 반드시 "되돌릴 수 없다" 고 말해야 한다.
-    func test_잡_삭제는_되돌릴_수_없다고_말한다() {
-        let j = makeJob(state: "DOWNLOADING", name: "영화.mkv")
+    /// **미완료 잡 삭제는 진행분을 버린다** — `partialFile()`·`doneFile()` 을 지운다.
+    /// → 되돌릴 수 없으므로 반드시 말해야 한다.
+    func test_진행중_잡_삭제는_되돌릴_수_없다고_말한다() {
+        let j = makeJob(state: "RUNNING", name: "영화.mkv")
         let s = ConfirmSpec.job(j)
-        XCTAssertTrue(s.isDestructive, "잡 삭제는 파괴 동작이어야 한다")
-        XCTAssertTrue(s.body.contains("되돌릴 수 없습니다"),
-                      "잡 삭제 본문에 복구 불가 문구가 없다: \(s.body)")
+        XCTAssertTrue(s.isDestructive, "진행 중인 잡 삭제는 파괴 동작이어야 한다")
+        XCTAssertTrue(s.body.contains("버려집니다"),
+                      "진행 중인 잡 삭제 본문에 진행분 버림 문구가 없다: \(s.body)")
     }
 
-    /// **완료된 잡도 마찬가지** — `doneFile()` 이 지우므로 파일이 사라진다.
-    func test_완료된_잡도_파괴_동작이다() {
+    /// **완료 잡 삭제는 목록에서만** — 서버 `DownloadEngine.cancel` 183행
+    /// `if (job.state == DONE) return` 이 **아무 파일도 지우지 않는다.**
+    ///
+    /// ## 이 테스트가 막는 사고
+    ///
+    /// 예전 문구는 상태를 안 가르고 "지금까지 받은 파일까지 삭제됩니다" 였다.
+    /// 실제로 `DONE` 잡을 지워보니 **파일이 보관함에 그대로 있었다.**
+    /// 반대로 말하면 사용자가 **컨펌을 안 읽고 누르는 법을 배운다** —
+    /// 오늘 사용자 토렌트를 지운 사고와 같은 습관이 된다.
+    /// 안전해지는 대신 경계가 사라지는 거라 더 나쁘다.
+    func test_완료된_잡_삭제는_목록만_지우고_파일을_지우지_않는다고_말한다() {
         let j = makeJob(state: "DONE", name: "완료.zip")
         let s = ConfirmSpec.job(j)
-        XCTAssertTrue(s.isDestructive)
-        XCTAssertTrue(s.body.contains("삭제"))
+        XCTAssertFalse(s.isDestructive, "완료 잡은 목록만 지우므로 파괴 동작이 아니다")
+        XCTAssertTrue(s.body.contains("목록에서만"),
+                      "완료 잡에 '목록에서만' 안내가 없다: \(s.body)")
+        XCTAssertTrue(s.body.contains("그대로 있습니다"),
+                      "완료 잡에 파일 보존 안내가 없다: \(s.body)")
+        XCTAssertFalse(s.body.contains("되돌릴 수 없습니다"),
+                       "완료 잡은 파일이 남는데 복구 불가라고 말하면 거짓말이다: \(s.body)")
+    }
+
+    /// **`CANCELED` 도 완료 쪽** — 서버는 `DONE` 만 예외로 두지만,
+    /// 취소된 잡은 애초에 완성 파일이 없다. 그래도 "파일을 지운다" 고 말하면 안 된다.
+    func test_취소된_잡도_파일을_지운다고_말하지_않는다() {
+        let s = ConfirmSpec.job(makeJob(state: "CANCELED", name: "x.zip"))
+        XCTAssertFalse(s.body.contains("파일까지 삭제"))
     }
 
     /// **이름이 화면에 보인다** — 무엇을 지우는지 확인 안 하고 지르면 안 된다.

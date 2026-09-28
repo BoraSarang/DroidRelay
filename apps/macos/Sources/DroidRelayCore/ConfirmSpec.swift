@@ -18,13 +18,15 @@ import Foundation
 ///
 /// | 종류 | 서버 동작 | 파일 |
 /// |---|---|---|
-/// | 잡 | `DownloadEngine.cancel` | **partial·done 파일까지 삭제** |
+/// | 잡(완료) | 목록에서만 제거 | **보관함에 그대로 남음** |
+/// | 잡(미완료) | `DownloadEngine.cancel` | 진행분(partial) 버려짐 · **보관함은 그대로** |
 /// | 토렌트(완료) | 목록에서만 제거 | **그대로 남음** |
 /// | 토렌트(미완료) | 쓰레기 정리 | **받은 조각 삭제됨** |
 /// | 보관함 | 휴지통으로 이동 | **휴지통에서 복원 가능** |
 ///
 /// ── 서버 근거 ──
 /// - `JobRoutes` 142행 → `DownloadEngine.cancel`
+/// - `DownloadEngine.cancel` **183행 `if (job.state == DONE) return`** → 완료는 파일 안 지움
 /// - `DownloadEngine.cancel` 193~194행 → `partialFile()?.delete()`, `doneFile()?.delete()`
 /// - `TorrentEngine.cancel` 830~831행 → `if (isComplete) { /* 목록만 */ }`
 /// - `StorageRoutes` → 휴지통 이동 + `trash/restore`
@@ -95,19 +97,49 @@ public struct ConfirmSpec: Equatable, Sendable {
 
     // MARK: - 잡
 
-    /// **잡 삭제 — 완전 삭제가 된다.**
+    /// **잡 삭제 — 완료 여부에 따라 확정한 의미가 다르다.**
     ///
-    /// 서버가 `partialFile()` 과 `doneFile()` 을 **둘 다** 지운다.
-    /// 즉 **다 받은 파일까지 사라진다.** 진행 중이든 완료든 예외가 없다.
+    /// ## 서버가 실제로 하는 일
     ///
-    /// → "되돌릴 수 없습니다" 를 **반드시** 말한다.
+    /// `DownloadEngine.cancel` **맨 첫 줄**이 이걸 가른다.
+    /// ```kotlin
+    /// if (job.state == JobState.DONE) return      // 183행
+    /// ```
+    /// - **완료(`DONE`)**: **아무 파일도 지우지 않는다.** 잡 목록에서만 빠진다.
+    ///   받은 파일은 보관함에 그대로 있다.
+    /// - **미완료**: `partialFile()` 과 `doneFile()` 을 **둘 다** 지운다(193~194행).
+    ///   **여기까지 받은 진행분이 버려진다.**
+    ///
+    /// ## 왜 나누나 — 이건 실제로 틀렸었다
+    ///
+    /// 처음엔 상태를 안 가르고 "지금까지 받은 파일까지 삭제됩니다" 로 통일했다.
+    /// **`DONE` 잡을 지워보니 파일이 살아있었다**(실측: 잡은 사라졌는데
+    /// 보관함의 `master.zip` 이 그대로였다).
+    ///
+    /// 반대 방향도 나쁘다. **다 Received 파일을 지우지 않으면서 지운다고 말하면,
+    /// 사용자는 컨펌을 안 읽고 누르는 법을 배운다** — 오늘 데이터가 사라진 것과
+    /// 똑같은 습관이다. 안전해지는 대신 경계가 사라지는 거라 더 나쁘다.
+    ///
+    /// → 서버가 하는 일을 그대로 말한다.
     public static func job(_ j: RelayClient.Job) -> ConfirmSpec {
-        ConfirmSpec(
-            title: "다운로드 삭제",
+        let n = safeName(j.name)
+        if j.isFinishedJob {
+            return ConfirmSpec(
+                title: "다운로드 삭제",
+                parts: [
+                    .init("「\(n)」 — "),
+                    .init("목록에서만", strong: true),
+                    .init(" 사라집니다. 받은 파일은 보관함에 그대로 있습니다."),
+                ],
+                isDestructive: false
+            )
+        }
+        return ConfirmSpec(
+            title: "다운로드 취소",
             parts: [
-                .init("「\(safeName(j.name))」 — "),
-                .init("지금까지 받은 파일까지 삭제", strong: true),
-                .init("됩니다. 되돌릴 수 없습니다."),
+                .init("「\(n)」 — "),
+                .init("여기까지 받은 진행분은 버려집니다", strong: true),
+                .init(". 보관함에 있는 파일은 건드리지 않습니다."),
             ],
             isDestructive: true
         )

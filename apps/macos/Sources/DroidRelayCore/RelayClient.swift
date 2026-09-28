@@ -12,6 +12,27 @@ import Foundation
 /// MCP 12개 도구는 다른 클라이언트를 위해 그대로 남겨 둔다(공존).
 public struct RelayClient: Sendable {
     public let base: URL
+
+    /// **완료 잡의 파일을 내려받는 주소** — `GET /file/{id}` (웹 1174행).
+    ///
+    /// ## 왜 함수를 따로 떼어냈나
+    ///
+    /// 처음엔 뷰 쪽에서 문자열을 이어 붙였다.
+    /// ```swift
+    /// URL(string: base.absoluteString + "file/" + id)   // ← 이게 문제였다
+    /// ```
+    /// `base` 는 **`http://10.38.120.211:3000` 으로 끝에 슬래시가 없다.**
+    /// 이어 붙이면 `http://10.38.120.211:3000file/…` 이 되고,
+    /// **호스트가 `10.38.120.211:3000file` 이 되어 `URL` 이 `nil` 이 된다.**
+    ///
+    /// `nil` 을 조용히 넘기면 **누른 흔적 없이 아무 일도 안 일어난다.**
+    /// 실제로 그렇게 고장 났고, 클릭으로 확인해서야 알았다.
+    /// 그래서 조립을 **여기**로 옮겨 테스트로 고정한다.
+    public static func fileURL(base: URL, id: String) -> URL? {
+        guard var c = URLComponents(url: base, resolvingAgainstBaseURL: false) else { return nil }
+        c.path = "/file/\(id)"
+        return c.url
+    }
     private let session: URLSession
 
     public init(base: URL, session: URLSession = .shared) {
@@ -64,18 +85,20 @@ public struct RelayClient: Sendable {
         /// 사용자가 아무것도 안 고르고 확인하면 틀린 정보를 믿게 된다.
         public let maxDownBps: Int
 
-        /// **목록에 뜨는 상태인가.**
+        /// **아직 끝나지 않은 잡인가** — 배지와 "진행" 숫자를 세는 기준.
         ///
-        /// ## 왜 `QUEUED` 를 넣었나
+        /// ## 왜 이름이 중요했나
         ///
-        /// 원래는 `RUNNING`/`STALLED` 뿐이었다. 그 결과 **다운로드를 추가하자마자
-        /// 잡이 화면에서 사라졌다** — 서버가 받는 즉시 `QUEUED` 로 시작하는데
-        /// 그것이 필터에 없었기 때문이다.
+        /// 원래 이름은 `isListable`("목록에 뜨는가") 이었다. 하지만 **완료 잡도
+        /// 목록에 보여야 한다** 고 정해져(웹과 동일) 이 이름이 **거짓말**이 되었다.
+        /// 거짓말인 이름은 나중에 "이 필터로 목록을 그린다" 는 코드를 다시 쓴다.
         ///
-        /// 사용자가 하는 일이 "추가했는데 안 보인다 → 실패한 줄 안다" 다.
-        /// **다만 이 값은 `isRunning`(속도 합산용)과 목적이 다르다.**
-        /// 대기 중인 잡은 아직 네트워크를 쓰지 않으므로 속도 합산에는 넣으면 안 된다.
-        public var isActive: Bool { ActionRules.isListable(state) }
+        /// 그래서 목적을 이름에 그대로 넣었다. **"그릴 것인가" 가 아니라
+        /// "끝났는가" 다.**
+        public var isUnfinished: Bool { ActionRules.isUnfinished(state) }
+
+        /// **끝난 잡인가** (`DONE`/`CANCELED`) — 목록 아래에 모이는 대상.
+        public var isFinishedJob: Bool { ActionRules.isFinished(state) }
 
         /// **속도 합산에 쓸 판정** — 서버의 상태 문자열을 하드코딩하지 않는다.
         ///
