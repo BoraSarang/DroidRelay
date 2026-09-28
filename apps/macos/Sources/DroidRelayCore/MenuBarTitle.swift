@@ -102,13 +102,14 @@ public enum MenuBarTitle {
         }
         guard !pairs.isEmpty else { return [.head(Head(badge: badge))] }
 
-        // 1줄: `↑9K ↓450K` — 출처가 2개면 값을 나란히 (`↑9K 8K ↓450K 2M`)
-        let up = pairs.map(\.up).joined(separator: " ")
-        let down = pairs.map(\.down).joined(separator: " ")
+        // **출처별로 값을 하나씩** 넘긴다 — 문자열로 합치면 열 분리가 불가능해진다.
+        // (합쳐서 넘겼을 때 기기 값이 잘려 화자가 "칸이 안 맞는다" 고 했다)
+        let up = pairs.map(\.up)
+        let down = pairs.map(\.down)
         return [
             .head(Head(badge: badge)),
-            .speed(SpeedRow(direction: .up, values: [up])),
-            .speed(SpeedRow(direction: .down, values: [down]))
+            .speed(SpeedRow(direction: .up, values: up)),
+            .speed(SpeedRow(direction: .down, values: down))
         ]
     }
 }

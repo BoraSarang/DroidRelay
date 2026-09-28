@@ -74,6 +74,28 @@ final class MenuBarTitleTests: XCTestCase {
 
     // MARK: - 1줄 압축 (실측 근거)
 
+    /// **출처별로 값이 분리돼야 한다** — 한 문자열로 합치면 메뉴바에서 열을 나눌 수 없다.
+    /// (합쳐서 넘겼을 때 기기 값이 잘려 "칸이 안 맞는다" 는 보고가 왔다)
+    func test_출처별_값이_분리된다() {
+        let l = title(droid: .init(downBps: 1_048_576, upBps: 1024),
+                      device: .init(downBps: 2_097_152, upBps: 2048))
+        guard case .speed(let up) = l[1], case .speed(let down) = l[2] else {
+            return XCTFail("speed 줄이 아니다")
+        }
+        XCTAssertEqual(up.values.count, 2, "업 값이 2열로 안 나뉜다: \(up.values)")
+        XCTAssertEqual(down.values.count, 2, "다운 값이 2열로 안 나뉜다: \(down.values)")
+        XCTAssertEqual(up.values[0], "1K", up.values.description)
+        XCTAssertEqual(up.values[1], "2K", up.values.description)
+    }
+
+    /// **한 출처면 값이 하나뿐** — 없는 열에 `—` 를 채우지 않는다.
+    func test_한_출처면_값이_하나뿐() {
+        let l = title(droid: .init(downBps: 1024, upBps: 1024), device: nil)
+        guard case .speed(let up) = l[1] else { return XCTFail("speed 줄이 아니다") }
+        XCTAssertEqual(up.values.count, 1, "\(up.values)")
+        XCTAssertEqual(up.values[0], "1K")
+    }
+
     /// **2줄 설계가 물리적으로 불가능했다** — 메뉴바 22pt, 10.5pt 글꼴 한 줄이 13pt.
     /// 그래서 ↑/↓ 를 한 줄에 압축한다. **이 테스트가 그 계약을 지킨다.**
     func test_한_줄에_업과_다운이_모두_있다() {
