@@ -22,40 +22,54 @@ final class StatusItemController {
 
     init(model: AppModel) { self.model = model }
 
-    private var titleView: MenuTitleView?
+    /// 현재 메뉴바에 그려진 줄 (검증용)
+    private var drawnLines: [MenuBarTitle.MenuBarLine] = []
+    /// 모델 관찰 루프 — 팝오버와 무관하게 메뉴바를 갱신한다.
+    private var observe: Task<Void, Never>?
+    /// 메뉴바에 붙는 뷰 — `statusItem.view` 로 들어간다.
+    private var speedView: MenuBarSpeedView?
 
     func install() {
         seedPositionOnce()
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem = item
 
-        if let b = item.button {
-            // **내용은 비운다.** `image` 를 지정한 `NSStatusBarButton` 은 `title` 을
-            // 그리지 않고, `title` 에 줄바꿈을 넣어도 `NSButton` 이 여러 줄을
-            // 렌더링하지 않는다. 둘 다 넣으면 결과적으로 **아이콘만 보인다.**
-            b.image = nil
-            b.title = ""
-            b.target = self
-            b.action = #selector(clicked(_:))
-            b.sendAction(on: [.leftMouseUp, .rightMouseUp])
-
-            // 그림은 서브뷰가 맡는다. autoresizing 으로 붙인다 —
-            // Auto Layout 을 걸면 `NSStatusBarButton` 이 높이를 자기 마음대로 잡아
-            // 줄이 잘린다(실측).
-            let v = MenuTitleView()
-            v.translatesAutoresizingMaskIntoConstraints = true
-            v.autoresizingMask = [.minYMargin, .maxYMargin]
-            b.addSubview(v)
-            titleView = v
-        }
+        // ## `statusItem.view` 로 넣는다 — 여기가 다섯 번째 실패의 답
+        //
+        // `statusItem.button` 의 title·image·서브뷰 로는 **전부 실패했다.**
+        // `NSStatusItem` 은 **`.view` 로도** 내용을 가질 수 있고, 여기에 직접 배치한
+        // `NSTextField` 는 시스템이 건드릴 일이 없다.
+        //
+        // (TetherLens 의 검증된 방식. 2줄이 성립하는 이유도 거기서 찾았다 —
+        //  **9pt 폰트**는 줄당 11pt, 2줄이 22pt 로 메뉴바 두께에 딱 들어간다.
+        //  내 이전 구현은 10.5pt(줄당 13pt)라 26pt 가 필요했고 잘렸다.)
+        let v = MenuBarSpeedView(
+            onClick: { [weak self] in self?.togglePopover() },
+            onRightClick: { [weak self] in self?.showMenu() }
+        )
+        item.view = v
+        speedView = v
         updateBadge()
 
-        // 배지 갱신. `PopoverContainer` 가 `badgeCount` 변화를 알리면 받아 그린다.
-        // (이 알림을 안 받으면 배지는 `install()` 시점 값으로 영영 고착된다)
-        NotificationCenter.default.addObserver(
-            forName: .drBadgeChanged, object: nil, queue: .main
-        ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.updateBadge() }
+        // ## 갱신을 누가 시키는가 — 여기가 마지막 함정이었다
+        //
+        // 이전에는 `PopoverContainer` 의 `.onChange(of: model.badgeCount)` 가
+        // `.drBadgeChanged` 를 올리고 그걸 여기서 받았다. 그럼 **팝오버가 살아야** 갱신된다.
+        //
+        // 그런데 `NSHostingController` 는 **팝오버를 처음 열 때** 만들어진다.
+        // → 앱을 켠 직후에는 아무것도 알리지 않는다 → 메뉴바가 `install()` 시점의
+        // `—` 로 **영영 고착된다.** 사용자가 클릭해 팝오버를 열기 전까지.
+        //
+        // `--watch` 로그로 실측: 서버에는 62.8 KB/s 가 흐르는데 메뉴바는 `—` .
+        // 서버 문제가 아니라 **갱신 트리거가 팝오버에 묶여 있던 것** 이었다.
+        //
+        // → **컨트롤러가 모델을 직접 관찰한다.** 팝오버는 그릴 대상일 뿐 아니다.
+        observe = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(500))
+                if Task.isCancelled { break }
+                await MainActor.run { self?.updateBadge() }
+            }
         }
 
         // **팝오버를 직접 닫지 않는다.** 바깥 클릭은 `behavior = .transient` 가 처리한다.
@@ -79,60 +93,46 @@ final class StatusItemController {
     /// 한 번 더 상처를 냈다: 처음엔 `attributedTitle` 에 넣고 배지만 `b.title` 로 갱신했는데,
     /// AppKit 이 `attributedTitle` 을 **삭제**해서 속도가 사라졌다(배지만 남음).
     /// 지금은 버튼에도 뷰에도 대입하지 않고 **뷰 하나만** 갱신한다.
+    /// 배지와 속도를 **한 번에** 그린다.
+    ///
+    /// ## `b.image` 로 넣는다 — 서브뷰는 실패했다
+    ///
+    /// 커스텀 `NSView` 를 서브뷰로 붙이는 길을 먼저 시도했다. **결과는 아무것도 안
+    /// 보였다** — 안테나 아이콘까지 사라졌다. 원인은 `NSStatusBarButton` 이 컨테이너가
+    /// 아니라 `NSButton` 이고, `NSStatusBar` 이 레이아웃을 다시 잡을 때 **버튼 프레임을
+    /// 자기가 결정한다** — 서브뷰 프레임은 그때마다 버려진다. 넣은 직후 조회하면
+    /// "정상" 으로 보이는데 실제로는 그려지지 않는다.
+    ///
+    /// `b.image` 는 시스템이 **항상** 그리는 자리다(안테나 심볼이 거기서 그려졌다).
+    /// 그래서 그림을 이미지로 구워서 이 자리에 넣는다.
     func updateBadge() {
-        guard let v = titleView else { return }
         let src = model.speedSetting
-        let d = model.droidSpeed
-        let dev = model.deviceSpeedAvailable ? model.deviceSpeed : nil
-
-        // **못 쓰는 출처는 열을 만들지 않는다** — 서버가 값을 안 주는데 0 을 넣으면
-        // 사용자는 "고장 났구나" 를 화면에서 읽는다.
-        v.setLines(MenuBarTitle.lines(
+        let drawn = MenuBarTitle.lines(
             badge: model.badgeCount,
-            droid: d,
-            device: dev,
+            droid: model.droidSpeed,
+            // **못 쓰는 출처는 열을 만들지 않는다** — 서버가 값을 안 주는데 0 을 넣으면
+            // 사용자는 화면에서 "고장 났구나" 를 읽는다.
+            device: model.deviceSpeedAvailable ? model.deviceSpeed : nil,
             includeDroid: src.showDroid,
             includeDevice: src.showDevice
-        ))
-
-        if let b = statusItem?.button {
-            b.needsLayout = true
-            b.layoutSubtreeIfNeeded()
-            let s = v.intrinsicContentSize
-            v.frame = NSRect(x: 0, y: 0, width: s.width, height: s.height)
-            b.frame.size.height = s.height
-            statusItem?.length = s.width
-        }
+        )
+        drawnLines = drawn
+        // **버튼이 아니라 `speedView` 를 갱신한다.** `NSStatusItem.view` 로 붙인 뒤
+        // 여기서 내용을 채운다 — 시스템이 개입하지 않으므로 값이 유실되지 않는다.
+        // 값이 없으면 빈 문자열이 들어가고 앱 아이콘 하나만 남는다.
+        speedView?.apply(drawn)
         renderTooltip()
     }
 
     /// 실제로 그리는 줄 — `--title-check` 검증용.
-    var debugLines: [String] { titleView?.debugLines ?? [] }
+    var debugLines: [String] { drawnLines.map(\.text) }
 
-    /// 상태 항목의 실제 프레임 — **요청한 높이를 시스템이 지켰는지** 확인한다.
-    ///
-    /// **잘림 판정의 기준은 뷰 자신이 아니라 메뉴바 두께다.** 뷰 프레임이
-    /// intrinsic 과 같아도 **버튼이 22pt 면 더 큰 뷰는 시스템이 잘라낸다.**
-    /// 뷰끼리만 비교하면 "잘림 없음" 이라는 잘못된 안락함을 준다(실제로 그랬다).
+    /// 메뉴바에 붙은 실제 프레임 — **잘림 여부를 숫자로 본다.**
     var debugFrames: [String] {
-        guard let b = statusItem?.button, let v = titleView else { return [] }
-        let need = v.intrinsicContentSize.height
-        let room = NSStatusBar.system.thickness
-        let shown = min(need, b.frame.height, room)
-        let fit = need <= room + 0.5
-        return [
-            "버튼 프레임 : w=\(Int(b.frame.width)) h=\(Int(b.frame.height))",
-            "뷰 프레임   : w=\(Int(v.frame.width)) h=\(Int(v.frame.height))",
-            "필요 높이   : \(Int(need))",
-            "메뉴바 두께  : \(Int(room))  ← 이게 실제 한계",
-            "보이는 줄   : \(v.debugLines.count)줄 중 \(max(0, Int((shown / max(need / CGFloat(v.debugLines.count), 1)).rounded(.down))) )줄",
-            "잘림        : " + (fit
-                ? "없음 — 전부 들어감"
-                : "**있음 — \(Int(need - room))pt 가 잘린다. 마지막 \(Int(ceil((need - room) / 13)))줄 이 배 밖으로 나간다**")
-        ]
+        guard let v = speedView else { return ["speedView    : **nil — install() 이 안 돌았다**"] }
+        return ["speedView ok : true"] + v.debugGeometry
     }
 
-    /// 값은 상태로 **한 곳에만** 조립한다 — 메뉴바와 툴팁이 같은 값을 쓴다.
     private func renderTooltip() {
         guard let b = statusItem?.button else { return }
         let sources = model.visibleSpeedSources
@@ -184,7 +184,11 @@ final class StatusItemController {
 
     @objc private func openDash() { model.openDashboard() }
     @objc private func openSettings() { NSApp.activate(ignoringOtherApps: true) }
-    @objc private func quit() { NSApp.terminate(nil) }
+    @objc private func quit() {
+        observe?.cancel()
+        observe = nil
+        NSApp.terminate(nil)
+    }
 }
 
 /// 설정 창은 M4 범위라 지금은 주소 입력만 최소로 제공한다.

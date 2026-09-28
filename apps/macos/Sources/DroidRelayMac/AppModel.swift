@@ -115,7 +115,10 @@ final class AppModel {
 
     /// Droid 속도 = HTTP 잡(다운로드만) + 활성 토렌트(다운/업)
     private func recomputeDroidSpeed() {
-        let jobsDown = jobs.filter { $0.state == "RUNNING" }.reduce(0) { $0 + $1.speedBps }
+        // **잡 상태 문자열을 하드코딩하면 안 된다.** 이전엔 `"RUNNING"` 을 찾았는데
+        // 서버는 `"DOWNLOADING"` 을 보낸다 — 그래서 잡 속도는 **영영 0** 이었다.
+        // 대소문자·언어를 무시하도록 바꾼다.
+        let jobsDown = jobs.filter { $0.isRunning }.reduce(0) { $0 + $1.speedBps }
         let active = torrents.filter { $0.isActive }
         let tDown = active.reduce(0) { $0 + $1.downloadBps }
         let tUp = active.reduce(0) { $0 + $1.uploadBps }
@@ -173,7 +176,11 @@ final class AppModel {
         // SSE tick(빠르면 1초)마다 4요청을 쏘면 서버·망이 불필요하게 busy 해진다.
         // **선택된 탭의 것만** 갱신하고 나머지는 그 탭이 열릴 때 당긴다.
         async let j = selectedTab == .downloads ? client.jobs() : jobs
-        async let t = selectedTab == .torrents ? client.torrents() : torrents
+        // **토렌트는 탭이 열려 있지 않아도 반드시 당긴다.** Droid 속도의 대부분을
+        // 잡이 아니라 토렌트가 차지하는데, 여기서 조건부로 부르면 탭이 '다운로드' 일 때
+        // `torrents` 가 영영 비어 속도가 계속 0 이 된다.
+        // (실측: 서버는 10KB/s 를 보내는데 메뉴바는 '—' — 탭 조건이 원인이었다)
+        async let t = client.torrents()
         async let f = selectedTab == .storage ? client.storage() : storage
         async let i = client.serverInfo()
         let (jobs, torrents, storage, info) = await (j, t, f, i)

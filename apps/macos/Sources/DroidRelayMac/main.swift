@@ -4,6 +4,9 @@ import SwiftUI
 import DroidRelayCore
 import ServiceManagement
 
+/// `--watch` 로그 위치
+let agentWatchLog = NSString(string: "~/.agent-droidrelay-watch.log").expandingTildeInPath
+
 /// 프로세스 진입점 — `@main` 대신 직접 부팅한다(씬 없이).
 ///
 /// **`NSApplicationMain` 을 쓰면 안 된다** — 그 경로는 `Info.plist` 의 씬 설정을
@@ -58,6 +61,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // 상태 항목을 실제로 만들어 **무엇이 그려지는지 문자열로** 확인하는 전용 모드.
         if CommandLine.arguments.contains("--title-check") {
             Task { await Diagnostics.titleCheck() }
+            return
+        }
+        // **실행 중인 앱이 진짜로 무엇을 그리는지** 파일로 남긴다.
+        //
+        // `--title-check` 는 별도 프로세스라 상태 항목이 "살아 있는" 앱과 다르다.
+        // 사용자가 보는 건 이 프로세스인데, 여기를 안 보면 또 같은 착각을 한다.
+        if CommandLine.arguments.contains("--watch") {
+            let m = AppModel(storedAddress: UserDefaults.standard.string(forKey: "serverAddress"))
+            let c = StatusItemController(model: m)
+            model = m; controller = c
+            c.install()
+            Task {
+                await m.connect()
+                while true {
+                    try? await Task.sleep(for: .seconds(1))
+                    await MainActor.run {
+                        let f = c.debugFrames.joined(separator: " / ")
+                        let l = c.debugLines.joined(separator: " | ")
+                        let msg = "[\(Date().timeIntervalSince1970.formatted(.number.precision(.fractionLength(0))))] \(l)  —  \(f)  [\(m.phaseLabel)]\n"
+                        // **덧붙여야 한다.** `String.write(toFile:atomically:false)` 는
+                        // 파일을 **자른다** — 그래서 20초 관찰해도 마지막 1줄만 남았다.
+                        // (이 버그 때문에 "갱신이 안 된다" 고 잘못 읽을 뻔했다)
+                        if !FileManager.default.fileExists(atPath: agentWatchLog) {
+                            FileManager.default.createFile(atPath: agentWatchLog, contents: nil)
+                        }
+                        if let fh = FileHandle(forWritingAtPath: agentWatchLog) {
+                            fh.seekToEndOfFile()
+                            fh.write(Data(msg.utf8))
+                            try? fh.close()
+                        }
+                    }
+                }
+            }
             return
         }
         if CommandLine.arguments.contains("--login-item=off") {
@@ -196,6 +232,7 @@ enum Diagnostics {
         // 상태 문구를 함께 찍는다.
         print("실측 속도   : \(m.droidSpeed.downBps)↓ / \(m.droidSpeed.upBps)↑  (\(m.phaseLabel))")
         print("실제 그리는 줄: \(c.debugLines.joined(separator: " | "))")
+
         NSApp.terminate(nil)
     }
 

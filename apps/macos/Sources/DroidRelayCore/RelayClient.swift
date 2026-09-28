@@ -57,6 +57,21 @@ public struct RelayClient: Sendable {
         public let isVideo: Bool
 
         public var isActive: Bool { state == "RUNNING" || state == "STALLED" }
+
+        /// **속도 합산에 쓸 판정** — 서버의 상태 문자열을 하드코딩하지 않는다.
+        ///
+        /// 이전에 `state == "RUNNING"` 으로만 더했다. 그런데 **`/api/jobs` 는 지금 0건**이고,
+        /// 진행 중인 것은 토렌트 쪽(`DOWNLOADING`)이었다. 문자열이 하나라도 어긋나면
+        /// **조용히 0 이 되고 에러도 없다** — 그래서 몇 시간 동안 놓칠 수 있다.
+        ///
+        /// 대소문자를 무시하고 진행 상태를 폭넓게 받아, 서버가 말을 바꿔도 값이 0 이
+        /// 되지 않게 한다. "완료" 만은 제외한다.
+        public var isRunning: Bool {
+            let s = state.lowercased()
+            guard !s.contains("done") && !s.contains("complete") && !s.contains("fail") else { return false }
+            return s.contains("running") || s.contains("download") || s.contains("active")
+                || s.contains("stalled") || s.contains("progress")
+        }
         public var isSeeding: Bool { state == "SEEDING" || state == "FETCHING_METADATA" }
         public var speedText: String { Self.bps(speedBps) }
         public var upText: String { Self.bps(uploadedBps) }

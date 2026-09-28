@@ -36,6 +36,18 @@ public struct Torrent: Identifiable, Sendable, Equatable {
 
     public var isActive: Bool { state == "DOWNLOADING" || state == "SEEDING" || state == "FETCHING_METADATA" }
     public var isDone: Bool { state == "DONE" }
+
+
+    /// **진행 중인지** — 서버가 보내는 상태 문자열을 하드코딩하지 않는다.
+    ///
+    /// 이전에 `"RUNNING"` 으로만 걸렀는데 서버는 `"DOWNLOADING"` 을 보낸다.
+    /// 문자열이 하나라도 어긋나면 **조용히 0 이 된다** — 에러도 없다.
+    /// 그래서 대소문자를 무시하고 진행 상태들을 폭넓게 받는다.
+    public var isRunning: Bool {
+        let s = state.lowercased()
+        return s.contains("running") || s.contains("download") || s.contains("active")
+            || s.contains("progress") || s.contains("start")
+    }
     public var percent: Int { Int((progress * 100).rounded()) }
 
     public var speedText: String { Self.bps(downloadBps) }

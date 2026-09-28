@@ -623,8 +623,8 @@ T-001~T-008 전부 완료 (커밋 7574486).
 | M-12 | M2 — 팔레트 (Carbon 핫키 `⌘⇧D` · `.nonactivatingPanel` · IME 입력 소스 캡처) | ⏸ |
 | M-13 | M3 — 독립 창 + 탭바 | ⏸ |
 | M-14 | M4 — 설정 영속화 + **DMG 배포 경로** | ⏸ |
-| M-14 | **메뉴바 속도 표시** — `MenuTitleView`(커스텀 뷰로 직접 그림) + `MenuBarTitle`(그릴 줄을 정하는 순수 로직) + `SpeedFormat.compact`(`450K` 압축) · Droid 속도는 잡+토렌트 합산 · 1초 자체 샘플러 · `--title-check` 로 실제 그려지는 문자열·프레임 검증. 테스트 64 → **85건** | ✅ |
-| M-14 | **2줄 → 1줄로 변경** — 메뉴바 두께 22pt, 10.5pt 글꼴 1줄이 13pt 라 2줄(27pt)은 5pt 잘림. `↑9K ↓450K` 로 압축 | ✅ |
+| M-14 | **메뉴바 속도 표시** — `statusItem.view` 로 `MenuBarSpeedView`(NSTextField 2줄 직접 배치) + `MenuBarTitle`(그릴 줄을 정하는 순수 로직) · 9pt 2줄이 메뉴바 22pt 에 들어감 · `--title-check`/`--watch` 로 프레임·잘림·실측값 검증. 테스트 64 → **85건** | ✅ |
+| M-14 | **2줄 표시** — TetherLens 방식(`statusItem.view` + 9pt) 로 확정. 10.5pt 로는 26pt 필요해 잘렸으나 **9pt 는 21pt** 로 22pt 안에 들어간다 | ✅ |
 | M-14 | **설정 시 "DroidRelay Settings" 창이 뜸** — `Settings { EmptyView() }` 씬 하나만 있으면 활성화될 때 자동 표시. 씬 없이 `NSApplication` 직접 부팅으로 교체. 창 0개 확인 | ✅ |
 | M-14 | **기기 속도 — 서버 미지원** (`api/net/speed` 없음). `TrafficStats` 엔드포인트 신설이 선행. 켜져 있어도 **빈 열을 만들지 않는다** (`MenuBarTitle` 가 `device: nil` 이면 제외) | ⏸ |
 | — | **앱 설치 위치 = `~/Applications`** (사용자 지정). `/Applications` 는 시스템 영역이라 승인·권한이 붙는다 | ✅ |
@@ -642,3 +642,5 @@ T-001~T-008 전부 완료 (커밋 7574486).
 
 **M-02 부근 근거**: `docs/mockups/probe_discovery.py` 실측 — 게이트웨이 35ms, `/24` 스캔 0.11초.
 **함정 13종** (리서치 6 + 구현 중 발견 7): `docs/plans/PLAN_v0.42_api-mcp-hardening_android.md` 6-2 / 6-2-1
+
+| M-14 | **속도가 0 으로 표시되던 버그 2건** — ① 잡 상태를 `"RUNNING"` 하드코딩 → 서버는 `DOWNLOADING`. `Job.isRunning` 으로 교체 ② `refresh()` 가 토렌트를 **탭 조건부로** 당김 → 메뉴바용 속도가 0. 항상 당기도록 변경 | ✅ |
