@@ -622,7 +622,8 @@ T-001~T-008 전부 완료 (커밋 7574486).
 | M-11 | 탐색 상태 표시 추가 여부 확정 (`🔌 10.38.120.211 자동 발견 ✓`) | ⏸ |
 | M-12 | M2 — 팔레트 (Carbon 핫키 `⌘⇧D` · `.nonactivatingPanel` · IME 입력 소스 캡처) | ⏸ |
 | M-13 | M3 — 독립 창 + 탭바 | ⏸ |
-| M-14 | M4 — 설정 영속화 (주소 저장 · 자동 시작) + **DMG 배포 경로** | ⏸ |
+| M-14 | M4 — 설정 영속화 + **DMG 배포 경로** | ⏸ |
+| M-14 | **로그인 시 자동 실행** — `SMAppService.mainApp` (구식 `SMLoginItemSetEnabled` 는 macOS 13 deprecated) · 상태는 플래그가 아니라 Launch Services 조회 · 실패 사유를 설정 화면에 노출 · `--login-item=on/off` 진단 플래그 · `--diagnose` 에 상태 출력. 테스트 39 → **45건** | ✅ |
 
 > **M-14 배포 방식 결정 (2026-09-28, 사용자)** — **DMG 로 배포**한다.
 > `spctl` 판정이 `rejected` 인 것은 ad-hoc 서명 상태의 **현재** 판정이고, 지금은

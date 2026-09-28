@@ -120,12 +120,17 @@ struct PopoverContainer: View {
     @Bindable var model: AppModel
     @State private var showSettings = false
     @State private var address = ""
+    /// 로그인 시 자동 실행 — **Launch Services 를 직접 조회**한다(UserDefaults 플래그가 아니라).
+    @State private var loginOn = LoginItem.isEnabled
+    @State private var loginMsg: String? = nil
 
     var body: some View {
         PopoverView(
             model: model,
             onSettings: {
                 address = model.storedAddress ?? ""
+                loginOn = LoginItem.isEnabled   // 시트를 열 때마다 실제 상태로 새로고침
+                loginMsg = nil
                 showSettings = true
             },
             onQuit: { NSApp.terminate(nil) }
@@ -156,10 +161,38 @@ struct PopoverContainer: View {
                 Spacer()
                 Button("다시 찾기") { Task { await model.connect() } }
             }
+
+            Divider()
+            Text("시작").font(.system(size: 14, weight: .bold))
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("로그인 시 자동 실행").font(.system(size: 12))
+                    if let loginMsg {
+                        Text(loginMsg).font(.system(size: 10.5)).foregroundStyle(.secondary)
+                    } else {
+                        Text("Mac 에 로그인하면 DroidRelay 가 자동으로 뜹니다")
+                            .font(.system(size: 10.5)).foregroundStyle(.tertiary)
+                    }
+                }
+                Spacer()
+                Toggle("", isOn: Binding(
+                    get: { loginOn },
+                    set: { toggleLogin($0) }
+                ))
+                .labelsHidden()
+            }
+
             HStack { Spacer(); Button("닫기") { showSettings = false }.keyboardShortcut(.defaultAction) }
         }
         .padding(20)
         .frame(width: 420)
+    }
+
+    /// 실패해도 앱은 죽지 않는다 — 사유를 설정 화면에 남기고 스위치를 원래대로 되돌린다.
+    private func toggleLogin(_ want: Bool) {
+        let r = LoginItem.set(want)
+        loginOn = LoginItem.isEnabled   // 요청한 값이 아니라 **실제** 상태를 따른다
+        if case .applied = r { loginMsg = nil } else { loginMsg = r.message }
     }
 }
 
