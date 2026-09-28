@@ -94,7 +94,7 @@ object StorageJanitor {
         if (!root.exists()) return 0L
         var total = 0L
         root.walkTopDown()
-            .onEnter { it.name != ".trash" }
+            .onEnter { !StorageGuard.isHidden(it.name) }
             .forEach { if (it.isFile) total += it.length() }
         return total
     }
@@ -112,7 +112,7 @@ object StorageJanitor {
         if (!trashDir.exists()) trashDir.mkdirs()
         var moved = 0
         root.walkTopDown()
-            .onEnter { it.name != ".trash" }
+            .onEnter { !StorageGuard.isHidden(it.name) }
             .filter { it.isFile }
             .sortedBy { it.lastModified() }
             .forEach { f ->
@@ -138,7 +138,7 @@ object StorageJanitor {
             }
         // 빈 폴더 정리
         root.listFiles()
-            ?.filter { it.isDirectory && it.name != ".trash" && (it.listFiles()?.isEmpty() == true) }
+            ?.filter { it.isDirectory && !StorageGuard.isHidden(it.name) && (it.listFiles()?.isEmpty() == true) }
             ?.forEach { it.delete() }
         DebugLogger.i("Janitor", "[FEATURE] 쿼터 정리 ${quotaGb}GB 초과 → ${moved}개 휴지통 이동")
         invalidateSizeCache()

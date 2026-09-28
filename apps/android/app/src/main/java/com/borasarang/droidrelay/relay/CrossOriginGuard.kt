@@ -82,15 +82,48 @@ internal object CrossOriginGuard {
     }
 
     /**
-     * Content-Type 화이트리스트.
-     * 본문을 받는 메서드 + [isGuardedPath] 에서만 검사한다.
-     * Content-Type 이 **비어 있어도 거부** 한다 — `fetch(body: Blob)` 로 타입 없이
-     * 보내면 simple request 가 되어 preflight 를 통과하기 때문이다.
+     * 본문 존재 여부.
+     *
+     * `Content-Length` 가 없거나 0 이면 본문 없는 요청이다. `Transfer-Encoding` 이 있으면
+     * 길이를 알 수 없으므로 본문이 **있다**고 본다 — 일부 클라이언트는 빈 몸을 chunked 로 보낸다.
      */
-    fun contentTypeAllowed(contentType: String?, path: String, method: String): Boolean {
+    fun hasBody(contentLength: String?, transferEncoding: String?): Boolean {
+        if (!transferEncoding.isNullOrBlank()) return true
+        val len = contentLength?.trim()?.toLongOrNull() ?: return false
+        return len > 0L
+    }
+
+    /**
+     * Content-Type 화이트리스트.
+     * 본문을 받는 메서드 + [isGuardedPath] + **실제로 본문이 있을 때만** 검사한다.
+     *
+     * **왜 본문이 있을 때만인가** (v0.43, T-1085)
+     * 대시보드의 제어 요청 다수가 본문 없이 호출한다 —
+     * `POST /api/jobs/{id}/pause` · `DELETE /api/torrents/{id}` · `POST /api/rss/{id}/check`.
+     * 브라우저는 본문이 없으면 `Content-Type` 헤더를 아예 보내지 않는데, 앞버전은
+     * "비면 거부"로 이것을 **415 로 막았다.** 토렌트 삭제·일시정지·재개가 전부 죽은 상태였다.
+     * 맥 메뉴바 앱 `RelayClient.control()` 도 `URLRequest` 에 본문·Content-Type 을 붙이지 않아
+     * 같은 이유로 415 를 받고 있었다(응답을 버리므로 사용자에게는 "아무 일도 없다").
+     *
+     * **본문이 있는 요청의 검사 강도는 그대로다.** 이 규칙이 막으려던 벡터는
+     * `text/plain` 본문으로 `JSONObject` 파싱을 혼란시키는 것이고 그런 요청은 반드시 본문이 있다.
+     * 반대로 본문이 없는 요청은 `receiveText()` 가 빈 문자열을 돌려주고 어느 라우트도
+     * 상태를 바꾸지 못한다(JSON 파싱 실패).
+     *
+     * 본문 없는 cross-origin POST/DELETE 는 [originAllowed] 와 [fetchSiteAllowed] 가 막는다 —
+     * 브라우저가 `Origin`·`Sec-Fetch-Site` 를 **항상** 붙이고 JS 로 위조할 수 없기 때문이다.
+     * 이 파일의 대원칙("Origin 검증이 실질 방어선")과도 일관된다.
+     */
+    fun contentTypeAllowed(
+        contentType: String?,
+        path: String,
+        method: String,
+        hasBody: Boolean = true,
+    ): Boolean {
         val m = method.uppercase()
         if (m in BODYLESS_METHODS) return true
         if (!isGuardedPath(path)) return true
+        if (!hasBody) return true
         val ct = contentType?.substringBefore(';')?.trim()?.lowercase().orEmpty()
         if (ct.isEmpty()) return false
         return ALLOWED_CONTENT_TYPES.any { ct == it }

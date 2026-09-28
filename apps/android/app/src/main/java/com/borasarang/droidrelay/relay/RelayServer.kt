@@ -484,7 +484,15 @@ private fun Application.relayRoutes(context: Context, serverRef: RelayServer) {
                     finish()
                     return@intercept
                 }
-                !CrossOriginGuard.contentTypeAllowed(call.request.headers["Content-Type"], reqPath, reqMethod) -> {
+                !CrossOriginGuard.contentTypeAllowed(
+                    call.request.headers["Content-Type"],
+                    reqPath,
+                    reqMethod,
+                    CrossOriginGuard.hasBody(
+                        call.request.headers["Content-Length"],
+                        call.request.headers["Transfer-Encoding"],
+                    ),
+                ) -> {
                     DebugLogger.w(
                         "Security",
                         "Content-Type 거부 ct=${call.request.headers["Content-Type"]} $reqMethod $reqPath (E-AND-SRV-0122)",

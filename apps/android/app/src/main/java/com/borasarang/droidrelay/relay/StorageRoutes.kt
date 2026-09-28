@@ -24,7 +24,37 @@ import org.json.JSONObject
 internal object StorageGuard {
     val dlRoot = java.io.File("/sdcard/Download/DroidRelay")
     val dlRootCanonical: java.io.File get() = dlRoot.canonicalFile
-    val trashDir = java.io.File(dlRoot, ".trash")
+    val trashDir = java.io.File(dlRoot, TRASH_NAME)
+
+    /**
+     * 토렌트 작업 디렉터리 (v0.43, T-1085).
+     *
+     * **왜 보관함 안인가** — libtorrent 는 완료 파일을 `save_dir` 에 쓰고 우리는 완료 후
+     * 보관함으로 옮긴다. 그런데 이전 `saveDir` 인 `getExternalFilesDir(null)/torrents` 는
+     * `/sdcard/Download` 과 **다른 마운트** 라 `rename(2)` 가 EXDEV 로 실패했고,
+     * 3.7GB 동기 복사에 **40초**가 걸렸다. 그동안 5초 폴링 코루틴이 통째로 블로킹돼
+     * 진행률·속도가 얼었다(실측).
+     *
+     * **왜 보관함 루트에 바로 두지 않는가** — 진행 중인 대용량 파일이
+     * `StorageJanitor.enforceQuota` 의 용량 계산에 잡히면, 정리가
+     * `sortedBy { lastModified }` 이므로 **오래된 사용자 파일이 대신 휴지통으로 사라진다.**
+     * `.trash` 와 똑같이 숨겨 UI·용량 계산·관리 API 에서 전부 제외한다.
+     * 완료분만 `rename` 으로 보관함 루트로 올라가므로 **복사가 아니다** — 같은 파일시스템.
+     */
+    const val TRASH_NAME = ".trash"
+    const val TORRENT_TMP_NAME = ".torrents"
+
+    val torrentTmpDir = java.io.File(dlRoot, TORRENT_TMP_NAME)
+
+    /** 보관함 안에서 숨겨야 하는 디렉터리 — 목록·용량 계산·관리 API 전부에서 제외 */
+    fun isHidden(name: String): Boolean = name == TRASH_NAME || name == TORRENT_TMP_NAME
+
+    /** 숨김 디렉터리 아래로는 내려가지 않는다 — 관리 API 가 워킹 디렉터리에 손대지 못하게 */
+    fun isUnderHidden(canonicalPath: String): Boolean =
+        HIDDEN.any { canonicalPath == canonicalOf(dlRoot, it) || canonicalPath.startsWith(canonicalOf(dlRoot, it) + java.io.File.separator) }
+
+    private val HIDDEN = listOf(TRASH_NAME, TORRENT_TMP_NAME)
+    private fun canonicalOf(base: java.io.File, name: String): String = java.io.File(base, name).canonicalFile.path
 
     /** dlRoot 하위로 한정된 canonical File — 탈출 경로는 null */
     fun storageFile(vararg parts: String): java.io.File? {
@@ -32,7 +62,10 @@ internal object StorageGuard {
         for (p in parts) { if (p.isNotEmpty()) f = java.io.File(f, p) }
         val c = f.canonicalFile
         val root = dlRootCanonical.path
-        return if (c.path == root || c.path.startsWith(root + java.io.File.separator)) c else null
+        if (!(c.path == root || c.path.startsWith(root + java.io.File.separator))) return null
+        // 숨김 디렉터리(휴지통·토렌트 워킹)는 관리 API 대상이 아니다
+        if (isUnderHidden(c.path)) return null
+        return c
     }
 
     /**
@@ -85,7 +118,7 @@ internal fun Route.storageRoutes(context: Context, serverRef: RelayServer) {
         }
         val arr = org.json.JSONArray()
         dir.listFiles()?.sortedWith(compareByDescending<java.io.File> { it.isDirectory }.thenBy { it.name })
-            ?.filter { it.name != ".trash" }
+            ?.filter { !StorageGuard.isHidden(it.name) }
             ?.forEach { f ->
             val obj = org.json.JSONObject()
             obj.put("name", f.name)
@@ -188,7 +221,7 @@ internal fun Route.storageRoutes(context: Context, serverRef: RelayServer) {
             val arr = org.json.JSONArray()
             if (depth > 3) return arr
             dir.listFiles()
-                ?.filter { it.isDirectory && it.name != ".trash" }
+                ?.filter { it.isDirectory && !StorageGuard.isHidden(it.name) }
                 ?.sortedBy { it.name.lowercase() }
                 ?.forEach { d ->
                     arr.put(org.json.JSONObject().apply {

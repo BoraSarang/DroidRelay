@@ -39,7 +39,7 @@ internal fun Route.davRoutes(context: Context, serverRef: RelayServer) {
                 val files = mutableListOf(target)
                 if (depth != "0" && target.isDirectory) {
                     target.listFiles()
-                        ?.filter { it.name != ".trash" }
+                        ?.filter { !StorageGuard.isHidden(it.name) }
                         ?.sortedWith(compareByDescending<java.io.File> { it.isDirectory }.thenBy { it.name })
                         ?.let { files.addAll(it) }
                 }

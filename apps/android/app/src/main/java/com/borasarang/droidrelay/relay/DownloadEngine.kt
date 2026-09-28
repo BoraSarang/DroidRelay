@@ -88,6 +88,10 @@ class DownloadEngine(
         restore()
     }
 
+    /** 복원 완료 여부 — `onDestroy`·`onTaskRemoved` 의 즉시 저장이 이를 확인한다 */
+    @Volatile private var restored = false
+    fun isRestored(): Boolean = restored
+
     /** 전역 속도 제한 즉시 적용 (BPS 단위) */
     fun applySpeedLimit(downloadBps: Long, uploadBps: Long) {
         maxDownloadBps.set(downloadBps)
@@ -108,6 +112,7 @@ class DownloadEngine(
     /** 앱 시작 시 jobs.json 복원 → 대기 항목 자동 재개 */
     private fun restore() {
         val restored = persistence.load()
+        this.restored = true
         restored.forEach { job ->
             mapPut(job)
             if (job.type != "http") {

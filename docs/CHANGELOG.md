@@ -1,5 +1,106 @@
 # Changelog
 
+## [v0.43.0] — 토렌트 보관함 이동 + 웹 삭제 복구 (v0.42 회귀 2건)
+
+> T-1085 · 테스트 300 → **313건 0 failures** (`TorrentStorageMoveContractTest` 신규 13건)
+
+### Fixed [android] — 완료된 토렌트가 보관함으로 이동되지 않음
+
+**증상**: 토렌트가 100%로 내려가도 보관함에 나타나지 않고 앱 전용 디렉터리
+(`/storage/emulated/0/Android/data/…/files/torrents`)에 남는다.
+
+**원인 — 자기 모순인 두 조건**. `startStatusPolling` 은 완료 **전이**(직전 상태 →
+DONE/SEEDING)를 보고 `moveToStorage()` 를 불렀다. 그런데 `TORRENT_FINISHED` 알림
+핸들러가 `state = DONE` 을 **먼저** 기록하고, 폴링 주기는 5초다. 완료 직후 5초 안에
+알림이 먼저 도착하므로 폴링이 볼 때 `prevState == DONE` 이었고, **같은 폴링의**
+`if (prevState == … DONE …) return@forEach` 에 막혀 이동 코드에 한 번도 도달하지 못했다.
+
+| | 알림이 먼저 (정상 경로·사실상 항상) | 폴링이 먼저 (드묾) |
+|---|---|---|
+| v0.42 | `early-return` → **이동 안 됨** | 이동 됨 |
+| v0.43 | 이동 됨 | 이동 됨 |
+
+8cb8ce7(T-1055)이 "알림 유실에 대비해 폴링으로 일원화"하려고 `moveToStorage()` 를
+알림에서 **빼기만** 했고, 알림이 state 를 선기록한다는 사실은 함께 손보지 않았다.
+알림 유실 대비 코드가 정작 알림이 **잘 오는** 정상 경로에서 이동을 죽였다.
+
+**수정**: 판정을 전이(`wasComplete`/`completeNow`)가 아니라 **"완료 상태 + 아직 안 옮김"**
+(`shouldMoveToStorage`)으로 바꾼다. 완료가 어느 경로로 관측되든 상관없고, 성공 시
+`storageMoved` 에 기록해 재이동을 막는다. 부수 보강 3건:
+- 실패 재시도 상한 `MAX_STORAGE_MOVE_ATTEMPTS=3` — 영구 실패가 5초마다 로그를 찍지 않음
+- `moveToStorage()` 가 성공 여부를 반환 — 앞버전은 실패해도 "이동 완료"를 로깅
+- **복원 시 수습** — `DONE` 으로 저장됐는데 `saveDir` 에 파일이 남아 있으면(앱 강제 종료로
+  이동 직전에 죽은 경우) `restoreTorrents()` 가 이동을 시도한다. `DONE` job 은 `handleMap`
+  에 없어 폴링이 이걸 다시 잡지 못한다
+
+### Fixed [web] — 웹에서 삭제·일시정지·재개가 전부 동작하지 않음 (v0.42 회귀)
+
+**증상**: 웹 대시보드에서 토렌트 삭제 버튼이 반응 없음. 완료된 토렌트에서 특히 체감된다.
+
+**원인**: v0.42 가 추가한 `CrossOriginGuard.contentTypeAllowed` 의 "Content-Type 이
+비어 있어도 거부" 규칙. 대시보드의 제어 요청 다수가 **본문 없이** 호출하는데
+(`fetch('/api/torrents/'+id,{method:'DELETE'})`), 브라우저는 본문이 없으면
+`Content-Type` 헤더를 아예 보내지 않는다 → **415 Unsupported Media Type** 로 라우트에
+도달하지 못했다.
+
+```
+DELETE /api/torrents/{id}      → 415   ← 삭제 안 됨
+POST   /api/jobs/{id}/pause   → 415   ← 일시정지 안 됨
+POST   /api/torrents/{id}/{a}  → 415   ← 재개 안 됨
+POST   /api/rss/{id}/check     → 415
+POST   /api/debrid/check      → 415
+POST   /api/debug/overlay/toggle → 415
+```
+
+맥 메뉴바 앱 `RelayClient.control()` 도 `URLRequest` 에 본문·Content-Type 을 붙이지 않아
+같은 이유로 415 — 응답을 버리므로 사용자에게는 "아무 일도 없다"였다.
+
+**수정**: Content-Type 규칙을 **실제로 본문이 있을 때만** 적용(`hasBody`).
+본문 없는 cross-origin POST/DELETE 는 `Origin`·`Sec-Fetch-Site` 검증이 그대로 막는다 —
+브라우저가 두 헤더를 **항상** 붙이고 JS 로 위조할 수 없기 때문이다. v0.42 문서 자신의
+대원칙("Origin 검증이 실질 방어선")과 일관된다.
+
+**보안 강도 저하 없음**: 이 규칙이 막으려던 벡터는 `text/plain` **본문**으로
+`JSONObject` 파싱을 혼란시키는 것이고 그런 요청은 반드시 본문이 있다. 본문 없는 요청은
+`receiveText()` 가 빈 문자열을 돌려주고 어느 라우트도 상태를 바꾸지 못한다.
+`text/plain`·`x-www-form-urlencoded`·Content-Type 누락(본문 有) 차단 테스트로 고정.
+
+### Changed [android] — 토렌트 작업 위치를 보관함 안 숨김 폴더로 (40초 정체 해소)
+
+`moveToStorage` 의 `renameTo` 가 EXDEV 로 실패해 3.7GB 를 동기 복사하고, 그동안
+5초 폴링 전체가 멈췄다(실측 40초). 원인: `getExternalFilesDir/torrents` 와
+`/sdcard/Download` 이 다른 마운트.
+
+작업 위치를 `<보관함>/.torrents` 로 옮겨 **같은 파일시스템**에서 rename 되게 했다.
+복사는 사라진다. 단, **보관함 루트에 바로 받지는 않았다** — 진행 중인 대용량 파일이
+`enforceQuota` 의 용량 계산에 잡히면 정리가 `sortedBy { lastModified }` 이라
+**오래된 사용자 파일이 대신 휴지통으로 사라진다.** 그래서 `.trash` 와 동일하게 숨겨
+목록·용량 계산·관리 API(`storageFile`)에서 전부 제외한다. 숨김 판정이 6곳에
+하드코딩돼 있어 `StorageGuard.isHidden()` 하나로 모았다.
+
+부수: 옛 작업 디렉터리 마이그레이션(복사 폴백 포함), 자기참조 이동 차단.
+
+### Fixed [android] — 목록 유실 (T-1085) — **이번 변경이 직접 일으킨 사고**
+
+워킹 디렉터리 마이그레이션을 `start()` — **서비스 메인 스레드** — 에서 동기 복사로
+두었다. 실측 6.8GB 에 **3분 53초**. 그 동안
+
+1. 앱 전체가 4분간 멈췄다(ANR), 그리고
+2. 5초 폴링의 `persistDebounced()` 가 **아직 복원 전인 빈 저장소**를 보고
+   `torrents.json` 을 `[]` 로 덮어썼다. `jobs.json` 도 마찬가지.
+3. 이어 실행된 `load()` 가 그 `[]` 를 읽어 **토렌트 4건과 작업 목록이 사라졌다.**
+
+근본 원인은 **"아직 아무것도 안 읽은 시점"과 "사용자가 다 지운 시점"이 파일로 구분되지
+않는다**는 것이다 — 둘 다 `[]` 다. 그래서 복원 완료 플래그를 모든 저장 경로에 심었다.
+
+- `TorrentEngine.persistNow()` — 복원 전 저장 스킵
+- `restoreTorrents()` → `restoreTorrentsAsync()` — IO 스레드에서 실행
+- `RelayService.onDestroy`·`onTaskRemoved` — 복원 전 저장 스킵 (선재 결함, 동일 유형)
+
+**데이터 손실**: 토렌트 6건의 magnet 링크와 진행 목록이 사라졌다. 부분 데이터
+약 26.6GB 는 디스크에 살아 있어 같은 이름으로 재추가하면 조각이 재사용된다.
+설정(`datastore`)과 보관함 파일은 무손실.
+
 ## [v0.42.0] — API/MCP 하드닝 (교차 출처 차단 + MCP 규격 준수 + 도구 5→12)
 
 > 상세: `docs/plans/PLAN_v0.42_api-mcp-hardening_android.md` (T-1073~T-1079)

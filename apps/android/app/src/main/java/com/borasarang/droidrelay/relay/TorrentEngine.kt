@@ -82,6 +82,22 @@ internal fun magnetInfoHash(magnet: String): String? {
 /** 동일 infohash의 .torrent 중복 추가 방지 (결함 #9) */
 class DuplicateTorrentException(val infoHash: String) : IllegalStateException("이미 다운로드 중인 토렌트입니다")
 
+/** magnet 추가 직후, 메타데이터 수신 전까지 쓰는 이름 — 실제 파일명도 아니므로 보관함 이동을 건너뛴다 */
+internal const val METADATA_PLACEHOLDER = "추출 중..."
+
+/**
+ * 토렌트 작업 디렉터리 — 보관함 경로 아래의 숨김 폴더 (v0.43, T-1085).
+ *
+ * 보관함과 **같은 파일시스템**이어야 `moveToStorage` 의 `renameTo` 가 한 번에 끝난다.
+ * 루트 자체를 쓰면 진행 중 파일이 사용자에게 보이고 쿼터 정리 대상이 되어
+ * 오래된 사용자 파일이 대신 휴지통으로 사라진다 — 그래서 숨김 하위 폴더를 쓴다.
+ */
+internal fun storageDirOf(storagePath: String): java.io.File =
+    java.io.File(storagePath, StorageGuard.TORRENT_TMP_NAME)
+
+/** 보관함 이동 실패 시 재시도 상한 (5초 폴링 × N회 = 무한 로그 방지) */
+internal const val MAX_STORAGE_MOVE_ATTEMPTS = 3
+
 /**
  * **실제로 파일에 기록되는 필드만**으로 만든 영속화 서명.
  *
@@ -332,6 +348,23 @@ class TorrentEngine(
     private val seedWaitSince = ConcurrentHashMap<String, Long>()
     /** id → 정체(스톨) 조건 첫 충족 시각(ms) — 키가 지워지면 조건이 해소된 것 */
     private val stallSince = ConcurrentHashMap<String, Long>()
+    /**
+     * 보관함 이동을 이미 마친 torrent id (v0.43, T-1085).
+     *
+     * **왜 `state` 전이가 아니라 별도 기록인가** — 앞버전은 "직전 상태 → 완료" 전이로
+     * 이동을 시도했다. 그런데 `TORRENT_FINISHED` 알림이 `state = DONE` 을 **먼저** 기록하므로
+     * 5초 폴링이 도달할 때 이미 `prevState == DONE` 이었고, 위의
+     * `prevState == DONE → return@forEach` 에 걸려 **이동 코드가 한 번도 실행되지 않았다.**
+     * 완료 직후 5초 안에 알림이 먼저 오므로 사실상 항상 재현되는 경쟁이었다.
+     * 결과적으로 파일이 앱 전용 디렉터리(`getExternalFilesDir/torrents`)에 남아
+     * 사용자는 "보관함으로 안 옮겨진다"고 봤다. (그래서 삭제는 되는데 파일이 안 지워졌다.)
+     *
+     * 이제 "완료 상태이면서 아직 안 옮긴 경우"로 판정한다 — 어느 경로(알림·폴링)로
+     * 완료가 관측되든 상관없고, 한 번 옮기면 다시 시도하지 않는다.
+     */
+    private val storageMoved = ConcurrentHashMap.newKeySet<String>()
+    /** 보관함 이동 실패 재시도 횟수 — 영구 실패로 5초마다 로그를 찍지 않기 위한 상한 */
+    private val storageMoveAttempts = ConcurrentHashMap<String, Int>()
     @Volatile private var latestStallEnabled: Boolean = SettingsConstraints.DEFAULT_TORRENT_STALL_ENABLED
     @Volatile private var latestStallThresholdKbps: Int = SettingsConstraints.DEFAULT_TORRENT_STALL_THRESHOLD_KBPS
     @Volatile private var latestStallTimeoutSec: Int = SettingsConstraints.DEFAULT_TORRENT_STALL_TIMEOUT_SEC
@@ -340,8 +373,27 @@ class TorrentEngine(
     private var lastPersistAt = 0L
     /** 마지막 저장 시점의 "기록 대상 필드" 서명 (라이브 필드 제외) */
     @Volatile private var lastSavedSnapshot: String? = null
+    /**
+     * 저장소 복원 완료 여부 (v0.43, T-1085) — **false 인 동안 저장을 금지한다.**
+     *
+     * 복원 전에는 `TorrentRepository` 가 비어 있다. 이때 저장하면
+     * "원래는 4건이었는데 0건으로 덮어쓴다"가 되어 목록이 영구히 사라진다.
+     * 실제로 그렇게 토렌트 4건과 작업 목록이 날아갔다(3분 53초 기동 블로킹의 결과).
+     * 사용자가 목록을 일부러 다 지운 경우와 구분할 수 없으므로,
+     * **복원 시점에 저장된 것이 nonempty 였다면 복원 실패를 의심하고 덮어쓰지 않는다.**
+     */
+    @Volatile private var restored = false
+
+    /** 복원 완료 여부 — `onDestroy`·`onTaskRemoved` 의 즉시 저장이 이를 확인한다 */
+    fun isRestored(): Boolean = restored
+
     private fun persistNow() {
         val all = TorrentRepository.all()
+        if (!restored) {
+            // 복원 전 저장 금지 — 빈 배열로 덮어쓰면 목록이 영구히 사라진다
+            DebugLogger.w(TAG, "복원 전 저장 스킵 (${all.size}건) — 목록 유실 방지")
+            return
+        }
         try { persistence.save(all) } catch (_: Exception) {}
         lastSavedSnapshot = persistedSignature(all)
     }
@@ -390,21 +442,43 @@ class TorrentEngine(
         }
     }
 
+    /**
+     * libtorrent 저장 경로 (v0.43, T-1085).
+     *
+     * **보관함 루트가 아니라 그 아래 숨김 디렉터리인 이유** — 두 가지가 동시에 성립해야 한다.
+     * 1. `moveToStorage` 의 `renameTo` 가 **같은 파일시스템**이어야 한다.
+     *    이전 `getExternalFilesDir(null)/torrents` 는 `/sdcard/Download` 과 다른 마운트라
+     *    EXDEV 로 실패해 전량 복사 → 3.7GB 에 40초, 그동안 폴링 코루틴 블로킹(실측).
+     * 2. 진행 중 파일이 **사용자에게 보이지 않아야** 하고 **쿼터 계산에서 빠져야** 한다.
+     *    `enforceQuota` 는 `sortedBy { lastModified }` 로 초과분을 휴지통 보내므로,
+     *    진행 중인 대용량 파일이 용량에 잡히면 오래된 사용자 파일이 대신 삭제된다.
+     * `.trash` 와 같은 취급(`StorageGuard.isHidden`)으로 두 조건을 모두 만족한다.
+     */
     val saveDir: File
-        get() = File(context.getExternalFilesDir(null), "torrents").apply { mkdirs() }
+        get() = storageDirOf(latestSavePath).apply { mkdirs() }
 
     /** 보관함 경로 — 설정값 (기본 StorageGuard.dlRoot, T-958) */
     private val storageDir: File
         get() = File(latestSavePath).apply { mkdirs() }
 
     /** 완료된 토렌트 파일을 보관함으로 이동 */
-    private fun moveToStorage(id: String, torrentName: String) {
+    private fun moveToStorage(id: String, torrentName: String): Boolean {
         val src = File(saveDir, torrentName)
         if (!src.exists()) {
             DebugLogger.w(TAG, "보관함 이동 스킵(소스 없음) id=$id name=$torrentName")
-            return
+            return false
         }
         var dst = File(storageDir, torrentName)
+        // 작업 디렉터리가 보관함 **아래**에 있으므로 자기참조·포함 관계를 막아야 한다.
+        // torrent 이름이 작업 디렉터리 이름과 겹치면 워킹 디렉터리 자체를 덮어쓴다.
+        val tmpCanonical = runCatching { saveDir.canonicalFile }.getOrNull()
+        val dstCanonical = runCatching { dst.canonicalFile }.getOrNull()
+        if (tmpCanonical != null && dstCanonical != null &&
+            (dstCanonical == tmpCanonical || dstCanonical.path.startsWith(tmpCanonical.path + File.separator))
+        ) {
+            DebugLogger.e(TAG, "보관함 이동 거부(작업 디렉터리 자기참조) id=$id name=$torrentName")
+            return false
+        }
         if (dst.exists()) {
             // 기존 보존 — 삭제 대신 고유 이름 회피 (데이터 손실 방지)
             val dot = torrentName.lastIndexOf('.')
@@ -440,9 +514,25 @@ class TorrentEngine(
                 if (dst.isFile) StorageJanitor.onCompleted(context, dst)
                 else StorageJanitor.enforceIfNeeded(context)
             }
+            return true
         } catch (e: Exception) {
             DebugLogger.e(TAG, "보관함 이동 실패 id=$id", e)
+            return false
         }
+    }
+
+    /**
+     * 지금 이 torrent 를 보관함으로 옮겨야 하는가 (v0.43, T-1085).
+     *
+     * 순수 판정 — 단위 테스트에서 libtorrent 없이 검증된다.
+     * `state` **전이**가 아니라 "완료 상태 + 아직 안 옮김" 으로 본다.
+     * 전이로 보면 `TORRENT_FINISHED` 알림이 state 를 DONE 으로 먼저 기록해 버려
+     * 폴링이 전이를 목격하지 못하고 이동을 영영 건너뛴다.
+     */
+    private fun shouldMoveToStorage(job: TorrentJob): Boolean {
+        if (storageMoved.contains(job.id)) return false
+        if (job.name.isEmpty() || job.name == METADATA_PLACEHOLDER) return false
+        return job.state == TorrentState.DONE || job.state == TorrentState.SEEDING
     }
 
     fun start() {
@@ -482,7 +572,7 @@ class TorrentEngine(
                 // 세션 세팅(정체 감지·활성 한도) 즉시 반영 (T-1050)
                 applySettings(settings.firstBlocking())
                 startStatusPolling()
-                restoreTorrents()
+                restoreTorrentsAsync()
                 // 트래커 목록 백그라운드 동기 (T-971, 실패해도 번들 목록 사용)
                 scope.launch {
                     if (runCatching { settings.firstBlocking().torrentTrackerSync }.getOrDefault(true)) {
@@ -508,6 +598,8 @@ class TorrentEngine(
             hashToId.clear()
             seedWaitSince.clear()
             stallSince.clear()
+            storageMoved.clear()
+            storageMoveAttempts.clear()
             DebugLogger.i(TAG, "세션 정지")
         }
     }
@@ -725,6 +817,8 @@ val th = withGate { session?.find(Sha1Hash.parseHex(expectedHash)) }
         unregisterMapping(id)
         seedWaitSince.remove(id)
         stallSince.remove(id)
+        storageMoved.remove(id)
+        storageMoveAttempts.remove(id)
         withGate {
             th?.let {
                 try { torrentName = it.torrentFile().name() } catch (_: Exception) {}
@@ -1070,6 +1164,34 @@ val th = withGate { session?.find(Sha1Hash.parseHex(expectedHash)) }
                         }
                         val job = TorrentRepository.get(id) ?: return@forEach
                         val prevState = job.state
+
+                        // ── 완료 → 보관함 이동 (v0.43, T-1085) ──
+                        // **상태 전이가 아니라 "완료인데 아직 안 옮김" 으로 판정한다.**
+                        // `TORRENT_FINISHED` 알림이 state 를 DONE 으로 먼저 쓰기 때문에,
+                        // 전이 판정 + 아래 `prevState == DONE` 조기 반환 조합에서는
+                        // 이 블록에 **절대 도달하지 못했다** (실측: 이동 0건).
+                        // 이동 전 시딩 중단 — 시딩 대상 파일 소실·오류 방지 (결함 #3)
+                        if (shouldMoveToStorage(job) &&
+                            (storageMoveAttempts[id] ?: 0) < MAX_STORAGE_MOVE_ATTEMPTS
+                        ) {
+                            try {
+                                withGate { th.unsetFlags(TorrentFlags.AUTO_MANAGED); th.pause() }
+                            } catch (_: Exception) {}
+                            if (moveToStorage(id, job.name)) {
+                                storageMoved.add(id)
+                                DebugLogger.i(TAG, "torrent 완료 → 시딩 중단 + 보관함 이동 id=$id")
+                            } else {
+                                val n = (storageMoveAttempts[id] ?: 0) + 1
+                                storageMoveAttempts[id] = n
+                                DebugLogger.w(TAG, "torrent 보관함 이동 실패($n/$MAX_STORAGE_MOVE_ATTEMPTS) id=$id name='${job.name}'")
+                            }
+                            // 이 tick 은 여기서 마친다 — 아래 update 가 완료 상태를 덮어쓰지 않도록.
+                            // shouldMoveToStorage 가 참인 동안 job.state 는 항상 DONE/SEEDING 이므로 무조건 성립한다.
+                            TorrentRepository.update(id) { it.copy(state = TorrentState.DONE, progress = 1f) }
+                            persistNow()
+                            return@forEach
+                        }
+
                         // 시드 비율 강제 (T-956) — SEEDING 중 비율 도달 시 자동 일시정지 (0=제한 없음)
                         val ratioLimit = latestSeedRatio
                         if (shouldPauseAtRatio(status.isSeeding, status.totalUpload(), status.totalDownload(), ratioLimit)) {
@@ -1097,18 +1219,6 @@ val th = withGate { session?.find(Sha1Hash.parseHex(expectedHash)) }
                                 TorrentStatus.State.FINISHED -> TorrentState.DONE
                                 TorrentStatus.State.UNKNOWN -> job.state
                             }
-                        }
-
-                        // 완료 전이 감지 → 보관함 이동 일원화 (FINISHED alert 유실 대비, 결함 #2)
-                        // 이동 전 시딩 중단 — 시딩 대상 파일 소실·오류 방지 (결함 #3)
-                        val wasComplete = prevState == TorrentState.DONE || prevState == TorrentState.SEEDING
-                        val completeNow = state == TorrentState.DONE || state == TorrentState.SEEDING
-                        if (completeNow && !wasComplete && job.name.isNotEmpty()) {
-                            try {
-                                withGate { th.unsetFlags(TorrentFlags.AUTO_MANAGED); th.pause() }
-                            } catch (_: Exception) {}
-                            moveToStorage(id, job.name)
-                            DebugLogger.i(TAG, "torrent 완료 전이 → 시딩 중단 + 보관함 이동 id=$id")
                         }
 
                         TorrentRepository.update(id) {
@@ -1344,7 +1454,76 @@ val th = withGate { session?.find(Sha1Hash.parseHex(expectedHash)) }
         )
     }
 
+    /**
+     * 이전 작업 디렉터리(`getExternalFilesDir/torrents`) → 새 작업 디렉터리로 1회 마이그레이션 (v0.43, T-1085).
+     *
+     * **왜 필요한가** — `saveDir` 이 바뀐다. resume 데이터는 이전 경로의 조각 파일을
+     * 가리키므로 그대로 두면 libtorrent 가 "파일 없음"으로 보고 **처음부터 다시 받는다**.
+     * 이동해 두면 이어받기가 유지된다.
+     *
+     * **왜 조용히 덮어쓰지 않는가** — 대상에 같은 이름이 있으면 건너뛴다.
+     * 마이그레이션 중 예기치 않은 삭제는 용납할 수 없다.
+     */
+    private fun migrateLegacyWorkDir() {
+        val legacy = File(context.getExternalFilesDir(null), "torrents")
+        if (!legacy.exists() || !legacy.isDirectory) return
+        val target = saveDir
+        var moved = 0
+        var skipped = 0
+        legacy.listFiles()?.forEach { f ->
+            val dest = File(target, f.name)
+            if (dest.exists()) {
+                skipped++
+                return@forEach
+            }
+            // rename 이 EXDEV 로 실패할 수 있다 — 두 경로가 다른 마운트이므로 **반드시**
+            // 복사 폴백이 있어야 한다. 이것이 없으면 조용히 건너뛰어 진행 중 데이터가
+            // 통째로 유실된다(부분 조각은 0 바이트에서 다시 받게 된다).
+            if (f.renameTo(dest)) {
+                moved++
+            } else {
+                val ok = runCatching {
+                    if (f.isDirectory) f.copyRecursively(dest, overwrite = false)
+                    else f.copyTo(dest, overwrite = false)
+                    f.deleteRecursively()
+                    true
+                }.getOrDefault(false)
+                if (ok) moved++ else skipped++
+            }
+        }
+        // 전부 옮겼고 남은 게 없다면 옛 디렉터리 제거
+        if (legacy.listFiles()?.isEmpty() == true) legacy.delete()
+        if (moved > 0 || skipped > 0) {
+            DebugLogger.i(TAG, "작업 디렉터리 마이그레이션 $moved 이동 / $skipped 건너뜀 → ${target.absolutePath}")
+        }
+    }
+
+    /**
+     * 복원을 **백그라운드에서** 수행한다 (v0.43, T-1085).
+     *
+     * **왜 비동기인가 — 실제 사고를 일으킨 지점이다.**
+     * `start()` 는 서비스의 메인 스레드에서 불린다. 여기에 워킹 디렉터리 마이그레이션
+     * (크로스마운트 **동기 복사**, 실측 6.8GB 에 3분 53초) 이 끼어 있으면
+     * ① 앱 전체가 4분 동안 멈추고(ANR) ② 그동안 5초 폴링의 `persistDebounced()` 가
+     * 아직 복원 전인 **빈 저장소**를 보고 `torrents.json` 을 `[]` 로 덮어쓴다.
+     * ③ 이어지는 `load()` 가 그 `[]` 를 읽어 토렌트 목록이 통째로 사라진다.
+     *
+     * ③ 이 데이터 손실은 아래 [restored] 플래그 가 막는다 — 비동기화는 ①·②의 원인이므로.
+     */
+    private fun restoreTorrentsAsync() {
+        scope.launch(Dispatchers.IO) {
+            try {
+                restoreTorrents()
+            } finally {
+                // 복원이 끝났음을 표시 — 이 전에는 어떤 저장도 금지된다 (persistNow 가 가드)
+                restored = true
+                DebugLogger.d(TAG, "복원 완료 플래그 설정")
+            }
+        }
+    }
+
     private fun restoreTorrents() {
+        migrateLegacyWorkDir()
         val restored = persistence.load()
         restored.forEach { job ->
             if (job.state != TorrentState.DONE && job.state != TorrentState.FAILED) {
@@ -1402,6 +1581,19 @@ val th = withGate { session?.find(Sha1Hash.parseHex(expectedHash)) }
                 }
             } else {
                 TorrentRepository.restore(job)
+                // 완료 상태로 저장돼 있는데 아직 saveDir 에 파일이 남아 있으면
+                // 이전 실행에서 이동 직전에 죽은 것이다 (앱 종료·강제 종료).
+                // DONE job 은 handleMap 에 없으므로 폴링이 이걸 다시 잡지 못한다 → 복원 시 수습.
+                if (job.state == TorrentState.DONE && File(saveDir, job.name).exists()) {
+                    scope.launch {
+                        if (moveToStorage(job.id, job.name)) {
+                            storageMoved.add(job.id)
+                            DebugLogger.i(TAG, "완료 torrent 복구 이동 id=${job.id} → ${job.name}")
+                        } else {
+                            DebugLogger.w(TAG, "완료 torrent 복구 이동 실패 id=${job.id} name='${job.name}'")
+                        }
+                    }
+                }
             }
         }
         DebugLogger.d(TAG, "복원 완료 ${restored.size}건")
