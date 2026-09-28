@@ -14,9 +14,34 @@ final class AppModel {
         case failed
     }
 
+    /// 팝오버 3탭 (M3). 웹 대시보드의 3탭 구성과 같은 순서다 —
+    /// 사용자가 두 UI 를 오갈 때 mental model 이 안 깨지게.
+    enum Tab: String, CaseIterable, Identifiable {
+        case downloads, torrents, storage
+        var id: String { rawValue }
+        var title: String {
+            switch self {
+            case .downloads: return "다운로드"
+            case .torrents: return "토렌트"
+            case .storage: return "보관함"
+            }
+        }
+        var icon: String {
+            switch self {
+            case .downloads: return "arrow.down.circle"
+            case .torrents: return "arrow.triangle.2.circlepath"
+            case .storage: return "tray.full"
+            }
+        }
+    }
+
+    @ObservationIgnored var selectedTab: Tab = .downloads
+
     var phase: Phase = .idle
     var server: ServerInfo?
     var jobs: [RelayClient.Job] = []
+    var torrents: [Torrent] = []
+    var storage: [StorageEntry] = []
     var storageFree: Int = 0
     var storageTotal: Int = 0
     var lastUpdate: Date?
@@ -42,7 +67,9 @@ final class AppModel {
 
     var activeJobs: [RelayClient.Job] { jobs.filter { $0.isActive } }
     var seedingJobs: [RelayClient.Job] { jobs.filter { $0.isSeeding } }
-    var badgeCount: Int { activeJobs.count }
+    /// 배지는 **탭과 무관하게** 전체 활성 수를 센다 — 어느 탭에 있든 진행 중임을 알린다.
+    var activeTorrents: [Torrent] { torrents.filter { $0.isActive } }
+    var badgeCount: Int { activeJobs.count + activeTorrents.count }
 
     // MARK: - 탐색
 
@@ -90,10 +117,17 @@ final class AppModel {
     func refresh() async {
         guard let s = server else { return }
         let client = RelayClient(base: s.baseURL)
-        async let j = client.jobs()
+        // 3개 탭이 같은 서버를 본다 — 필요한 것만 한 번에.
+        // SSE tick(빠르면 1초)마다 4요청을 쏘면 서버·망이 불필요하게 busy 해진다.
+        // **선택된 탭의 것만** 갱신하고 나머지는 그 탭이 열릴 때 당긴다.
+        async let j = selectedTab == .downloads ? client.jobs() : jobs
+        async let t = selectedTab == .torrents ? client.torrents() : torrents
+        async let f = selectedTab == .storage ? client.storage() : storage
         async let i = client.serverInfo()
-        let (jobs, info) = await (j, i)
+        let (jobs, torrents, storage, info) = await (j, t, f, i)
         self.jobs = jobs
+        self.torrents = torrents
+        self.storage = storage
         if let info {
             storageFree = info.storageFree
             storageTotal = info.storageTotal
@@ -101,10 +135,33 @@ final class AppModel {
         lastUpdate = Date()
     }
 
+    /// 탭을 바꾸면 그 탭 데이터는 즉시 당긴다 — 10초 백업 폴링을 기다리지 않는다.
+    func selectTab(_ tab: Tab) async {
+        guard tab != selectedTab else { return }
+        selectedTab = tab
+        await refresh()
+    }
+
     func control(_ id: String, _ action: String) {
         guard let s = server else { return }
         Task {
             await RelayClient(base: s.baseURL).control(id, action)
+            await refresh()
+        }
+    }
+
+    func torrentControl(_ id: String, _ action: String) {
+        guard let s = server else { return }
+        Task {
+            await RelayClient(base: s.baseURL).torrentControl(id, action)
+            await refresh()
+        }
+    }
+
+    func torrentDelete(_ id: String) {
+        guard let s = server else { return }
+        Task {
+            await RelayClient(base: s.baseURL).torrentDelete(id)
             await refresh()
         }
     }
