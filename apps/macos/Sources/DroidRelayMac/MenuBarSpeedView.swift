@@ -46,8 +46,11 @@ final class MenuBarSpeedView: NSView {
 
     private static let fontSize: CGFloat = 9
     private static let valueFont = NSFont.monospacedDigitSystemFont(ofSize: fontSize, weight: .medium)
-    private static let iconSize: CGFloat = 11
-    private static let arrowSize: CGFloat = 9
+    /// **메뉴바 기본 아이콘 크기(18pt) 를 쓴다.** 11pt 로 두면 9pt 글꼴 옆에서
+    /// 작아서 "아이콘이 안 보인다" 는 인상을 준다(사용자 지적).
+    /// SF Symbol 의 pointSize 와 1:1 로 맞아야 실제 크기가 의도대로 나온다.
+    private static let iconSize: CGFloat = 16
+    private static let arrowSize: CGFloat = 11
     private static let gap: CGFloat = 2
 
     /// 열 폭을 정하는 샘플 — **값과 무관하게 고정**한다.
