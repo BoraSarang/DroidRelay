@@ -255,6 +255,89 @@ final class AppModel {
         }
     }
 
+    // MARK: - 쓰기 동작 (M-14)
+
+    /// **사용자에게 보여줄 마지막 결과.** 실패 사유를 여기에 남겨 UI 가 읽는다.
+    @ObservationIgnored var lastResult: WriteResult = .success
+    /// 진행 중 여부 — 중복 실행을 막고 버튼을 비활성화한다.
+    @ObservationIgnored var busy = false
+    /// 상세 시트가 보고 있는 토렌트
+    @ObservationIgnored var detail: TorrentDetail?
+    /// 휴지통 목록
+    @ObservationIgnored var trash: [StorageTrashItem] = []
+    /// 시트가 지금 조작하려는 항목 id — **모두 "한 항목" 대상**이라 하나로 충분하다.
+    @ObservationIgnored var currentTargetID: String = ""
+
+    private func write(_ op: @escaping (RelayClient) async -> WriteResult) async {
+        guard let s = server else { lastResult = .fail("서버에 연결되어 있지 않습니다"); return }
+        busy = true
+        let r = await op(RelayClient(base: s.baseURL))
+        busy = false
+        // **성공해도 목록을 다시 읽어야 한다.** 서버가 새 항목을 만든 뒤라
+        // 로컬 배열에는 반영이 없다.
+        if r.ok { await refresh() }
+        lastResult = r
+    }
+
+    // MARK: 다운로드
+
+    func addDownload(_ url: String) async { await write { await $0.addDownload(url: url) } }
+    func setJobLimit(_ id: String, bps: Int) async { await write { await $0.setJobLimit(id: id, maxDownBps: bps) } }
+
+    // MARK: 토렌트
+
+    func addTorrent(_ input: String) async { await write { await $0.addTorrent(magnetOrURL: input) } }
+    func setTorrentLimit(_ id: String, bps: Int) async { await write { await $0.setTorrentLimit(id: id, maxDownBps: bps) } }
+
+    /// 토렌트 상세를 연다 — **시드 정보의 유일한 출처**이므로 실패하면 그대로 알린다.
+    func openDetail(_ id: String) async {
+        guard let s = server else { lastResult = .fail("서버에 연결되어 있지 않습니다"); return }
+        busy = true
+        let d = await RelayClient(base: s.baseURL).torrentDetail(id: id)
+        busy = false
+        if let d { detail = d; lastResult = .success }
+        else { lastResult = .fail("상세 정보를 가져오지 못했습니다") }
+    }
+
+    // MARK: 보관함
+
+    func storageMove(_ from: String, to folder: String) async {
+        await write { await $0.storageMove(from: from, to: folder) }
+    }
+    func storageRename(_ from: String, to: String) async {
+        await write { await $0.storageRename(from: from, to: to) }
+    }
+    func storageTrash(_ path: String) async { await write { await $0.storageTrash(path: path) } }
+    func storageDelete(_ path: String) async { await write { await $0.storageDelete(path: path) } }
+    func storageMkdir(_ path: String, _ name: String) async {
+        await write { await $0.storageMkdir(path: path, name: name) }
+    }
+    func storageRestore(_ name: String) async { await write { await $0.storageRestore(name: name) } }
+    func storagePurge(_ name: String) async { await write { await $0.storagePurge(name: name) } }
+
+    /// 휴지통을 읽는다 — 열 때마다 새로 읽어야 한다(다른 기기에서 지웠을 수도 있다).
+    func loadTrash() async {
+        guard let s = server else { return }
+        trash = await RelayClient(base: s.baseURL).storageTrashList()
+    }
+
+    /// 보관함 항목을 공유 링크로 만들어 브라우저로 연다.
+    ///
+    /// **파일을 직접 내려받는 엔드포인트가 없다.** 웹 대시보드도 공유 링크를 만들어
+    /// 브라우저로 연다 — 서버가 파일을 스트림하지 않는다. 같은 방식이 유일하게 일관된다.
+    func shareStorage(_ path: String) async {
+        guard let s = server else { lastResult = .fail("서버에 연결되어 있지 않습니다"); return }
+        busy = true
+        let token = await RelayClient(base: s.baseURL).storageShareLink(path: path)
+        busy = false
+        guard let token, let u = URL(string: "\(s.baseURL.absoluteString)/s/\(token)") else {
+            lastResult = .fail("공유 링크를 만들지 못했습니다")
+            return
+        }
+        NSWorkspace.shared.open(u)
+        lastResult = .success
+    }
+
     func torrentDelete(_ id: String) {
         guard let s = server else { return }
         Task {

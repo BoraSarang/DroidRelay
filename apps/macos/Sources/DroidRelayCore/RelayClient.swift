@@ -238,4 +238,68 @@ public struct RelayClient: Sendable {
         let (d, _) = try await session.data(for: req)
         return d
     }
+
+    // MARK: - 쓰기 요청 (RelayClient+Write 에서 쓴다)
+
+    /// POST + JSON 본문.
+    ///
+    /// **HTTP 상태 코드를 버리지 않는다.** 서버는 200 이 아닌 상태로 **오류 문구를
+    /// 본문에 담아** 보내는데, 성공 코드만 보면 "왜 안 되지?" 하고 이유를 잃는다.
+    /// → 상태 코드와 본문을 함께 `WriteResult` 에 담아 돌려준다.
+    func postBody(_ path: String, _ body: [String: Any]) async -> (status: Int, data: Data) {
+        var req = URLRequest(url: base.appendingPathComponent(path))
+        req.httpMethod = "POST"
+        req.timeoutInterval = 15
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        do {
+            let (d, r) = try await session.data(for: req)
+            return (Int((r as? HTTPURLResponse)?.statusCode ?? 0), d)
+        } catch {
+            return (0, Data("\(error.localizedDescription)".utf8))
+        }
+    }
+
+    /// POST + JSON → `WriteResult`. **서버 사유를 그대로 살려서** 돌려준다.
+    func postJSON(_ path: String, _ body: [String: Any]) async -> WriteResult {
+        let (status, data) = await postBody(path, body)
+        return RelayClient.writeResult(status: status, data: data, body: body)
+    }
+
+    /// GET 또는 POST + JSON → 딕셔너리 (공유 링크처럼 응답이 JSON 인 경우).
+    func getJSON(_ path: String, method: String = "GET", body: [String: Any]? = nil) async -> [String: Any]? {
+        var req = URLRequest(url: base.appendingPathComponent(path))
+        req.httpMethod = method
+        req.timeoutInterval = 10
+        if let body {
+            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            req.httpBody = try? JSONSerialization.data(withJSONObject: body)
+        }
+        guard let d = try? await session.data(for: req).0,
+              let any = try? JSONSerialization.jsonObject(with: d, options: [.fragmentsAllowed])
+        else { return nil }
+        return any as? [String: Any]
+    }
+
+    /// 상태 코드 + 본문 → `WriteResult`.
+    ///
+    /// 서버는 오류를 **텍스트**(`"E-AND-DOWN-1003: …"`)나 **JSON**(`{"error":"…"}`)
+    /// 둘 다 쓴다. 둘 다 읽어봐야 사유가 나온다.
+    static func writeResult(status: Int, data: Data, body: [String: Any]) -> WriteResult {
+        guard status != 0 else { return .fail("서버에 연결하지 못했습니다") }
+        let raw = String(data: data, encoding: .utf8) ?? ""
+        // JSON 이면 error 필드를 우선한다
+        if let o = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let e = o["error"] as? String, !e.isEmpty {
+            return WriteResult(ok: false, message: e,
+                               newId: o["id"] as? String)
+        }
+        if (200..<300).contains(status) {
+            // 추가 API 는 새 id 를 돌려준다
+            let newId = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])??["id"] as? String
+            return WriteResult(ok: true, message: "", newId: newId)
+        }
+        // 본문이 비었으면 상태 코드만으로 말한다 — 사용자에게 422 만 보여주면 무의미
+        return .fail(raw.isEmpty ? "요청이 실패했습니다 (HTTP \(status))" : raw)
+    }
 }

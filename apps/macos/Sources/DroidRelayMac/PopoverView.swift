@@ -8,6 +8,8 @@ struct PopoverView: View {
     @Bindable var model: AppModel
     var onSettings: () -> Void
     var onQuit: () -> Void
+    /// 쓰기 시트 — 어느 것이 열렸는가. nil 이면 닫힘.
+    @State private var sheet: WriteSheets.Sheet?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -34,6 +36,25 @@ struct PopoverView: View {
                 .frame(width: 328)
                 Divider().opacity(0.5)
             }
+            // ── 액션 바 ──
+            // **탭마다 다른 동작이 필요하다.** 다운로드 탭은 "추가", 보관함 탭은
+            // "폴더 만들기/휴지통", 토렌트 탭은 "추가" — 한 줄에 다 몰아넣으면
+            // 어느 탭에서 쓸지 모른다.
+            HStack(spacing: 6) {
+                actionButton("plus", "다운로드 추가") { sheet = .addDownload }
+                actionButton("arrow.down.circle", "토렌트 추가") { sheet = .addTorrent }
+                Spacer()
+                if model.selectedTab == .storage {
+                    actionButton("folder.badge.plus", "폴더") { sheet = .mkdir }
+                    actionButton("trash", "휴지통") {
+                        Task { await model.loadTrash() }
+                        sheet = .trash
+                    }
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+
             tabBar
             Divider().opacity(0.5)
             content
@@ -43,6 +64,44 @@ struct PopoverView: View {
             footer
         }
         .frame(width: 352)
+        .sheet(item: $sheet) { which in
+            WriteSheets(model: model, sheet: .constant(which))
+        }
+        // **실패 사유는 dismiss 하지 않는다.** 서버가 준 오류(예: "이미 등록된
+        // 다운로드입니다") 는 사용자가 다음 행동을 정하는 데 필요한 정보다.
+        .overlay(alignment: .bottom) {
+            if !model.lastResult.ok && sheet == nil {
+                resultBanner
+            }
+        }
+    }
+
+    private var resultBanner: some View {
+        HStack(alignment: .top, spacing: 6) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+            Text(model.lastResult.message)
+                .font(.system(size: 11))
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+            Button {
+                model.lastResult = .success
+            } label: {
+                Image(systemName: "xmark").font(.system(size: 9))
+            }
+            .buttonStyle(.plain).foregroundStyle(.secondary)
+        }
+        .padding(8)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 6))
+        .padding(8)
+    }
+
+    private func actionButton(_ icon: String, _ tip: String, _ act: @escaping () -> Void) -> some View {
+        Button(action: act) {
+            Image(systemName: icon).font(.system(size: 11))
+        }
+        .buttonStyle(.borderless)
+        .help(tip)
     }
 
     // MARK: - 탭바 (M3)
@@ -146,7 +205,18 @@ struct PopoverView: View {
                         torrent: t,
                         onPause: { model.torrentControl(t.id, "pause") },
                         onResume: { model.torrentControl(t.id, "resume") },
-                        onDelete: { model.torrentDelete(t.id) }
+                        onDelete: { model.torrentDelete(t.id) },
+                        // **시드 정보는 목록에 없다.** `/api/torrents` 의 seeds/peers 는
+                        // DB 저장값이고 "지금 몇 명 붙어있는지" 는 상세만 안다.
+                        onDetail: {
+                            model.currentTargetID = t.id
+                            Task { await model.openDetail(t.id) }
+                            sheet = .detail
+                        },
+                        onLimit: {
+                            model.currentTargetID = t.id
+                            sheet = .torrentLimit
+                        }
                     )
                 }
             }
@@ -163,8 +233,8 @@ struct PopoverView: View {
                 if model.storage.isEmpty {
                     empty("보관함이 비어 있습니다", tip: nil)
                 }
-                ForEach(model.storage) { e in
-                    StorageRow(entry: e)
+                ForEach(model.storage, id: \.name) { e in
+                    StorageRow(entry: e, onMove: { Task { await model.storageTrash(e.path) } })
                 }
             }
             .padding(5)
@@ -370,6 +440,10 @@ struct TorrentRow: View {
     let onPause: () -> Void
     let onResume: () -> Void
     let onDelete: () -> Void
+    /// **시드 정보 열기** — 목록에 없는 값의 유일한 출처
+    var onDetail: () -> Void = {}
+    /// 속도 제한 시트
+    var onLimit: () -> Void = {}
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -412,6 +486,10 @@ struct TorrentRow: View {
             .lineLimit(1)
 
             HStack(spacing: 5) {
+                // **상세는 완료 여부와 무관하게 항상 보인다** — 완료된 토렌트도
+                // "몇 명이 시드해 주는지" 가 궁금한 대상이다.
+                small("시드 정보", .primary, onDetail)
+                small("속도", .primary, onLimit)
                 if torrent.isDone {
                     Text("완료 — 보관함으로 이동됨").font(.system(size: 10.5))
                         .foregroundStyle(.tertiary)
@@ -439,6 +517,12 @@ struct TorrentRow: View {
 
 struct StorageRow: View {
     let entry: StorageEntry
+    /// 폴더로 이동 — **시트에서 대상/목적지를 입력**한다(서버가 판단한다)
+    var onMove: () -> Void = {}
+    /// 휴지통으로 보내기 — **즉시 지우지 않는다**
+    var onTrash: () -> Void = {}
+    /// Mac 으로 내려받기(공유 링크)
+    var onShare: () -> Void = {}
 
     var body: some View {
         HStack(spacing: 7) {
@@ -457,9 +541,25 @@ struct StorageRow: View {
                 .foregroundStyle(.tertiary)
             }
             Spacer(minLength: 0)
+            // **액션은 호버 시에만** — 항상 보이면 4개 아이콘이 목록 전체를 덮는다.
+            rowActions
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 5)
         .contentShape(Rectangle())
+    }
+
+    private var rowActions: some View {
+        HStack(spacing: 7) {
+            Button(action: onMove) {
+                Image(systemName: "folder").font(.system(size: 10.5))
+            }.buttonStyle(.borderless).help("폴더로 이동")
+            Button(action: onShare) {
+                Image(systemName: "square.and.arrow.down").font(.system(size: 10.5))
+            }.buttonStyle(.borderless).help("Mac 으로 내려받기")
+            Button(action: onTrash) {
+                Image(systemName: "trash").font(.system(size: 10.5))
+            }.buttonStyle(.borderless).foregroundStyle(.orange).help("휴지통으로 보내기")
+        }
     }
 }

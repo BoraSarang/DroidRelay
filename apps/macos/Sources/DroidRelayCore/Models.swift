@@ -84,10 +84,17 @@ public struct StorageEntry: Identifiable, Sendable, Equatable {
     public let size: Int
     public let fileCount: Int
     public let modified: Date?
+    /// **보관함 루트 기준 상대 경로** — 이동·삭제·휴지통 API 가 이 값을 받는다.
+    ///
+    /// 목록 응답에는 `name` 만 온다(실측: `{"name":"AI","type":"dir",…}`).
+    /// 루트 목록이므로 이때는 `name` 과 경로가 같다. 중첩 응답이 `path` 를 주면
+    /// 그 값을 쓴다 — 서버가 경로를 내려줘도 그대로 동작한다.
+    public let path: String
 
     public init?(json: Any) {
         guard let o = json as? [String: Any], let name = o["name"] as? String else { return nil }
         self.name = name
+        self.path = o["path"] as? String ?? name
         let type = o["type"] as? String ?? "file"
         self.isDirectory = type == "dir"
         self.size = RelayClient.int(o["size"])
