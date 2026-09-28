@@ -78,6 +78,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { await Diagnostics.titleCheck() }
             return
         }
+        // 설정 창 위치는 **눈으로만 판단하면 안 된다.**
+        // "중앙에 뜬다" 는 서술이고, 실제 좌표·화면 목록·복원 여부가 수치다.
+        // `--diagnose` 는 StatusItem 을 안 만들고 `--title-check` 는 메뉴바를 본다 —
+        // **셋 다 이 창을 검증하지 못한다.** 전용 모드가 필요하다.
+        if CommandLine.arguments.contains("--settings-check") {
+            Task { await Diagnostics.settingsCheck() }
+            return
+        }
         // **실행 중인 앱이 진짜로 무엇을 그리는지** 파일로 남긴다.
         //
         // `--title-check` 는 별도 프로세스라 상태 항목이 "살아 있는" 앱과 다르다.
@@ -336,6 +344,65 @@ enum Diagnostics {
         print("실제 그리는 줄: \(c.debugLines.joined(separator: " | "))")
 
         NSApp.terminate(nil)
+    }
+
+    /// **설정 창이 어디에 뜨는지** — 좌표를 수치로 본다.
+    ///
+    /// ## 왜 전용 모드인가
+    ///
+    /// "창이 가운데에 나온다" 는 **서술**이다. 틀렸는지 맞았는지는 좌표로 판정한다.
+    /// `--diagnose` 는 `StatusItem` 을 만들지 않고, `--title-check` 는 메뉴바 줄을 본다.
+    /// **셋 다 이 창을 건드리지 않는다.** 그래서 전용이 필요하다.
+    ///
+    /// ## 무엇을 확인하나
+    ///
+    /// 1. **실제 화면 목록** — 테스트는 1440×900 을 썼지만 이 Mac 은 3024×1964 다.
+    ///    "중앙" 이라는 말의 기준이 화면마다 다르다.
+    /// 2. **저장값이 없을 때의 좌표** — 사용자의 요청("가운데")이 실제로 성립하는가.
+    /// 3. **저장값이 있을 때** — 그 자리에 돌아오는가.
+    /// 4. **저장값이 화면 밖에 있을 때** — 가운데로 복귀하는가. **이게 조용한 실패를 막는다.**
+    @MainActor
+    static func settingsCheck() async {
+        print("=== DroidRelay 설정 창 위치 진단 ===")
+        // **주 화면이 첫째여야 한다** — `visible[0]` 이 "돌아갈 곳"으로 쓰인다.
+        var frames = NSScreen.screens.map(\.visibleFrame)
+        if let main = NSScreen.main?.visibleFrame {
+            frames.removeAll { $0 == main }
+            frames.insert(main, at: 0)
+        }
+        print("화면 수      : \(NSScreen.screens.count)")
+        for (i, f) in frames.enumerated() {
+            print("  [\(i)] \(i == 0 ? "주 화면 " : "추가     ")\(fmt(f))")
+        }
+        print("저장된 좌표  : \(WindowPlacement.loadOrigin().map { "(\(Int($0.x)), \(Int($0.y)))" } ?? "없음 — 처음 실행")")
+
+        // 실제 창 크기를 그대로 쓴다 — 가정한 크기로 재면 본래 문제가 된다.
+        let c = SettingsWindowController(model: AppModel())
+        guard let w = c.window else { print("창 생성 실패"); NSApp.terminate(nil); return }
+        let size = w.frame.size
+        print("창 크기      : \(Int(size.width))×\(Int(size.height))")
+
+        let saved = WindowPlacement.loadOrigin()
+        let got = WindowPlacement.resolve(saved: saved, size: size, visible: frames)
+        let centered = WindowPlacement.centered(in: frames[0], size: size)
+        print("해결된 좌표  : (\(Int(got.x)), \(Int(got.y)))")
+        print("가운데 기준  : (\(Int(centered.x)), \(Int(centered.y)))  → \(got == centered ? "가운데 ✓" : "저장 위치 ✓")")
+        print("보이는가     : \(WindowPlacement.canGrab(got, size: size, in: frames) ? "yes — 사용자가 찾을 수 있다" : "NO — 창을 못 찾는다")")
+        let title = WindowPlacement.titleBarRect(origin: got, size: size)
+        print("제목바 띠   : \(fmt(title))")
+
+        // **저장값을 일부러 화면 밖에 두고** 가운데로 돌아오는지 본다 — 이게 핵심 규칙.
+        let lost = CGPoint(x: frames[0].maxX + 2000, y: frames[0].maxY)
+        let rescued = WindowPlacement.resolve(saved: lost, size: size, visible: frames)
+        print("화면 밖 복귀 : (\(Int(lost.x)), \(Int(lost.y))) → (\(Int(rescued.x)), \(Int(rescued.y)))  → \(rescued == centered ? "가운데로 복귀 ✓" : "복귀 실패 ✗")")
+        // **저장값은 건드리지 않는다** — 진단이 사용자의 배치를 바꾸면 안 된다.
+        print("저장된 좌표  : \(WindowPlacement.loadOrigin().map { "(\(Int($0.x)), \(Int($0.y))) — 안 건드림" } ?? "없음 — 안 건드림")")
+        print("=== 끝 ===")
+        NSApp.terminate(nil)
+    }
+
+    private static func fmt(_ r: CGRect) -> String {
+        "(\(Int(r.minX)), \(Int(r.minY)) \(Int(r.width))×\(Int(r.height)))"
     }
 
     /// SSE 생존 확인 — 메뉴바 앱의 실시간 갱신이 실제로 통하는지 본다.
