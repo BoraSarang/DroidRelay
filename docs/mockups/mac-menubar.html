@@ -1,0 +1,725 @@
+<!doctype html>
+<html lang="ko" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DroidRelay for Mac — 목업</title>
+<style>
+/* ─────────────────────────────────────────────────────────
+   DroidRelay macOS 메뉴바 앱 목업
+   실제 제품 화면(대시보드)을 iframe 으로 임베드한다 — 가짜 UI 아님.
+   REST API 직접 호출 전제 (SSE /api/events 로 진행률 수신)
+   ───────────────────────────────────────────────────────── */
+:root{
+  --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+  --accent:#39FF14;
+  --accent2:#00E5FF;
+  --warn:#FFE14D;
+  --err:#FF6B7F;
+}
+html[data-theme=dark]{
+  --wall-1:#1b2a3a; --wall-2:#0b1420;
+  --chrome:rgba(38,38,41,.72);
+  --chrome-solid:#26262a;
+  --panel:rgba(30,30,33,.78);
+  --panel-solid:#1e1e21;
+  --stroke:rgba(255,255,255,.12);
+  --stroke2:rgba(255,255,255,.06);
+  --text:#EDEDF0;
+  --muted:#9A9AA0;
+  --dim:#6E6E75;
+  --fill:rgba(255,255,255,.08);
+  --row:rgba(255,255,255,.045);
+  --sel:rgba(57,255,20,.14);
+  --shadow:0 18px 60px rgba(0,0,0,.55), 0 2px 8px rgba(0,0,0,.4);
+  --menubar:rgba(0,0,0,.34);
+}
+html[data-theme=light]{
+  --wall-1:#d8e2ee; --wall-2:#f2f5f8;
+  --chrome:rgba(246,246,248,.76);
+  --chrome-solid:#f6f6f8;
+  --panel:rgba(250,250,252,.82);
+  --panel-solid:#fafafc;
+  --stroke:rgba(0,0,0,.12);
+  --stroke2:rgba(0,0,0,.06);
+  --text:#1D1D20;
+  --muted:#5C5C63;
+  --dim:#8A8A92;
+  --fill:rgba(0,0,0,.06);
+  --row:rgba(0,0,0,.035);
+  --sel:rgba(52,120,0,.12);
+  --shadow:0 18px 60px rgba(0,0,0,.22), 0 2px 8px rgba(0,0,0,.12);
+  --menubar:rgba(255,255,255,.5);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{
+  font-family:var(--font); color:var(--text);
+  background:linear-gradient(160deg,var(--wall-1),var(--wall-2));
+  min-height:100vh; overflow:hidden; -webkit-font-smoothing:antialiased;
+  font-size:13px;
+}
+/* ── 메뉴바 ── */
+.menubar{
+  position:fixed; top:0; left:0; right:0; height:26px; z-index:900;
+  background:var(--menubar); backdrop-filter:blur(24px) saturate(180%);
+  -webkit-backdrop-filter:blur(24px) saturate(180%);
+  border-bottom:.5px solid var(--stroke2);
+  display:flex; align-items:center; gap:2px; padding:0 10px;
+  font-size:13px;
+}
+.mb-left{font-weight:600; letter-spacing:.2px}
+.mb-right{margin-left:auto; display:flex; align-items:center; gap:14px; color:var(--text); opacity:.92}
+.mb-item{opacity:.9}
+.mb-emoji{font-size:14px; line-height:1}
+
+/* 앱 상태 아이템 — 이게 우리 앱의 존재감 전부 */
+.dr-status{
+  display:flex; align-items:center; gap:4px; padding:2px 6px; border-radius:5px;
+  cursor:pointer; transition:background .12s;
+}
+.dr-status:hover{background:var(--fill)}
+.dr-status.open{background:var(--fill)}
+.dr-icon{font-size:14px; line-height:1; position:relative; display:inline-block}
+.dr-dot{
+  position:absolute; top:-2px; right:-3px; min-width:14px; height:14px; padding:0 3px;
+  border-radius:7px; background:#FF3B30; color:#fff; font-size:9px; font-weight:700;
+  line-height:14px; text-align:center; box-shadow:0 0 0 1.5px var(--chrome-solid);
+}
+.dr-dot.idle{display:none}
+.dr-arrow{font-size:8px; opacity:.5; margin-left:1px}
+
+/* ── 팝오버 ── */
+.popover{
+  position:fixed; z-index:880; width:352px;
+  background:var(--panel); backdrop-filter:blur(34px) saturate(180%);
+  -webkit-backdrop-filter:blur(34px) saturate(180%);
+  border:.5px solid var(--stroke); border-radius:12px; box-shadow:var(--shadow);
+  overflow:hidden; opacity:0; transform:translateY(-6px) scale(.98); pointer-events:none;
+  transition:opacity .14s ease, transform .14s ease;
+}
+.popover.show{opacity:1; transform:none; pointer-events:auto}
+.popover::before{ /* 말풍선 */
+  content:''; position:absolute; top:-5px; right:26px; width:10px; height:10px;
+  background:var(--panel); border-left:.5px solid var(--stroke); border-top:.5px solid var(--stroke);
+  transform:rotate(45deg); backdrop-filter:blur(1px);
+}
+.pop-head{
+  display:flex; align-items:center; gap:8px; padding:10px 13px 9px;
+  border-bottom:.5px solid var(--stroke2);
+}
+.pop-title{font-weight:600; font-size:12.5px; letter-spacing:.1px}
+.pop-sub{color:var(--dim); font-size:11px; margin-left:auto; font-variant-numeric:tabular-nums}
+.pop-list{max-height:min(340px,42vh); overflow-y:auto; padding:5px}
+.pop-list::-webkit-scrollbar{width:8px}
+.pop-list::-webkit-scrollbar-thumb{background:var(--stroke); border-radius:4px}
+
+.dl{
+  padding:8px 9px; border-radius:8px; display:flex; flex-direction:column; gap:5px;
+  transition:background .12s;
+}
+.dl:hover{background:var(--row)}
+.dl-top{display:flex; align-items:center; gap:7px}
+.dl-ico{font-size:12px; width:14px; text-align:center; flex-shrink:0}
+.dl-name{flex:1; min-width:0; font-size:12.5px; font-weight:500;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.dl-spd{font-size:11px; color:var(--accent2); font-variant-numeric:tabular-nums; font-weight:600; flex-shrink:0}
+.dl-spd.up{color:#FF9F0A}
+.bar{height:4px; background:var(--fill); border-radius:2px; overflow:hidden}
+.bar>i{display:block; height:100%; border-radius:2px; background:var(--accent);
+  transition:width .5s cubic-bezier(.4,0,.2,1)}
+.dl-meta{display:flex; gap:8px; font-size:10.5px; color:var(--dim); font-variant-numeric:tabular-nums}
+.dl-meta .eta{margin-left:auto}
+.dl-acts{display:flex; gap:5px; margin-top:1px}
+.mini{
+  border:none; background:var(--fill); color:var(--text); border-radius:5px;
+  font:inherit; font-size:10.5px; padding:2px 7px; cursor:pointer; transition:background .12s;
+}
+.mini:hover{background:var(--stroke)}
+.mini.warn{color:var(--warn)}
+
+.pop-stats{
+  display:flex; gap:0; padding:8px 13px; border-top:.5px solid var(--stroke2);
+  border-bottom:.5px solid var(--stroke2); font-size:11px; color:var(--muted);
+}
+.pop-stats>div{flex:1; text-align:center; border-left:.5px solid var(--stroke2)}
+.pop-stats>div:first-child{border-left:none}
+.pop-stats b{display:block; color:var(--text); font-size:12px; font-weight:600;
+  font-variant-numeric:tabular-nums; margin-top:1px}
+
+.pop-menu{padding:5px}
+.mi{
+  display:flex; align-items:center; gap:8px; width:100%; padding:6px 8px;
+  border:none; background:none; color:var(--text); font:inherit; font-size:12.5px;
+  border-radius:6px; cursor:pointer; text-align:left; transition:background .1s;
+}
+.mi:hover{background:var(--accent); color:#061206}
+html[data-theme=light] .mi:hover{color:#fff}
+.mi kbd{margin-left:auto; font:inherit; font-size:10.5px; opacity:.6;
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.mi.hot{background:var(--sel)}
+.mi.hot:hover{background:var(--accent)}
+.msep{height:.5px; background:var(--stroke2); margin:4px 8px}
+
+/* ── 팔레트 ── */
+.pal-scrim{
+  position:fixed; inset:0; z-index:940; background:rgba(0,0,0,.22);
+  opacity:0; pointer-events:none; transition:opacity .16s;
+}
+.pal-scrim.show{opacity:1; pointer-events:auto}
+.palette{
+  position:fixed; z-index:950; left:50%; top:16vh; transform:translateX(-50%) scale(.97);
+  width:min(620px,92vw);
+  background:var(--panel); backdrop-filter:blur(40px) saturate(180%);
+  -webkit-backdrop-filter:blur(40px) saturate(180%);
+  border:.5px solid var(--stroke); border-radius:14px; box-shadow:var(--shadow);
+  overflow:hidden; opacity:0; pointer-events:none;
+  transition:opacity .15s, transform .15s;
+}
+.palette.show{opacity:1; transform:translateX(-50%) scale(1); pointer-events:auto}
+.pal-in{
+  display:flex; align-items:center; gap:10px; padding:13px 15px;
+  border-bottom:.5px solid var(--stroke2);
+}
+.pal-in .ico{font-size:17px}
+.pal-field{flex:1; min-width:0}
+.pal-field input{
+  width:100%; border:none; background:none; outline:none; color:var(--text);
+  font:inherit; font-size:16px; font-weight:400;
+}
+.pal-field input::placeholder{color:var(--dim)}
+.pal-hint{
+  font:inherit; font-size:10.5px; color:var(--dim); font-family:ui-monospace,Menlo,monospace;
+  border:.5px solid var(--stroke); border-radius:4px; padding:1px 5px; flex-shrink:0;
+}
+.pal-hint.flash{background:var(--accent); color:#061206; border-color:var(--accent)}
+
+.pal-body{padding:12px 15px 14px; display:flex; flex-direction:column; gap:11px}
+.pal-dl-info{
+  display:flex; align-items:center; gap:11px; padding:10px 12px;
+  background:var(--row); border-radius:9px;
+}
+.pal-dl-info .ico{font-size:22px}
+.pal-dl-meta{flex:1; min-width:0}
+.pal-dl-title{font-size:13px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
+.pal-dl-sub{font-size:11.5px; color:var(--muted); margin-top:2px}
+.pal-dl-sub .ok{color:var(--accent2)}
+.pal-dl-sub .warnc{color:var(--warn)}
+.qual{
+  appearance:none; background:var(--fill); color:var(--text); border:.5px solid var(--stroke);
+  border-radius:7px; padding:5px 24px 5px 9px; font:inherit; font-size:12px; cursor:pointer;
+  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='8' height='5'><path d='M1 1l3 3 3-3' fill='none' stroke='%23888' stroke-width='1.4' stroke-linecap='round'/></svg>");
+  background-repeat:no-repeat; background-position:right 8px center;
+}
+.pal-actions{display:flex; gap:8px; align-items:center}
+.btn{
+  border:none; border-radius:8px; padding:7px 15px; font:inherit; font-size:12.5px;
+  font-weight:600; cursor:pointer; transition:filter .12s, background .12s;
+}
+.btn-primary{background:var(--accent); color:#061206}
+html[data-theme=light] .btn-primary{color:#fff}
+.btn-primary:hover{filter:brightness(1.1)}
+.btn-ghost{background:var(--fill); color:var(--text); font-weight:500}
+.btn-ghost:hover{background:var(--stroke)}
+.pal-note{font-size:11px; color:var(--dim); margin-left:auto; text-align:right; line-height:1.5}
+kbd.key{
+  font:inherit; font-size:10.5px; font-family:ui-monospace,Menlo,monospace;
+  border:.5px solid var(--stroke); border-radius:4px; padding:1px 5px;
+  background:var(--fill); color:var(--muted);
+}
+.pal-empty{padding:22px; text-align:center; color:var(--dim); font-size:12.5px}
+
+/* ── 독립 창 ── */
+.win{
+  position:fixed; z-index:870; left:50%; top:50%; transform:translate(-50%,-50%) scale(.96);
+  width:min(1080px,94vw); height:min(720px,86vh);
+  background:var(--chrome-solid); border-radius:11px; box-shadow:var(--shadow);
+  border:.5px solid var(--stroke); overflow:hidden; display:flex; flex-direction:column;
+  opacity:0; pointer-events:none; transition:opacity .18s, transform .18s;
+}
+.win.show{opacity:1; transform:translate(-50%,-50%) scale(1); pointer-events:auto}
+.win-bar{
+  height:38px; flex-shrink:0; display:flex; align-items:center; padding:0 13px; gap:8px;
+  border-bottom:.5px solid var(--stroke2); background:var(--chrome);
+  backdrop-filter:blur(20px);
+}
+.tl{display:flex; gap:8px}
+.tl i{width:12px; height:12px; border-radius:50%; display:block; cursor:pointer}
+.tl .r{background:#FF5F57}.tl .y{background:#FEBC2E}.tl .g{background:#28C840}
+.win-title{
+  position:absolute; left:50%; transform:translateX(-50%); font-size:12.5px;
+  font-weight:600; opacity:.75;
+}
+.win-tabbar{display:flex; gap:2px; margin-left:14px}
+.win-tab{
+  font-size:11.5px; padding:4px 10px; border-radius:6px; color:var(--muted); cursor:pointer;
+}
+.win-tab.on{background:var(--fill); color:var(--text); font-weight:600}
+.win-frame{flex:1; min-height:0; position:relative; background:#0A0A0C}
+.win-frame iframe{width:100%; height:100%; border:none; display:block}
+.win-fallback{
+  position:absolute; inset:0; display:none; flex-direction:column; align-items:center;
+  justify-content:center; gap:10px; color:#9A9AA0; text-align:center; padding:20px;
+}
+.win-fallback.on{display:flex}
+.win-fallback code{
+  background:rgba(255,255,255,.08); padding:2px 7px; border-radius:4px;
+  font-family:ui-monospace,Menlo,monospace; font-size:11.5px;
+}
+
+/* ── 설정 ── */
+.set{
+  position:fixed; z-index:930; left:50%; top:50%; transform:translate(-50%,-50%) scale(.96);
+  width:min(560px,92vw); max-height:82vh; display:flex;
+  background:var(--panel-solid); border-radius:11px; box-shadow:var(--shadow);
+  border:.5px solid var(--stroke); overflow:hidden;
+  opacity:0; pointer-events:none; transition:opacity .16s, transform .16s;
+}
+.set.show{opacity:1; transform:translate(-50%,-50%) scale(1); pointer-events:auto}
+.set-nav{
+  width:150px; flex-shrink:0; padding:9px 7px; border-right:.5px solid var(--stroke2);
+  background:var(--row);
+}
+.set-nav div{padding:6px 9px; border-radius:6px; font-size:12.5px; color:var(--muted); cursor:pointer}
+.set-nav div.on{background:var(--accent); color:#061206; font-weight:600}
+html[data-theme=light] .set-nav div.on{color:#fff}
+.set-body{flex:1; padding:16px 18px; overflow-y:auto; min-width:0}
+.set-h{font-size:14px; font-weight:700; margin-bottom:3px}
+.set-d{font-size:11.5px; color:var(--dim); margin-bottom:15px; line-height:1.5}
+.fld{margin-bottom:14px}
+.fld label{display:block; font-size:12px; font-weight:600; margin-bottom:4px}
+.fld .sub{font-size:11px; color:var(--dim); margin-top:3px; line-height:1.5}
+.fld input[type=text]{
+  width:100%; padding:7px 10px; border-radius:7px; border:.5px solid var(--stroke);
+  background:var(--fill); color:var(--text); font:inherit; font-size:12.5px; outline:none;
+}
+.fld input[type=text]:focus{border-color:var(--accent)}
+.chk{display:flex; align-items:center; gap:8px; font-size:12.5px; margin-bottom:9px; cursor:pointer}
+.chk input{width:15px; height:15px; accent-color:var(--accent)}
+.hk{
+  display:flex; align-items:center; justify-content:space-between; gap:12px;
+  padding:9px 11px; background:var(--row); border-radius:8px; margin-bottom:9px;
+}
+.hk-l b{font-size:12.5px; font-weight:600; display:block}
+.hk-l span{font-size:11px; color:var(--dim)}
+.hk-k{
+  font-family:ui-monospace,Menlo,monospace; font-size:12px; font-weight:600;
+  background:var(--fill); border:.5px solid var(--stroke); border-radius:6px;
+  padding:5px 10px; cursor:pointer; white-space:nowrap;
+}
+.hk-k:hover{border-color:var(--accent)}
+
+/* ── 토스트 ── */
+.toasts{position:fixed; z-index:990; left:50%; bottom:26px; transform:translateX(-50%);
+  display:flex; flex-direction:column; gap:7px; align-items:center; pointer-events:none}
+.toast{
+  background:var(--panel-solid); border:.5px solid var(--stroke); border-radius:9px;
+  padding:8px 15px; font-size:12.5px; box-shadow:var(--shadow);
+  opacity:0; transform:translateY(8px); transition:opacity .2s, transform .2s;
+}
+.toast.show{opacity:1; transform:none}
+.toast b{color:var(--accent2)}
+
+/* ── 목업 안내 ── */
+.hint-bar{
+  position:fixed; z-index:999; left:50%; bottom:14px; transform:translateX(-50%);
+  display:flex; gap:7px; align-items:center;
+  background:var(--chrome); backdrop-filter:blur(20px);
+  border:.5px solid var(--stroke); border-radius:9px; padding:6px 10px;
+  font-size:11px; color:var(--muted); box-shadow:var(--shadow);
+}
+.hint-bar b{color:var(--text); font-weight:600}
+.hint-bar button{
+  border:none; background:var(--fill); color:var(--text); border-radius:5px;
+  font:inherit; font-size:11px; padding:3px 8px; cursor:pointer;
+}
+.hint-bar button:hover{background:var(--stroke)}
+body.dark-ui .hint-bar{display:none}
+</style>
+</head>
+<body class="dark-ui">
+
+<!-- ── 메뉴바 ── -->
+<div class="menubar">
+  <div class="mb-left"> <span style="font-weight:700">&#63743;</span> Finder &nbsp; 파일 &nbsp; 편집 &nbsp; 보기 &nbsp; 이동 &nbsp; 창 &nbsp; 도움말</div>
+  <div class="mb-right">
+    <span class="mb-item mb-emoji">&#128241;</span>
+    <span class="mb-item mb-emoji">&#128246;</span>
+    <div class="dr-status" id="drStatus" title="DroidRelay">
+      <span class="dr-icon">&#128225;<span class="dr-dot idle" id="drDot">0</span></span>
+      <span class="dr-arrow">&#9662;</span>
+    </div>
+  </div>
+</div>
+
+<!-- ── 팝오버 ── -->
+<div class="popover" id="popover">
+  <div class="pop-head">
+    <span style="font-size:13px">&#128225;</span>
+    <span class="pop-title">DroidRelay</span>
+    <span class="pop-sub" id="popSub">방금 전</span>
+  </div>
+  <div class="pop-list" id="popList"></div>
+  <div class="pop-stats">
+    <div>오늘<b id="stToday">—</b></div>
+    <div>여유 공간<b id="stFree">—</b></div>
+    <div>온도<b id="stTemp">—</b></div>
+  </div>
+  <div class="pop-menu">
+    <button class="mi hot" id="miAdd"><span>&#128228;</span> 주소 붙여넣어 받기<kbd>&#8984;&#8679;D</kbd></button>
+    <button class="mi" id="miDash"><span>&#127760;</span> 대시보드 열기</button>
+    <div class="msep"></div>
+    <button class="mi" id="miTheme"><span>&#9681;</span> 어두운 모드<kbd>&#8984;&#8679;T</kbd></button>
+    <button class="mi" id="miSet"><span>&#9881;</span> 설정…<kbd>&#8984;,</kbd></button>
+    <button class="mi"><span>&#9215;</span> DroidRelay 종료</button>
+  </div>
+</div>
+
+<!-- ── 팔레트 ── -->
+<div class="pal-scrim" id="palScrim"></div>
+<div class="palette" id="palette">
+  <div class="pal-in">
+    <span class="ico">&#128228;</span>
+    <div class="pal-field">
+      <input id="palInput" placeholder="주소를 붙여넣으세요" spellcheck="false" autocomplete="off">
+    </div>
+    <span class="pal-hint" id="palHint">&#8984;V</span>
+  </div>
+  <div class="pal-body" id="palBody">
+    <div class="pal-empty" id="palEmpty">붙여넣은 주소를 분석합니다…</div>
+    <div id="palResult" style="display:none">
+      <div class="pal-dl-info">
+        <span class="ico" id="riIco">&#127916;</span>
+        <div class="pal-dl-meta">
+          <div class="pal-dl-title" id="riTitle">—</div>
+          <div class="pal-dl-sub" id="riSub">—</div>
+        </div>
+        <select class="qual" id="riQual">
+          <option>원본 (1.2 GB)</option>
+          <option>1080p (720 MB)</option>
+          <option>720p (410 MB)</option>
+        </select>
+      </div>
+      <div class="pal-actions">
+        <button class="btn btn-primary" id="riGo">등록</button>
+        <button class="btn btn-ghost">취소</button>
+        <div class="pal-note">
+          폰이 직접 다운로드합니다 · ⏎ 등록 · esc 닫기<br>
+          품질 선택은 스트림 주소에서만
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── 독립 창 (실제 대시보드) ── -->
+<div class="win" id="win">
+  <div class="win-bar">
+    <div class="tl"><i class="r"></i><i class="y"></i><i class="g"></i></div>
+    <span class="win-title">DroidRelay — 10.233.247.205:3000</span>
+    <div class="win-tabbar">
+      <div class="win-tab on">대시보드</div>
+      <div class="win-tab">진행</div>
+      <div class="win-tab">보관함</div>
+    </div>
+  </div>
+  <div class="win-frame">
+    <iframe id="dashFrame" src="http://localhost:3000/"></iframe>
+    <div class="win-fallback" id="winFallback">
+      <div style="font-size:30px">&#128225;</div>
+      <div><b>실제 대시보드를 불러오지 못했습니다</b></div>
+      <div>폰이 꺼져 있거나 <code>adb forward tcp:3000 tcp:3000</code> 가 필요합니다.<br>
+      브라우저에서 <code>http://localhost:3000</code> 로 접속 가능한지 확인하세요.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ── 설정 ── -->
+<div class="set" id="set">
+  <div class="set-nav">
+    <div class="on">일반</div>
+    <div>단축키</div>
+    <div>알림</div>
+    <div>고급</div>
+  </div>
+  <div class="set-body">
+    <div class="set-h">DroidRelay 연결</div>
+    <div class="set-d">폰이 같은 네트워크에 있어야 합니다. 주소가 바뀌면 여기서 고치세요.</div>
+    <div class="fld">
+      <label>서버 주소</label>
+      <input type="text" id="setAddr" value="http://10.233.247.205:3000">
+      <div class="sub">자동 발견에 실패했을 때만 직접 입력하세요. 기본값은 로컬 네트워크에서 찾습니다.</div>
+    </div>
+    <div class="fld">
+      <label>웹 인증 (HTTP Basic)</label>
+      <input type="text" placeholder="비워두면 인증 없음" value="">
+      <div class="sub">폰 설정에서 인증을 켜면 아이디와 비밀번호를 입력해야 합니다. Keychain 에 저장됩니다.</div>
+    </div>
+    <div style="height:8px"></div>
+    <div class="set-h">단축키</div>
+    <div class="set-d">Carbon 전역 핫키를 씁니다. 접근성 권한을 요구하지 않습니다.</div>
+    <div class="hk">
+      <div class="hk-l"><b>주소 붙여넣어 받기</b><span>팔레트 열기</span></div>
+      <div class="hk-k">&#8984; &#8679; D</div>
+    </div>
+    <div class="hk">
+      <div class="hk-l"><b>새로고침</b><span>진행률 즉시 갱신</span></div>
+      <div class="hk-k">&#8984; R</div>
+    </div>
+    <div class="set-h" style="margin-top:18px">알림</div>
+    <div class="chk"><input type="checkbox" checked> 다운로드 완료 시 알림</div>
+    <div class="chk"><input type="checkbox" checked> 스로틀링(발열·배터리) 시 경고</div>
+    <div class="chk"><input type="checkbox"> 실패 시 알림</div>
+  </div>
+</div>
+
+<div class="toasts" id="toasts"></div>
+
+<div class="hint-bar">
+  <span><b>목업</b> · 메뉴바 아이콘 클릭</span>
+  <button onclick="openPalette()">&#8984;&#8679;D 팔레트</button>
+  <button onclick="openWin()">대시보드 창</button>
+  <button onclick="openSet()">설정</button>
+  <button onclick="toggleTheme()">테마</button>
+</div>
+
+<script>
+/* ─────────────────────────────────────────────────────────
+   목업 동작. REST 직접 호출 전제:
+   진행률은 실제 구현에서 SSE /api/events 를 구독한다.
+   여기서는 그 흐름을 흉내내 progresses 로 애니메이션한다.
+   ───────────────────────────────────────────────────────── */
+const $ = s => document.querySelector(s);
+const $$ = s => [...document.querySelectorAll(s)];
+
+const state = {
+  active: [
+    { id:'a1', ico:'🎬', name:'JUR-838.mp4',            pct:62, spd:7340032,  eta:'4분 12초', up:0,     state:'RUNNING' },
+    { id:'a2', ico:'📦', name:'ubuntu-24.04-desktop.iso', pct:23, spd:3145728,  eta:'18분 40초', up:412000, state:'RUNNING' },
+    { id:'a3', ico:'🌊', name:'KRE-512.torrent',         pct:100,spd:0,         eta:'',          up:180000, state:'SEEDING' },
+  ],
+  today: 4.28, free: 40.1, temp: 38,
+};
+
+const fmtBps = b => b>0 ? (b>=1048576 ? (b/1048576).toFixed(1)+' MB/s' : (b/1024).toFixed(0)+' KB/s') : '—';
+const fmtGB  = g => g.toFixed(1)+' GB';
+
+/* ── 팝오버 렌더 ── */
+function renderPop(){
+  const list = $('#popList');
+  if(!state.active.length){
+    list.innerHTML = `<div style="padding:26px 10px;text-align:center;color:var(--dim);font-size:12.5px">
+      진행 중인 작업이 없습니다<br><span style="font-size:11px">⌘⇧D 로 주소를 붙여넣어 보세요</span></div>`;
+  } else {
+    list.innerHTML = state.active.map(d=>`
+      <div class="dl" data-id="${d.id}">
+        <div class="dl-top">
+          <span class="dl-ico">${d.ico}</span>
+          <span class="dl-name">${esc(d.name)}</span>
+          <span class="dl-spd ${d.up?'up':''}">${d.up? '▲'+fmtBps(d.up) : '▼'+fmtBps(d.spd)}</span>
+        </div>
+        <div class="bar"><i style="width:${d.pct}%"></i></div>
+        <div class="dl-meta">
+          <span>${d.state==='SEEDING'?'시딩':Math.floor(d.pct)+'%'}</span>
+          ${d.state==='SEEDING'
+            ? '<span style="color:var(--accent2)">피어 14</span>'
+            : `<span class="eta">남은 ${d.eta}</span>`}
+        </div>
+        <div class="dl-acts">
+          ${d.state==='SEEDING'
+            ? '<button class="mini warn" data-act="stop">시딩 중지</button>'
+            : '<button class="mini" data-act="pause">일시정지</button><button class="mini" data-act="cancel">취소</button>'}
+        </div>
+      </div>`).join('');
+  }
+  const n = state.active.filter(d=>d.state==='RUNNING').length;
+  const dot = $('#drDot');
+  dot.classList.toggle('idle', n===0);
+  dot.textContent = n;
+  $('#stToday').textContent = fmtGB(state.today);
+  $('#stFree').textContent  = fmtGB(state.free);
+  $('#stTemp').textContent  = state.temp+'°';
+}
+const esc = s => (s||'').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+/* 진행 애니메이션 — 실제라면 SSE tick 을 받을 자리 */
+setInterval(()=>{
+  let changed = false;
+  state.active.forEach(d=>{
+    if(d.state!=='RUNNING' || d.pct>=100) return;
+    d.pct = Math.min(100, d.pct + Math.random()*0.9);
+    if(d.spd) d.spd = Math.max(0, d.spd + (Math.random()-.5)*400000);
+    if(d.pct>=100){ d.state='DONE'; }
+    changed = true;
+  });
+  state.today += state.active.filter(d=>d.state==='RUNNING').length * 0.0009;
+  if(changed && $('#popover').classList.contains('show')) renderPop();
+}, 700);
+
+/* ── 팝오버 열림/닫기 ── */
+function anchorPopover(){
+  const r = $('#drStatus').getBoundingClientRect();
+  const p = $('#popover');
+  p.style.top = (r.bottom + 5) + 'px';
+  p.style.left = Math.max(12, Math.min(r.right - p.offsetWidth, innerWidth - 12 - p.offsetWidth)) + 'px';
+}
+function togglePopover(){
+  const p = $('#popover');
+  const opening = !p.classList.contains('show');
+  closeAll();
+  if(opening){
+    anchorPopover();
+    renderPop();
+    p.classList.add('show');
+    $('#drStatus').classList.add('open');
+  }
+}
+$('#drStatus').onclick = e => { e.stopPropagation(); togglePopover(); };
+
+/* ── 팔레트 ── */
+const SAMPLES = {
+  'https://example.com/movie_2160p.mkv': { ico:'🎬', title:'movie_2160p.mkv', sub:'직접 영상 · 2.4 GB', sel:null },
+  'https://example.com/stream/master.m3u8': { ico:'📺', title:'라이브 스트림 (마스터)', sub:'HLS · 해상도 3종 감지', sel:['원본 (1080p)','720p','480p'] },
+  'https://example.com/doc.pdf': { ico:'📄', title:'doc.pdf', sub:'일반 파일 · 340 KB', sel:null },
+};
+let palKey = '';
+function openPalette(){
+  closeAll();
+  const scrim=$('#palScrim'), p=$('#palette');
+  scrim.classList.add('show'); p.classList.add('show');
+  const inp=$('#palInput');
+  inp.value='';
+  $('#palResult').style.display='none';
+  $('#palEmpty').style.display='block';
+  $('#palEmpty').textContent='붙여넣은 주소를 분석합니다…';
+  setTimeout(()=>inp.focus(), 40);
+  // 목업: 클립보드에 이미 주소가 있다고 가정하고 ⌘V 를 흉내낸다
+  setTimeout(()=>pasteClipboard(), 520);
+}
+/* 실제 구현: NSPasteboard.general.string(forType:.string) 를 핫키 직후 동기적으로 읽는다.
+   폴링하면 안 된다 — 사용자가 주소 복사 → ⌘⇧D 사이에 값이 바뀔 수 있다. */
+function pasteClipboard(){
+  const inp=$('#palInput'), hint=$('#palHint');
+  const sample = 'https://example.com/movie_2160p.mkv';
+  inp.value = sample;
+  hint.textContent='붙여넣음';
+  hint.classList.add('flash');
+  setTimeout(()=>{ hint.classList.remove('flash'); hint.textContent='⌘V'; }, 800);
+  analyze(inp.value);
+}
+function analyze(url){
+  const empty=$('#palEmpty'), res=$('#palResult');
+  setTimeout(()=>{
+    const key = Object.keys(SAMPLES).find(k => url.includes(k.replace('https://example.com',''))) ;
+    const s = key ? SAMPLES[key] : { ico:'📦', title:url.split('/').pop()||url, sub:'일반 다운로드', sel:null };
+    palKey = url;
+    $('#riIco').textContent = s.ico;
+    $('#riTitle').textContent = s.title;
+    $('#riSub').innerHTML = `${esc(s.sub)} &nbsp;<span class="ok">✓ 분석 완료</span>`;
+    const q=$('#riQual');
+    if(s.sel){ q.style.display=''; q.innerHTML = s.sel.map(x=>`<option>${x}</option>`).join(''); }
+    else { q.style.display='none'; }
+    empty.style.display='none'; res.style.display='';
+  }, 480);
+}
+$('#palInput').addEventListener('input', e => {
+  const v=e.target.value.trim();
+  if(!v){ $('#palResult').style.display='none'; $('#palEmpty').style.display='block'; return; }
+  analyze(v);
+});
+$('#riGo').onclick = () => {
+  const url = $('#palInput').value.trim();
+  const name = $('#riTitle').textContent;
+  closeAll();
+  state.active.unshift({
+    id:'n'+Date.now(), ico:$('#riIco').textContent, name, pct:0,
+    spd:0, eta:'확인 중…', up:0, state:'RUNNING'
+  });
+  toast(`등록했습니다 → <b>${esc(name)}</b>`);
+  setTimeout(()=>{ renderPop(); if($('#popover').classList.contains('show')) renderPop(); }, 60);
+  setTimeout(()=>{ if(!$('#popover').classList.contains('show')){ togglePopover(); } }, 380);
+};
+$('#palScrim').onclick = closeAll;
+$('#palInput').addEventListener('keydown', e => {
+  if(e.key==='Enter' && $('#palResult').style.display!=='none') $('#riGo').click();
+  if(e.key==='Escape') closeAll();
+});
+
+/* ── 독립 창 ── */
+let dashLoaded = false;
+function openWin(){
+  closeAll();
+  const w=$('#win');
+  w.classList.add('show');
+  const f=$('#dashFrame');
+  if(f.dataset.loaded!=='1'){ f.dataset.loaded='1'; f.src='http://localhost:3000/'; }
+  // load 이벤트는 404 여도 발화하므로 "아예 로드조차 안 됨" 만 실패로 본다.
+  // contentDocument 로 확인하려 하면 크로스 오리진이라 항상 null 이라 정상 화면에서도 오판한다.
+  dashLoaded = false;
+  $('#winFallback').classList.remove('on');
+  setTimeout(()=>{ if(!dashLoaded) $('#winFallback').classList.add('on'); }, 6000);
+}
+$('#dashFrame').addEventListener('load', ()=>{
+  dashLoaded = true;
+  $('#winFallback').classList.remove('on');
+});
+$('#dashFrame').addEventListener('error', ()=>{ dashLoaded = false; });
+
+/* ── 설정 ── */
+function openSet(){ closeAll(); $('#set').classList.add('show'); }
+
+/* ── 공통 ── */
+function toast(html){
+  const t=document.createElement('div');
+  t.className='toast'; t.innerHTML=html;
+  $('#toasts').appendChild(t);
+  requestAnimationFrame(()=>t.classList.add('show'));
+  setTimeout(()=>{ t.classList.remove('show'); setTimeout(()=>t.remove(),260); }, 2600);
+}
+function closeAll(){
+  $('#popover').classList.remove('show');
+  $('#drStatus').classList.remove('open');
+  $('#palette').classList.remove('show');
+  $('#palScrim').classList.remove('show');
+  $('#win').classList.remove('show');
+  $('#set').classList.remove('show');
+}
+function toggleTheme(){
+  const h=document.documentElement;
+  h.dataset.theme = h.dataset.theme==='dark' ? 'light' : 'dark';
+}
+$('#miAdd').onclick   = () => openPalette();
+$('#miDash').onclick  = () => openWin();
+$('#miSet').onclick   = () => openSet();
+$('#miTheme').onclick = () => toggleTheme();
+document.addEventListener('click', e => {
+  if(e.target.closest('#drStatus') || e.target.closest('#popover') ||
+     e.target.closest('.palette') || e.target.closest('.win') ||
+     e.target.closest('.set') || e.target.closest('.hint-bar')) return;
+  closeAll();
+});
+document.addEventListener('keydown', e => {
+  const meta = e.metaKey || e.ctrlKey;
+  if(meta && e.shiftKey && e.key.toLowerCase()==='d'){ e.preventDefault(); openPalette(); }
+  if(meta && e.shiftKey && e.key.toLowerCase()==='t'){ e.preventDefault(); toggleTheme(); }
+  if(e.key==='Escape') closeAll();
+  if(meta && e.key.toLowerCase()==='r'){
+    e.preventDefault();
+    state.active.forEach(d=>{ if(d.state==='RUNNING'){ d.pct=Math.min(100,d.pct+1); } });
+    renderPop(); toast('새로고침');
+  }
+});
+/* 팝오버 안 액션 */
+$('#popList').addEventListener('click', e=>{
+  const b=e.target.closest('[data-act]'); if(!b) return;
+  const id=b.closest('.dl').dataset.id, act=b.dataset.act;
+  const i=state.active.findIndex(d=>d.id===id); if(i<0) return;
+  if(act==='pause'){ state.active[i].state='PAUSED'; toast('일시정지'); }
+  if(act==='cancel'){ state.active.splice(i,1); toast('취소했습니다'); }
+  if(act==='stop'){ state.active.splice(i,1); toast('시딩 중지'); }
+  renderPop();
+});
+addEventListener('resize', ()=>{ if($('#popover').classList.contains('show')) anchorPopover(); });
+renderPop();
+</script>
+</body>
+</html>

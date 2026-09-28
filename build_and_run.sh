@@ -38,17 +38,32 @@ pick_device() {
 }
 
 # pick_device 결과를 검증하고 $SERIAL 에 넣는다. 실패 시 exit.
+# 선택과 사용 사이에 기기가 사라질 수 있다 — USB 케이블이 흔들리면 실제로 그렇다.
+# 그래서 살아 있는지 한 번 더 확인하고, 사라졌으면 다른 후보로 한 번 더 시도한다.
+device_alive() { adb devices | awk '$2=="device"{print $1}' | grep -qx "$1"; }
+
 resolve_device() {
-  local d; d=$(pick_device)
-  case "$d" in
-    NO_DEVICE) echo "⚠️  연결된 디바이스 없음"; return 1 ;;
-    INVALID_SERIAL) echo "❌ DRD_SERIAL='$DRD_SERIAL' 이(가) 연결 목록에 없음"; return 1 ;;
-    MULTIPLE)
-      echo "❌ 디바이스가 여러 대 연결됨 — $DRD_SERIAL 로 지정하세요:"
-      adb devices | awk '$2=="device"{printf "     %s  %s %s\n",$1,$4,$5}'
-      return 1 ;;
-    *) SERIAL="$d"; return 0 ;;
-  esac
+  local d attempt
+  for attempt in 1 2; do
+    d=$(pick_device)
+    case "$d" in
+      NO_DEVICE)
+        if [ "$attempt" = "1" ]; then sleep 1; continue; fi
+        echo "⚠️  연결된 디바이스 없음"; return 1 ;;
+      INVALID_SERIAL)
+        echo "❌ DRD_SERIAL='$DRD_SERIAL' 이(가) 연결 목록에 없음"; return 1 ;;
+      MULTIPLE)
+        echo "❌ 디바이스가 여러 대 연결됨 — $DRD_SERIAL 로 지정하세요:"
+        adb devices -l | awk '$2=="device"{printf "     %s  %s %s\n",$1,$4,$5}'
+        return 1 ;;
+      *)
+        if device_alive "$d"; then SERIAL="$d"; return 0; fi
+        echo "… $d 가 응답하지 않아 다시 선택합니다"
+        sleep 1 ;;
+    esac
+  done
+  echo "❌ 연결된 디바이스가 안정적이지 않습니다. USB 케이블/무선 연결을 확인하세요."
+  return 1
 }
 
 # JAVA_HOME: Android Studio JBR 우선, 그 외 시스템 Java
