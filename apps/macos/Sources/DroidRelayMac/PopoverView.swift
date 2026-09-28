@@ -1034,7 +1034,7 @@ struct StorageRow: View {
     let entry: StorageEntry
     /// **폴더를 열기** — 파일이면 호출되지 않는다.
     let onOpen: () -> Void
-    /// **브라우저로 실시간 재생** — `▶` 가 뜰 때만 눌린다.
+    /// **실시간 재생** — `▶` 가 뜰 때만 눌린다.
     let onPlay: () -> Void
     /// **Mac 으로 내려받기** — `받기` 가 뜰 때만 눌린다.
     let onDownload: () -> Void
@@ -1042,8 +1042,8 @@ struct StorageRow: View {
     let onMove: () -> Void
     let onTrash: () -> Void
 
-    /// **브라우저가 실제로 재생할 수 있는 파일인가** — 서버 타입 ∩ Safari 지원.
-    private var playable: Bool { ActionRules.isBrowserPlayableVideo(entry.name) }
+    /// **▶ 가 뜰 파일인가** — `mp4`·`mp3` 만 (IINA 우선, 없으면 브라우저).
+    private var playable: Bool { ActionRules.isStreamPlayable(entry.name) }
 
     /// 아이콘 + 이름 + 크기/날짜
     private var entryLabel: some View {
@@ -1111,10 +1111,10 @@ struct StorageRow: View {
                 .buttonStyle(.plain)
                 .help("열기")
             } else if playable {
-                // **브라우저가 진짜 재생하는 파일에만 ▶ 를 띄운다.**
+                // **진짜 재생되는 파일에만 ▶ 를 띄운다** — `mp4`·`mp3` 뿐.
                 //
                 // `.mkv` `.avi` `.dmg` 에 ▶ 를 주면 사용자가 눌렀을 때
-                // 브라우저가 **검은 화면**을 낸다 → "앱이 고장났다" 는 인상.
+                // 재생 앱이 **검은 화면**을 낸다 → "앱이 고장났다" 는 인상.
                 // 누를 수 있는데 안 되는 버튼은 없는 것보다 나쁘다.
                 Button(action: onPlay) {
                     Image(systemName: "play.fill")
@@ -1122,7 +1122,7 @@ struct StorageRow: View {
                         .foregroundStyle(Color.accentColor)
                 }
                 .buttonStyle(.plain)
-                .help("재생 — 브라우저에서 실시간으로 봅니다")
+                .help("재생 — IINA 로 실시간으로 봅니다(없으면 브라우저)")
 
                 // **재생할 수 있는 파일도 반드시 받아야 할 수 있다.**
                 //
@@ -1149,6 +1149,7 @@ struct StorageRow: View {
                 //
                 // 내려받으면 로컬 파일이 되고 **사용자 기본 프로그램(IINA) 이 열어 준다.**
                 // 막다른 길이 없도록 — ▶ 는 진짜 재생되는 파일에만.
+                // (`m4v` `mov` `webm` 도 여기 걸린다. 재생은 되지만 ▶ 는 두지 않는다.)
                 Button(action: onDownload) {
                     Text("받기")
                         .font(.system(size: 10.5, weight: .medium))
