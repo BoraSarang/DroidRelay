@@ -573,7 +573,23 @@ T-001~T-008 전부 완료 (커밋 7574486).
 |--------|------|------|
 | T-1085 | **완료 torrent → 보관함 이동 0건** — `TORRENT_FINISHED` 알림이 state=DONE 선기록 → 폴링의 `prevState==DONE` 조기 반환에 막혀 `moveToStorage()` 미도달. 전이 판정 → "완료+미이동" 판정으로 교체 · `storageMoved` 재이동 방지 · 실패 재시도 상한 3 · `moveToStorage()` 성공 반환 · 복원 시 미완료 이동 수습 | ✅ |
 | T-1085 | **웹 삭제·일시정지·재개 전부 415** — `CrossOriginGuard` "Content-Type 비면 거부"가 본문 없는 `DELETE /api/torrents/{id}` 등을 막음(맥 `RelayClient.control()` 도 동일). `hasBody` 분기 추가 — 본문 있을 때만 검사. Origin·Sec-Fetch-Site 방어 유지 | ✅ |
-| T-1085 | 회귀 테스트 `TorrentStorageMoveContractTest` 13건 (테스트 300 → 313) | ✅ |
+| T-1085 | 회귀 테스트 `TorrentStorageMoveContractTest` 17건 + `PersistBeforeRestoreTest` 3건 (테스트 300 → 320) | ✅ |
+| T-1085 | **목록 유실 사고** — 메인 스레드 동기 마이그레이션(6.8GB·3분53초) 동안 `persistDebounced` 가 빈 저장소를 저장 → `torrents.json`·`jobs.json` 이 `[]` 로 덮어써짐. 복원 완료 플래그를 모든 저장 경로에 심음(`persistNow`·`restoreTorrentsAsync`·`onDestroy`·`onTaskRemoved`) | ✅ |
+| T-1085 | 토렌트 작업 위치 → `<보관함>/.torrents` (같은 파일시스템 → rename, 40초 복사 소멸). `.trash` 와 동일 숨김 처리(목록·용량·관리 API 제외), 숨김 판정 하드코딩 6곳 → `StorageGuard.isHidden()` | ✅ |
+
+**함정 2 — 내가 만든 버그가 두 번째 사고를 만들었다**
+워킹 디렉터리 마이그레이션을 `start()`(메인 스레드)에 두었다. 크로스마운트 동기 복사라
+6.8GB 에 3분 53초, 그동안 ①ANR ②5초 폴링이 "아직 복원 전인 빈 저장소"를 보고
+`torrents.json` 을 `[]` 로 덮어씀 ③`load()` 가 그 `[]` 를 읽어 목록 소실.
+**"아무것도 안 읽은 시점"과 "사용자가 다 지운 시점"은 파일로 구분되지 않는다** —
+둘 다 `[]` 다. 저장 가드는 플래그가 아니라 그 구분이 필요하다.
+教训: 목록을 메모리에만 두는 구조에서 **복원 완료 전 저장은 항상 위험**하다.
+
+**함정 3 — "저장 위치를 보관함으로"의 함정**
+`enforceQuota` 는 `sortedBy { lastModified }` 로 초과분을 휴지통 보낸다. 진행 중인
+대용량 파일이 보관함 루트에 잡히면 **오래된 사용자 파일이 대신 삭제된다.** 그래서
+루트가 아니라 **숨김 하위 폴더**를 썼다 — 같은 파일시스템 이점(복사 소멸) + 쿼터·목록
+부작용 제거를 동시에 얻는다.
 
 **함정**: "알림 유실 대비" 코드를 만들면서 **알림이 정상적으로 오는 경로**를 죽였다.
 폴링 주기(5초) > 알림 지연이라 알림이 이기는 게 사실상 항상인데, 그걸 전이 판정과

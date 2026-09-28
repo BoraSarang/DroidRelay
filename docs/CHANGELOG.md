@@ -65,6 +65,42 @@ POST   /api/debug/overlay/toggle → 415
 `receiveText()` 가 빈 문자열을 돌려주고 어느 라우트도 상태를 바꾸지 못한다.
 `text/plain`·`x-www-form-urlencoded`·Content-Type 누락(본문 有) 차단 테스트로 고정.
 
+### Changed [android] — 토렌트 작업 위치를 보관함 안 숨김 폴더로 (40초 정체 해소)
+
+`moveToStorage` 의 `renameTo` 가 EXDEV 로 실패해 3.7GB 를 동기 복사하고, 그동안
+5초 폴링 전체가 멈췄다(실측 40초). 원인: `getExternalFilesDir/torrents` 와
+`/sdcard/Download` 이 다른 마운트.
+
+작업 위치를 `<보관함>/.torrents` 로 옮겨 **같은 파일시스템**에서 rename 되게 했다.
+복사는 사라진다. 단, **보관함 루트에 바로 받지는 않았다** — 진행 중인 대용량 파일이
+`enforceQuota` 의 용량 계산에 잡히면 정리가 `sortedBy { lastModified }` 이라
+**오래된 사용자 파일이 대신 휴지통으로 사라진다.** 그래서 `.trash` 와 동일하게 숨겨
+목록·용량 계산·관리 API(`storageFile`)에서 전부 제외한다. 숨김 판정이 6곳에
+하드코딩돼 있어 `StorageGuard.isHidden()` 하나로 모았다.
+
+부수: 옛 작업 디렉터리 마이그레이션(복사 폴백 포함), 자기참조 이동 차단.
+
+### Fixed [android] — 목록 유실 (T-1085) — **이번 변경이 직접 일으킨 사고**
+
+워킹 디렉터리 마이그레이션을 `start()` — **서비스 메인 스레드** — 에서 동기 복사로
+두었다. 실측 6.8GB 에 **3분 53초**. 그 동안
+
+1. 앱 전체가 4분간 멈췄다(ANR), 그리고
+2. 5초 폴링의 `persistDebounced()` 가 **아직 복원 전인 빈 저장소**를 보고
+   `torrents.json` 을 `[]` 로 덮어썼다. `jobs.json` 도 마찬가지.
+3. 이어 실행된 `load()` 가 그 `[]` 를 읽어 **토렌트 4건과 작업 목록이 사라졌다.**
+
+근본 원인은 **"아직 아무것도 안 읽은 시점"과 "사용자가 다 지운 시점"이 파일로 구분되지
+않는다**는 것이다 — 둘 다 `[]` 다. 그래서 복원 완료 플래그를 모든 저장 경로에 심었다.
+
+- `TorrentEngine.persistNow()` — 복원 전 저장 스킵
+- `restoreTorrents()` → `restoreTorrentsAsync()` — IO 스레드에서 실행
+- `RelayService.onDestroy`·`onTaskRemoved` — 복원 전 저장 스킵 (선재 결함, 동일 유형)
+
+**데이터 손실**: 토렌트 6건의 magnet 링크와 진행 목록이 사라졌다. 부분 데이터
+약 26.6GB 는 디스크에 살아 있어 같은 이름으로 재추가하면 조각이 재사용된다.
+설정(`datastore`)과 보관함 파일은 무손실.
+
 ## [v0.42.0] — API/MCP 하드닝 (교차 출처 차단 + MCP 규격 준수 + 도구 5→12)
 
 > 상세: `docs/plans/PLAN_v0.42_api-mcp-hardening_android.md` (T-1073~T-1079)

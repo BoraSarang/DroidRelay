@@ -473,12 +473,25 @@ class RelayService : Service() {
             // 트래픽 통계 원장 저장 (v0.37)
             runCatching { TrafficLedger.flush() }
             // 강제종료/서비스 종료 시 즉시 영구 저장 (T-111)
+            // 복원 전 저장 금지 (T-1085) — 복원 전엔 저장소가 비어 있어
+            // "원본 N건" 이 "[]" 로 덮여써지면 목록이 영구히 사라진다(실제로 그랬다).
             runCatching {
                 val jobs = com.borasarang.droidrelay.relay.JobsRepository.all()
-                JobsPersistence(appContext).save(jobs)
+                if (com.borasarang.droidrelay.relay.RelayApp.engine?.isRestored() == true) {
+                    JobsPersistence(appContext).save(jobs)
+                } else {
+                    DebugLogger.w(TAG, "복원 전 종료 — jobs.json 저장 스킵 (${jobs.size}건)")
+                }
             }
             // Torrent 상태 저장
-            runCatching { TorrentRepository.all().let { TorrentPersistence(appContext).save(it) } }
+            runCatching {
+                val ts = TorrentRepository.all()
+                if (com.borasarang.droidrelay.relay.RelayApp.torrentEngine?.isRestored() == true) {
+                    TorrentPersistence(appContext).save(ts)
+                } else {
+                    DebugLogger.w(TAG, "복원 전 종료 — torrents.json 저장 스킵 (${ts.size}건)")
+                }
+            }
             DebugLogger.i(TAG, "백그라운드 정지·영구 저장 완료")
         }
         scope.cancel()
@@ -490,8 +503,17 @@ class RelayService : Service() {
     override fun onTaskRemoved(rootIntent: Intent?) {
         DebugLogger.i(TAG, "onTaskRemoved → 즉시 영구 저장")
         val jobs = com.borasarang.droidrelay.relay.JobsRepository.all()
-        JobsPersistence(applicationContext).save(jobs)
-        TorrentRepository.all().let { TorrentPersistence(applicationContext).save(it) }
+        if (com.borasarang.droidrelay.relay.RelayApp.engine?.isRestored() == true) {
+            JobsPersistence(applicationContext).save(jobs)
+        } else {
+            DebugLogger.w(TAG, "복원 전 스와이프 종료 — jobs.json 저장 스킵 (${jobs.size}건)")
+        }
+        val ts = TorrentRepository.all()
+        if (com.borasarang.droidrelay.relay.RelayApp.torrentEngine?.isRestored() == true) {
+            TorrentPersistence(applicationContext).save(ts)
+        } else {
+            DebugLogger.w(TAG, "복원 전 스와이프 종료 — torrents.json 저장 스킵 (${ts.size}건)")
+        }
         // FGS 제거 누락 시 시스템에 의해 타임아웃 크래시 발생 — 스와이프 종료 시에도 명시적으로 해제 (E-AND-SRV-0110)
         if (isForeground) {
             ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)

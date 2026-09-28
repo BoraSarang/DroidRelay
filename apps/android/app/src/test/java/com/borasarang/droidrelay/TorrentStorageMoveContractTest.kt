@@ -3,9 +3,13 @@ package com.borasarang.droidrelay
 import com.borasarang.droidrelay.relay.CrossOriginGuard
 import com.borasarang.droidrelay.relay.MAX_STORAGE_MOVE_ATTEMPTS
 import com.borasarang.droidrelay.relay.METADATA_PLACEHOLDER
+import com.borasarang.droidrelay.relay.StorageGuard
 import com.borasarang.droidrelay.relay.WebAssets
+import com.borasarang.droidrelay.relay.storageDirOf
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -146,9 +150,60 @@ class TorrentStorageMoveContractTest {
         assertTrue(MAX_STORAGE_MOVE_ATTEMPTS in 1..10)
     }
 
+    // ── 5. 작업 디렉터리 = 보관함 아래 숨김 폴더 (v0.43 추가분) ──
+
+    /**
+     * 이게 40초 정체의 근본 원인이다. `getExternalFilesDir` 는 `/sdcard/Download` 과
+     * 다른 마운트라 rename 이 EXDEV 로 실패 → 전량 복사.
+     */
+    @Test
+    fun `작업 디렉터리는 보관함 경로 아래에 있다`() {
+        val tmp = storageDirOf("/sdcard/Download/DroidRelay")
+        assertEquals("/sdcard/Download/DroidRelay/.torrents", tmp.path)
+    }
+
+    @Test
+    fun `작업 디렉터리 이름은 숨김 이름 목록에 포함된다`() {
+        assertTrue(StorageGuard.isHidden(StorageGuard.TORRENT_TMP_NAME))
+        assertTrue(StorageGuard.isHidden(StorageGuard.TRASH_NAME))
+    }
+
+    /**
+     * **데이터 손실 가드** — 진행 중인 대용량 파일이 용량 계산에 잡히면,
+     * `enforceQuota` 가 `sortedBy { lastModified }` 로 **오래된 사용자 파일**을
+     * 대신 휴지통으로 보낸다. 그래서 작업 디렉터리는 반드시 숨겨야 한다.
+     */
+    @Test
+    fun `작업 디렉터리는 일반 파일명처럼 취급되지 않는다`() {
+        assertFalse(StorageGuard.isHidden("제목없는 폴더"))
+        assertFalse(StorageGuard.isHidden("movie.mp4"))
+        assertFalse(StorageGuard.isHidden(".hidden-by-user"))
+    }
+
+    /**
+     * 관리 API 가 워킹 디렉터리에 손댈 수 없다 — 조회·삭제·이동 전부 차단.
+     *
+     * 계약: **루트 직속** 숨김 디렉터리와 그 하위가 차단된다. 실제로 워킹 디렉터리는
+     * `dlRoot/.torrents` 하나뿐이므로 이것으로 충분하다 — 하위 경로는 전부 이 접두사
+     * 아래에 있어 함께 막힌다. `영상/.torrents` 처럼 **중첩**된 동명 폴더는 사용자가 만든
+     * 정상 폴더라 막지 않는다(`.trash` 의 기존 동작과 동일).
+     */
+    @Test
+    fun `보관함 API 는 숨김 디렉터리를 경로로 받지 않는다`() {
+        val sep = java.io.File.separator
+        assertNull(StorageGuard.storageFile(StorageGuard.TORRENT_TMP_NAME))
+        assertNull(StorageGuard.storageFile(StorageGuard.TORRENT_TMP_NAME + sep))
+        assertNull(StorageGuard.storageFile(StorageGuard.TORRENT_TMP_NAME + sep + "아무 torrent 이름"))
+        assertNull(StorageGuard.storageFile(StorageGuard.TORRENT_TMP_NAME + sep + "a" + sep + "b"))
+        assertNull(StorageGuard.storageFile(StorageGuard.TRASH_NAME))
+        // 일반 경로는 여전히 동작해야 한다
+        assertNotNull(StorageGuard.storageFile(""))
+        assertNotNull(StorageGuard.storageFile("영상"))
+    }
+
     /** 메타데이터 전 이름은 실제 파일명이 아니다 — 이 값으로 이동을 시도하면 안 된다 */
     @Test
-    fun `메타데이터 대입자리는 이동 대상이 아니다`() {
+    fun `메타데이터 대입자위는 이동 대상이 아니다`() {
         assertEquals("추출 중...", METADATA_PLACEHOLDER)
     }
 }
