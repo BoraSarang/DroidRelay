@@ -504,6 +504,41 @@ final class AppModel {
         }
     }
 
+    /// **팝오버에 보여줄 연결 한 줄** (M-11).
+    ///
+    /// ## 왜 주소를 다닌 이유
+    ///
+    /// 앱이 자동으로 폰을 찾아 붙는데 **어디에 붙었는지 아무 말도 하지 않았다.**
+    /// 사용자가 그대로 물은 게 이것이다 — "이게 내 폰이 맞아?"
+    ///
+    /// 여기에 더 나쁜 상황이 있다. **네트워크가 바뀌면 조용히 다른 폰에 붙어 있을 수 있다.**
+    /// 공유기 설정으로 바뀐 건데 주소만 달라지고 아무 말 없으면, 사용자는
+    /// **"왜 갑자기 옛날 자료가 나오지"** 하고 원인을 알 수 없다.
+    ///
+    /// → **붙은 곳과 방법을 함께 말한다.** 고장인지 설정이 바뀐 건지가 드러난다.
+    var connectionLine: String {
+        switch phase {
+        case .connected(let strategy):
+            guard let s = server else { return "연결됨" }
+            return DiscoveryBadge.line(strategy: strategy,
+                                      address: s.displayAddress,
+                                      version: s.version,
+                                      isManual: strategy == .manual)
+        case .discovering:
+            return DiscoveryBadge.scanningLine()
+        case .failed:
+            return DiscoveryBadge.failureLine()
+        case .idle:
+            return "대기 — 서버를 찾는 중이 아닙니다"
+        }
+    }
+
+    /// **탐색 중인지** — 표시를 깜빡이게 하지 않기 위한 신호.
+    var isConnecting: Bool {
+        if case .discovering = phase { return true }
+        return false
+    }
+
     // MARK: - 갱신
 
     func refresh() async {

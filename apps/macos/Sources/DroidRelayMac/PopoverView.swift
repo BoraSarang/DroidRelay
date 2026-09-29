@@ -224,19 +224,74 @@ struct PopoverView: View {
     // MARK: - 헤더
 
     private var header: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "antenna.radiowaves.left.and.right")
-                .font(.system(size: 13))
-            Text("DroidRelay").font(.system(size: 12.5, weight: .semibold))
-            Spacer()
-            if let d = model.lastUpdate {
-                Text(d, style: .relative)
-                    .font(.system(size: 11))
-                    .foregroundStyle(.tertiary)
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Image(systemName: "antenna.radiowaves.left.and.right")
+                    .font(.system(size: 13))
+                Text("DroidRelay").font(.system(size: 12.5, weight: .semibold))
+                Spacer()
+                if let d = model.lastUpdate {
+                    Text(d, style: .relative)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.tertiary)
+                }
             }
+            .padding(.horizontal, 13)
+            .padding(.vertical, 10)
+
+            // **어디에 붙었는지 한 줄** (M-11).
+            //
+            // ## 왜 헤더 바로 아래인가
+            //
+            // "DroidRelay" 라는 제목만 보면 **어느 폰인지 알 수 없다.**
+            // 사용자가 그대로 물은 게 "이게 내 폰이 맞아?" 다.
+            // 제목과 **같은 줄에 붙어 있어야** "이 앱이 누구와 붙었는가" 가 한 번에 읽힌다.
+            //
+            // ## 왜 따로 빼지 않았나 — 옆에 붙이면 사라진다
+            //
+            // 오른쪽엔 **마지막 갱신 시각**(`방금 전`)이 이미 있다. 거기 붙이면
+            // **두 정보가 한 줄에서 경쟁한다.** 어느 쪽이 움직이는지 눈에 띄고
+            // 읽히는 쪽은 더 중요하므로 **고정된 줄로 분리**한다.
+            connectionLine
+        }
+    }
+
+    /// **탐색 결과 한 줄** — 주소 · 버전 · 붙은 방법을 말한다.
+    private var connectionLine: some View {
+        HStack(spacing: 5) {
+            // **기호가 상태를 먼저 말한다** — 글자를 다 읽기 전에도
+            // "연결됐다 / 안 됐다" 가 보이게 한다.
+            Image(systemName: model.isConnecting ? "magnifyingglass" : dotIcon)
+                .font(.system(size: 9))
+                .foregroundStyle(dotColor)
+            Text(model.connectionLine)
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Spacer(minLength: 0)
         }
         .padding(.horizontal, 13)
-        .padding(.vertical, 10)
+        .padding(.bottom, 7)
+    }
+
+    private var dotIcon: String {
+        switch model.phase {
+        case .connected: "circle.fill"
+        case .discovering: "circle.dotted"
+        case .failed: "exclamationmark.circle.fill"
+        case .idle: "circle"
+        }
+    }
+
+    /// **색은 글자와 같은 판단을 쓴다** — "연결됨" 인데 주황이면 사용자는 거짓말로 읽는다.
+    private var dotColor: Color {
+        switch model.phase {
+        case .connected: .green
+        case .discovering: .secondary
+        case .failed: .orange
+        case .idle: .secondary
+        }
     }
 
     // MARK: - 인라인 추가 줄 (다운로드 · 토렌트)
