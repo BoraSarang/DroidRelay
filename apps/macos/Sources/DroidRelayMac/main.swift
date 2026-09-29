@@ -409,11 +409,39 @@ enum Diagnostics {
             // 속도 — 메뉴바 2줄이 실제로 이런 문자열이 된다
             let droid = await c.droidSpeed()
             print("Droid 속도  : ↓ \(SpeedFormat.text(droid.downBps))  ↑ \(SpeedFormat.text(droid.upBps))")
-            // 기기 = 누적 카운터. 속도는 클라이언트가 시간 차로 나눈다.
-            if let t = await c.deviceTraffic() {
-                print("기기 카운터 : rx=\(t.rxTotal) tx=\(t.txTotal) (누적 — 속도는 클라이언트가 계산)")
+            // 기기 = 누적 카운터. 속도는 클라이언트가 시간 차로 나눈다 (M-27).
+            //
+            // **★ 두 모드를 다 찍는다** — 하나만 찍으면 **어느 경로가 문제인지 모른다.**
+            // `external` 이 0 이면 서버가 rmnet 을 못 찾는 것이고, `all` 이 0 이면
+            // 요청 자체가 실패한 것이다. **"서버 미지원" 이라는 말은 원인을 감춘다.**
+            let 설정 = TrafficScopeSetting.load()
+            print("기기 범위 설정: \(설정.scope.rawValue) (기본 = \(TrafficScope.default.rawValue))")
+            // **설정한 모드만 먼저 찍는다** — 이것이 **실제로 화면에 나오는 값**이다.
+            if let t = try? await c.deviceTrafficChecked(scope: 설정.scope) {
+                print("기기 카운터 : rx=\(t.rxTotal) tx=\(t.txTotal)"
+                      + "  범위=\(t.scope?.rawValue ?? "없음(구버전)")  (누적 — 속도는 클라이언트가 계산)")
             } else {
                 print("기기 카운터 : (서버 미지원 — /api/net/speed 없거나 supported=false)")
+            }
+            // **그다음 나머지 모드** — "왜 이 값인지" 를 비교하기 위해 본다.
+            //
+            // **이게 왜 필요한가** — `external` 이 0 이면 **rmnet 못 찾음**(서버 문제)이고,
+            // `all` 이 0 이면 **요청 실패**다. **"서버 미지원" 이라는 말은 원인을 감춘다.**
+            for s in TrafficScope.allCases where s != 설정.scope {
+                do {
+                    let t = try await c.deviceTrafficChecked(scope: s)
+                    print("  비교(\(s.rawValue)): rx=\(t.rxTotal) tx=\(t.txTotal)")
+                } catch {
+                    print("  비교(\(s.rawValue)): 실패 — \(error)")
+                }
+            }
+            // **설정과 서버가 실제로 쓴 값의 일치 여부** — 구버전 서버 대처의 근거.
+            if let t = try? await c.deviceTrafficChecked(scope: 설정.scope) {
+                if let used = t.scope, used != 설정.scope {
+                    print("범위 불일치 : 설정 '\(설정.scope.rawValue)' · 서버 '\(used.rawValue)'")
+                } else if t.scope == nil {
+                    print("범위        : 서버가 이 필드를 모른다 (구버전) — 설정이 지켜지지 않을 수 있다")
+                }
             }
             let st = SMAppService.mainApp.status
             let stName = switch st {

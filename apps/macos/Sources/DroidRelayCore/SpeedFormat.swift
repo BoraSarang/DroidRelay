@@ -61,16 +61,60 @@ public enum SpeedSource: String, CaseIterable, Identifiable, Sendable {
     public var label: String { self == .droid ? "Droid" : "기기" }
 }
 
-/// 기기(폰 전체) 트래픽 **누적 카운터**.
+/// 기기 트래픽 **누적 카운터**.
 ///
 /// **속도가 아니라 누적값**이라는 점이 중요하다. 서버가 나눠 보내면 폴링 주기가
 /// 흔들릴 때 표시가 출렁인다 — 클라이언트가 `SpeedHistory` 로 시간 차를 재야 한다.
+///
+/// ## `scope` — 이 값이 어디까지 센 것인가 (M-27)
+///
+/// **누락되면 `nil` 이다.** 옛 서버는 이 필드를 모른다.
+/// `nil` 이라고 **"전체" 라고 가정하지 않는다** — 사용자가 "외부만" 으로
+/// 설정했는데 핫스팟 값이 나오면 **"설정이 안 먹혔다"** 는 말과
+/// **"서버가 예전 버전이라 못 한다"** 는 말이 다르다.
+///
+/// → **구분해서 알린다.** (`TrafficScopeSetting` 참조)
 public struct DeviceTraffic: Equatable, Sendable {
     public var rxTotal: Int
     public var txTotal: Int
-    public init(rxTotal: Int, txTotal: Int) {
+    /// 서버가 **실제로** 사용한 범위. `nil` = 서버가 이 필드를 모른다.
+    public var scope: TrafficScope?
+
+    public init(rxTotal: Int, txTotal: Int, scope: TrafficScope? = nil) {
         self.rxTotal = max(0, rxTotal)
         self.txTotal = max(0, txTotal)
+        self.scope = scope
+    }
+
+    /// **JSON 의 카운터 값을 `Int` 로 — 64비트를 보존한다.**
+    ///
+    /// ## 왜 `intValue` 가 아니라 `int64Value` 인가 — 실측으로 깨졌다
+    ///
+    /// ```
+    /// JSON          rxTotal = 3,952,191,717      (3.9 GB)
+    /// intValue   →   -397,312,936             ★ 값이 뒤집혔다
+    /// int64Value →  3,952,191,717             ✓
+    /// ```
+    ///
+    /// 서버(Android `Long`)는 64비트 카운터를 준다. **`intValue` 는
+    /// 플랫폼 `Int` 크기로 좁힌다** — 값이 크면 **음수** 가 되고,
+    /// 그러면 클라이언트의 시간 차 계산이 **이름만 남고 값이 사라진다.**
+    ///
+    /// → **형이 값의 범위를 보장하는 `int64Value` 만 쓴다.**
+    ///
+    /// - Parameter value: `NSNumber` / `String` / 그 외.
+    /// - Returns: `0` 이상. **음수는 0** (카운터 되감김 방어).
+    public static func clampTotal(_ value: Any?) -> Int {
+        let n: Int64?
+        if let num = value as? NSNumber {
+            n = num.int64Value
+        } else if let s = value as? String {
+            n = Int64(s)
+        } else {
+            n = nil
+        }
+        guard let v = n, v > 0 else { return 0 }
+        return Int(min(v, Int64(Int.max)))
     }
 }
 
