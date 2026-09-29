@@ -27,10 +27,30 @@ import SwiftUI
 @MainActor
 final class SettingsWindowController: NSWindowController, NSWindowDelegate {
 
+    /// **창 크기** — 생성 위치와 무관하게 여기만 진짜다.
+    static let contentSize = CGSize(width: 460, height: 520)
+
     /// **셋업을 한 번만** — `NSWindowController.init(window:)` 로 창을 직접 준다.
+    ///
+    /// ## 창을 만들어서 **즉시 가운데에 둔다** — 이게 왼쪽 하단 버그의 답
+    ///
+    /// 원래 `contentRect: NSRect(x: 0, y: 0, …)` 로 만들어 **위치를 (0,0)에 고정**했다.
+    /// 그 결과 **첫 실행에 창이 화면 왼쪽 아래에 떴다.** 사용자가 본 그대로였다.
+    ///
+    /// 실제 초기 프레임은 `(0, -28)` 이었다. `contentRect` 는 **내용물** 영역이라
+    /// 위로 제목바 28pt 가 붙어 **제목바가 화면 밖으로 삐져나갔다.**
+    /// "왼쪽 아래"보다 나쁜 "제목바가 화면 밖에 있다"였다.
+    ///
+    /// `applyPlacement()` 로 나중에 옮기면 되므로 **굳이 (0,0) 에 만들 이유가 없다.**
+    /// 창이 **화면에 뜨는 첫 순간부터** 제자리에 있게 하는 게 정직하다.
     init(model: AppModel) {
+        // **내용물 기준으로 가운데를 잡는다** — `frame` 이 아니라 `contentRect`.
+        // 제목바가 붙은 최종 프레임이 정중앙에 오려면 **내용물을 먼저** 세팅해야 한다.
+        let vf = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+        let s = Self.contentSize
+        let start = WindowPlacement.initialContentOrigin(in: vf, contentSize: s)
         let w = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 460, height: 520),
+            contentRect: NSRect(origin: start, size: s),
             styleMask: [.titled, .closable, .fullSizeContentView],
             backing: .buffered,
             defer: false
@@ -81,6 +101,14 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         let origin = WindowPlacement.resolve(saved: WindowPlacement.loadOrigin(),
                                              size: w.frame.size, visible: frames)
         w.setFrameOrigin(origin)
+    }
+
+    /// **저장된 위치를 버리고 가운데로 되돌린다** — 진단·문제 해결용.
+    ///
+    /// 사용자 배치까지 지우므로 **자동으로 부르지 않는다.**
+    func resetPlacement() {
+        WindowPlacement.clearOrigin()
+        applyPlacement()
     }
 
     /// **창이 사라질 때 위치를 기억한다.**

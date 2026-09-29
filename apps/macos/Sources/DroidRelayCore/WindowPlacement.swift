@@ -100,6 +100,52 @@ public enum WindowPlacement {
                height: titleBarHeight)
     }
 
+    /// **창을 만들 때 넘길 `contentRect` 의 원점** — **창 전체가** 정중앙이 되도록.
+    ///
+    /// ## 왜 이게 별도 함수인가 — `(0, -28)` 버그의 재발 방지
+    ///
+    /// 처음엔 `NSWindow(contentRect: NSRect(x: 0, y: 0, …))` 로 만들었다.
+    /// `x: 0, y: 0` 이 **화면 왼쪽 아래**라는 뜻이었다. 사용자가 실제로 본 그대로다.
+    ///
+    /// 게다가 초기 프레임이 `(0, -28)` 이었다. **`contentRect` 는 내용물 영역**이라
+    /// 위로 제목바 28pt 가 붙고, 그만큼 **화면 밖으로 삐져나간 것**이다.
+    /// "왼쪽 아래" 보다 나쁜 "제목바가 화면 밖에 있다"였다.
+    ///
+    /// ## 왜 `titleBar` 를 **빼** 나야 하는가 — 이게 미묘한 부분이다
+    ///
+    /// `contentRect` 는 **내용물** 영역이고, 제목바는 그 **위쪽**에 붙는다.
+    /// 즉 최종 프레임은 `[y - 28, y + 520]` 이고 그 중심은 `y + 246` 다.
+    ///
+    /// ```
+    ///   frame.midY = (y - titleBar + y + contentH) / 2 = y + (contentH - titleBar) / 2
+    ///   이것이 visible.midY 가 되려면
+    ///   y = visible.midY - (contentH - titleBar) / 2
+    /// ```
+    ///
+    /// **덧셈이 아니라 뺄셈이다.** 처음에 `+ titleBar` 로 적어 테스트가 28pt 어긋남을
+    /// 잡았다. 부호를 반대로 적으면 **창이 아래로 처져 보인다.**
+    ///
+    /// 화면이 1130pt 라 오차는 눈에 거의 안 띄지만, **"가운데" 라는 말은
+    /// 어긋난 자리 가운데가 아니다.** → **창 전체가 정확히 가운데가 되도록 계산한다.**
+    public static func initialContentOrigin(in visible: CGRect, contentSize: CGSize,
+                                            titleBar: CGFloat = titleBarHeight) -> CGPoint {
+        CGPoint(x: visible.midX - contentSize.width / 2,
+                y: visible.midY - (contentSize.height - titleBar) / 2)
+    }
+
+    /// **내용물을 가운데에 넣었을 때, 제목바까지 붙인 최종 창 프레임.**
+    ///
+    /// 제목바가 창 **위쪽**에 붙으므로 `y` 는 `titleBar` 만큼 내려간다.
+    /// 이 함수가 있어야 **"창 전체가 화면 안인가"** 를 순수하게 검증할 수 있다.
+    public static func frameAfterTitleBar(contentOrigin: CGPoint,
+                                          contentSize: CGSize,
+                                          titleBar: CGFloat = titleBarHeight) -> CGRect {
+        CGRect(x: contentOrigin.x,
+               y: contentOrigin.y - titleBar,
+               width: contentSize.width,
+               height: contentSize.height + titleBar)
+    }
+
     // MARK: - 저장소
 
     /// `UserDefaults` 키 — 앱 이름으로 접두어를 붙여 **다른 앱 값과 섞이지 않게** 한다.
