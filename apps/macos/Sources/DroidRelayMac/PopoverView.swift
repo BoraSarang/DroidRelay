@@ -820,12 +820,17 @@ struct JobRow: View {
                     .lineLimit(1)
                     .truncationMode(.middle)
                 Spacer(minLength: 4)
-                if job.uploadedBps > 0 {
-                    Text("▲\(job.upText)").font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(.orange)
-                } else {
-                    Text(job.speedText).font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(.cyan)
+                // **다운과 업을 함께 보여준다** — `if/else` 로 고르면 안 된다.
+                // 실측(2026-09-29): 업이 켜지는 순간 다운로드 속도가 화면에서
+                // 사라졌다. 서버는 `downloadSpeed: 102427` 을 주고 있었다.
+                // 규칙은 Core 의 `RowSpeedDisplay` 에 있고(9가지 조합 테스트),
+                // 여부는 **문자열만** 받는다.
+                let sp = RowSpeedDisplay.job(down: job.speedBps, up: job.uploadedBps)
+                if let d = sp.down {
+                    Text(d).font(.system(size: 11, weight: .semibold)).foregroundStyle(.cyan)
+                }
+                if let u = sp.up {
+                    Text(u).font(.system(size: 11, weight: .semibold)).foregroundStyle(.orange)
                 }
             }
 
@@ -959,12 +964,15 @@ struct TorrentRow: View {
                     .font(.system(size: 12.5, weight: .medium))
                     .lineLimit(1).truncationMode(.middle)
                 Spacer(minLength: 4)
-                if torrent.uploadBps > 0 {
-                    Text("▲\(torrent.upText)").font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(.orange)
-                } else {
-                    Text(torrent.speedText).font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(.cyan)
+                // **다운과 업을 함께 보여준다** — 잡 행과 같은 버그, 같은 규칙.
+                // 실측: 서버는 `downloadSpeed: 102427` 인데 업이 켜져 있으면
+                // 화면에 **아무것도 안 보였다.**
+                let sp = RowSpeedDisplay.torrent(down: torrent.downloadBps, up: torrent.uploadBps)
+                if let d = sp.down {
+                    Text(d).font(.system(size: 11, weight: .semibold)).foregroundStyle(.cyan)
+                }
+                if let u = sp.up {
+                    Text(u).font(.system(size: 11, weight: .semibold)).foregroundStyle(.orange)
                 }
             }
 
