@@ -134,12 +134,15 @@ final class StatusItemController {
     /// 그래서 그림을 이미지로 구워서 이 자리에 넣는다.
     func updateBadge() {
         let src = model.speedSetting
+        // **메뉴바도 필터된 값을 쓴다** — 그래프만 걸러르고 메뉴바에 원본을 쓰면
+        // 스파이크 순간 메뉴바에는 `↑5M` 이 뜬다. **같은 값이 화면마다 다르게 보이면
+        // 둘 중 하나가 거짓말이다.** (실측 2026-09-29: 기기 카운터가 2~5 MB/s 로 튐)
         let drawn = MenuBarTitle.lines(
             badge: model.badgeCount,
             droid: model.droidSpeed,
             // **못 쓰는 출처는 열을 만들지 않는다** — 서버가 값을 안 주는데 0 을 넣으면
             // 사용자는 화면에서 "고장 났구나" 를 읽는다.
-            device: model.deviceSpeedAvailable ? model.deviceSpeed : nil,
+            device: model.deviceSpeedAvailable ? model.displayDeviceSpeed : nil,
             includeDroid: src.showDroid,
             includeDevice: src.showDevice
         )
