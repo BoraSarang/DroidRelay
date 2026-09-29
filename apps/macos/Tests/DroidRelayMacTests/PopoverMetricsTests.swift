@@ -46,7 +46,7 @@ final class PopoverMetricsTests: XCTestCase {
             values: [.droid: ("707K", "762K"), .device: ("707K", "762K")],
             axisLabel: "1.0 MB/s · 보통 3.1 KB/s"
         )
-        let 깨진가용폭: CGFloat = 328          // 352 − 12×2
+        let 깨진가용폭: CGFloat = 328          // 352 − 12×2 (여백이 12 였던 때)
         XCTAssertGreaterThan(need, 깨진가용폭,
                              "이 값이 328 이하면 원인이 '폭 부족' 이 아니다 — 재측정해야 한다")
         // **SwiftUI 실제 배치값 365.0pt.** 여기서 어긋나면 Core 계수를 다시 잡아야 한다.
@@ -338,6 +338,65 @@ final class PopoverMetricsTests: XCTestCase {
         XCTAssertEqual(PopoverMetrics.graphWidth,
                        PopoverMetrics.width - PopoverMetrics.graphInset * 2, accuracy: 0.001)
         XCTAssertLessThan(PopoverMetrics.graphWidth, PopoverMetrics.width)
+    }
+
+    /// **여백은 6 이다** — 그래프를 넓히기로 줄였다 (2026-09-29).
+    ///
+    /// **12 를 6 으로 한 이유** — 0 으로 줄이면 그래프가 팝오버 양끝에 붙고,
+    /// 라운드 코너(4pt) 안에 선이 닿아 **잘린 것처럼 보인다.**
+    /// 6 이면 코너와 선 사이에 **2pt** 가 남는다.
+    func test_여백은_6이다() {
+        XCTAssertEqual(PopoverMetrics.graphInset, 6, accuracy: 0.001)
+        XCTAssertEqual(PopoverMetrics.graphWidth, 438, accuracy: 0.001)   // 450 − 6×2
+        // **줄인 만큼 그래프가 실제로 넓어졌어야 한다** — 12 pt.
+        XCTAssertEqual(PopoverMetrics.graphWidth - (450 - 12 * 2), 12, accuracy: 0.001)
+    }
+
+    /// **여백이 화면에도 같은 값으로 적용되어야 한다.**
+    ///
+    /// ## 이 테스트가 없으면 무엇이 깨지는가
+    ///
+    /// `graphWidth = width − graphInset×2` 인데 **`PopoverView` 의 `.padding` 이
+    /// 리터럴 `12` 로 적혀 있으면** 여기만 6 으로 바꿔도
+    /// **계산은 438, 화면은 426** 이 된다. 그래프가 12pt 눌리고
+    /// **"좁다" 뿐이라 아무도 원인을 모른다.**
+    ///
+    /// → 이 검사는 **리터럴 12 가 남아 있지 않은지** 본다.
+    /// (`PopoverMetrics.graphInset` 를 쓰면 값은 자동으로 같아진다)
+    func test_여백_리터럴이_남아있지_않다() {
+        // **PopoverMetrics.graphInset 과 다른 값을 쓴 곳이 없어야 한다.**
+        // 스위프트 소스에서 그래프의 좌우 여백 리터럴을 찾는다.
+        // **경로는 `#filePath` 로 찾는다** — 현재 디렉터리에 의존하면
+        // 러너가 어디서 테스트를 띄우느냐에 따라 **성공/실패가 갈린다.**
+        // (cwd 가 패키지 루트일 때 `../../` 은 패키지 밖을 가리킨다 — 실제로 그랬다)
+        let 패키지루트 = URL(fileURLWithPath: #filePath)      // …/Tests/Xxx/이파일.swift
+            .deletingLastPathComponent()                      // …/Tests/Xxx
+            .deletingLastPathComponent()                      // …/Tests
+            .deletingLastPathComponent()                      // 패키지 루트
+        let 경로 = 패키지루트
+            .appendingPathComponent("Sources/DroidRelayMac/PopoverView.swift").path
+        guard let 내용 = try? String(contentsOfFile: 경로, encoding: .utf8) else {
+            XCTFail("PopoverView.swift 를 못 읽었다 (\(경로)) — 여백 검사를 건너뛰면 안 된다 (조용한 실패)")
+            return
+        }
+        // **그래프 뷰 근처만 본다** — 전체 파일을 보면 실패한다.
+        //
+        // 실패 배너·컨펌 막대도 `.padding(.horizontal, 12)` 를 쓰는데
+        // **그건 `graphWidth` 계산과 상관없는 별개 영역**이다. (`.frame(width:)` 가
+        // `PopoverMetrics.width` 라 여백이 12 여도 맞아 있다.)
+        // → **"그래프 뒤에 오는 여백"** 만 검사해야 **진짜 회귀만** 잡힌다.
+        guard let 시작 = 내용.range(of: "SpeedGraph(") else {
+            XCTFail("PopoverView.swift 에 SpeedGraph( 가 없다 — 여백 검사가 빈 것이 되었다 (조용한 실패)")
+            return
+        }
+        let 뒤 = 내용[시작.upperBound...]
+            .prefix(2000)                       // 그래프 블록 + Divider + tabBar 까지
+        XCTAssertTrue(뒤.contains("padding(.horizontal, PopoverMetrics.graphInset)"),
+                      "그래프의 좌우 여백이 `PopoverMetrics.graphInset` 을 쓰고 있지 않다 — "
+                      + "여백과 graphWidth 계산이 따로 놀면 그래프가 조용히 눌린다")
+        XCTAssertFalse(뒤.contains("padding(.horizontal, 12)"),
+                       "그래프 여백에 리터럴 12 가 남아 있다 — "
+                       + "graphInset 을 6 으로 줄여도 화면은 12 를 뺀다 (계산 438 vs 화면 426)")
     }
 
     /// **팝오버가 설정 창보다 넓으면 안 된다.**

@@ -31,7 +31,12 @@ struct PopoverView: View {
                     // 튀는 값이 있지만 지우지 않고 구분 가능하게 만든다.
                     deviceAxisLabel: model.deviceAxisLabel
                 )
-                .padding(.horizontal, 12)
+                // **여백도 상수를 쓴다 — 12 를 여기 또 적으면 안 된다.**
+                //
+                // `graphWidth = width − graphInset×2` 인데 여백이 다른 값이면
+                // **계산은 6 이라 하고 화면은 12 를 뺀다.** 그래프가 조용히 눌리거나
+                // 팝오버 밖으로 넘친다. **같은 값을 두 벌 쓰면 언제든 어긋난다.** (M-26)
+                .padding(.horizontal, PopoverMetrics.graphInset)
                 .padding(.vertical, 8)
                 // **폭을 명시한다.** Canvas 는 제안된 크기를 그대로 쓰는데, VStack 안에서
                 // 제안 폭이 0 이면 그래프가 0 폭이 되고 팝오버 전체가 사라진다.
