@@ -25,7 +25,10 @@ struct PopoverView: View {
                     deviceDown: model.deviceSpeedAvailable
                         ? model.graphSeries(.device, down: true) : [],
                     deviceUp: model.deviceSpeedAvailable
-                        ? model.graphSeries(.device, down: false) : []
+                        ? model.graphSeries(.device, down: false) : [],
+                    // **기기 축은 "최대 · 평시" 두 값을 함께 보여준다** — 지연 정산으로
+                    // 튀는 값이 있지만 지우지 않고 구분 가능하게 만든다.
+                    deviceAxisLabel: model.deviceAxisLabel
                 )
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
