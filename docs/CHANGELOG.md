@@ -83,7 +83,7 @@
 |---|---|
 | 팝오버 폭 352 | ✅ M-1 에서 반영 |
 | 통계 행 | ✅ M-13 에서 **탭별** 3칸으로 구현 (목업은 고정 3칸, 실제는 탭마다 다른 숫자가 낫다) |
-| **목업의 "온도"** | ❌ **서버에 엔드포인트가 없다** — `/api/info` 실측 결과 `version`·`storageFree`·`storageTotal`·`ip`·`port`·`running`·`speedTotalBps`·`httpsEnabled`·`httpsPort` 뿐. **표시할 값이 없는 항목을 넣으면 "—" 가 항상 보인다** |
+| **목업의 "온도"** | ✅ **목업에서 제거** — 서버에 엔드포인트가 없다. `/api/info` 실측 결과 `version`·`storageFree`·`storageTotal`·`ip`·`port`·`running`·`speedTotalBps`·`httpsEnabled`·`httpsPort` 뿐. **값이 없는 칸은 "—" 가 영영 보인다** — 정보를 더하는 게 아니라 없는 자리를 그리는 것이라 제거 |
 | 팔레트 | ⏸ M-12 로 분리 — 시스템 권한 필요 |
 
 → M-10 은 **실질 완결**로 정리.
