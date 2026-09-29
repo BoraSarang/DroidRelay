@@ -618,7 +618,7 @@ T-001~T-008 전부 완료 (커밋 7574486).
 | M-08 | 메뉴바 아이콘 실제 렌더링 — **사용자 확인 완료 (2026-09-28)**: `.app` 설치 → 실행 → 3탭 동작 확인. 폰 established 연결 3개 · SSE `data: tick` 스트리밍 | ✅ |
 | M-09 | **PR 생성** — `feat/macos-menubar-m1` → main — **PR #17 머지 완료** (`e05d0d4`) | ✅ |
 | M-13 | **M3 — 독립 창 + 탭바** — 팝오버에 3탭(다운로드/토렌트/보관함) + 탭별 진행 배지 · `Torrent`/`StorageEntry` 모델(순수 파싱) · 탭별 통계 · `torrentControl`/`torrentDelete` · `--diagnose` 확장. 테스트 25 → **39건** | ✅ |
-| M-10 | 목업 리뷰 4건 반영 (팝오버 폭 · 통계 행 · 팔레트 단계 · 탭바) | ✅ **실질 완결** — 폭 352 반영(M1) · 통계 행은 탭별로 3칸 구현(M13) · 탭바 반영(M13) · **팔레트는 M-12 로 분리**(시스템 권한 필요). 목업의 "온도" 항목은 **서버에 엔드포인트가 없어 표시할 값이 없다**(`/api/info` 실측: version·storageFree·storageTotal·ip·port·running·speedTotalBps·httpsEnabled·httpsPort 뿐) |
+| M-10 | 목업 리뷰 4건 반영 (팝오버 폭 · 통계 행 · 팔레트 단계 · 탭바) | ✅ **실질 완결** — 폭 352 반영(M1) · 통계 행은 탭별로 3칸 구현(M13) · 탭바 반영(M13) · **팔레트는 M-12 로 분리**(시스템 권한 필요). 목업의 "온도" 항목은 **서버에 엔드포인트가 없어 표시할 값이 없다**(`/api/info` 실측: version·storageFree·storageTotal·ip·port·running·speedTotalBps·httpsEnabled·httpsPort 뿐) → **목업에서 제거**(값이 없는 칸은 "—" 가 영영 보인다) |
 | M-15 | **쓰기 기능 일괄 구현** — `RelayClient+Write`(다운로드 추가·잡/토렌트 속도 제한·토렌트 추가·상세·파일 선택 · 보관함 이동/이름변경/휴지통/삭제/폴더생성/복원/영구삭제/공유링크) + `WriteResult`(서버 사유 그대로 전달) + `WriteSheets`(8종 시트) + 행 액션. **서버 명세를 curl 로 실측 대조** — 가정한 키 3개가 틀렸음(`address`→`ip`, `progress` 없음, `numComplete/Incomplete` 추가) | ✅ |
 | M-14 | **팝오버 속도 그래프** — `SpeedGraph`(SwiftUI Canvas, 4계열 공유 Y축) + `AppModel.graphSeries` 시간축 균등 재구성 · 출처별 이력 분리(Droid ⊇ 기기이므로 **같은 축**) | ✅ |
 | M-14 | **팝오버가 아예 안 뜨던 회귀 2건** — ① `statusItem.view` 전환 후 `statusItem.button` 이 nil → 팝오버 위치 `guard` 에서 조용히 return ② `contentSize` 와 `contentViewController` **충돌** → 그래프를 넣자 팝오버가 안 뜸 | ✅ |

@@ -359,10 +359,20 @@ body.dark-ui .hint-bar{display:none}
     <span class="pop-sub" id="popSub">방금 전</span>
   </div>
   <div class="pop-list" id="popList"></div>
+  <!--
+    2칸이 의도다. "온도" 칸은 2026-09-29 에 제거했다.
+    웹 대시보드는 `/api/guard/status` 로 온도·배터리를 보여주지만 **팝오버는 그 경로가 없다.**
+    `/api/info` 실측 결과 = version·storageFree·storageTotal·ip·port·running·
+    speedTotalBps·httpsEnabled·httpsPort. **온도 필드가 없다.**
+
+    값이 없는 칸은 "—" 가 영영 보인다. 정보를 더하는 게 아니라
+    **없는 자리를 그리는 것**이므로 넣지 않는다. (M-22 에서 서버 재확인)
+    온도를 넣으려면 **서버에 엔드포인트를 신설**해야 하고, 그때는
+    웹의 `/api/guard/status` 와 경로를 맞추는 게 맞아 한 군데서 온다.
+  -->
   <div class="pop-stats">
     <div>오늘<b id="stToday">—</b></div>
     <div>여유 공간<b id="stFree">—</b></div>
-    <div>온도<b id="stTemp">—</b></div>
   </div>
   <div class="pop-menu">
     <button class="mi hot" id="miAdd"><span>&#128228;</span> 주소 붙여넣어 받기<kbd>&#8984;&#8679;D</kbd></button>
@@ -497,7 +507,7 @@ const state = {
     { id:'a2', ico:'📦', name:'ubuntu-24.04-desktop.iso', pct:23, spd:3145728,  eta:'18분 40초', up:412000, state:'RUNNING' },
     { id:'a3', ico:'🌊', name:'KRE-512.torrent',         pct:100,spd:0,         eta:'',          up:180000, state:'SEEDING' },
   ],
-  today: 4.28, free: 40.1, temp: 38,
+  today: 4.28, free: 40.1,
 };
 
 const fmtBps = b => b>0 ? (b>=1048576 ? (b/1048576).toFixed(1)+' MB/s' : (b/1024).toFixed(0)+' KB/s') : '—';
@@ -537,7 +547,6 @@ function renderPop(){
   dot.textContent = n;
   $('#stToday').textContent = fmtGB(state.today);
   $('#stFree').textContent  = fmtGB(state.free);
-  $('#stTemp').textContent  = state.temp+'°';
 }
 const esc = s => (s||'').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 
