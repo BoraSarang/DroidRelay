@@ -142,7 +142,8 @@ final class StatusItemController {
             droid: model.droidSpeed,
             // **못 쓰는 출처는 열을 만들지 않는다** — 서버가 값을 안 주는데 0 을 넣으면
             // 사용자는 화면에서 "고장 났구나" 를 읽는다.
-            device: model.deviceSpeedAvailable ? model.displayDeviceSpeed : nil,
+            // **원본을 그대로 쓴다** — 필터로 지우면 3초짜리 실제 다운로드도 사라진다.
+            device: model.deviceSpeedAvailable ? model.deviceSpeed : nil,
             includeDroid: src.showDroid,
             includeDevice: src.showDevice
         )

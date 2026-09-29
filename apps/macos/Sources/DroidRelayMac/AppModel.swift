@@ -318,10 +318,12 @@ final class AppModel {
     /// 왜곡된다(과거가 오른쪽에 몰린다). **시간 축을 균등하게** 재구성한다.
     func graphSeries(_ source: SpeedSource, down: Bool, now: Date = Date()) -> [Int] {
         let h = history(for: source)
-        // **스파이크를 걸러낸 값을 그린다** — 기기 카운터 보충분 때문에
-        // Y축이 5 MB/s 로 튀면 실제 트래픽(몇 KB/s)이 바닥에 눌린다.
-        // (실측 2026-09-29: 정상 1~5 KB/s · 보충 2~5 MB/s)
-        let raw = h.smoothed(down)
+        // **원본을 그대로 그린다** — 값을 지우지 않는다.
+        // (2026-09-29 실측: 기기 카운터는 지연 정산으로 주기적으로 뛴다.
+        //  이건 앱에서 제거할 수 없다 — NetworkStatsManager 는 권한 없어 불가,
+        //  /proc/net/dev 는 SELinux denied, 서버 폴링은 정산이 무관해 무의미.
+        //  지우면 3초짜리 실제 다운로드까지 사라진다 → **표시에서 구분한다.**)
+        let raw = h.series(down)
         guard !raw.isEmpty else { return [] }
         let points = Int(Self.historySpan)             // 60점
         guard raw.count >= 2 else { return raw }
@@ -542,23 +544,26 @@ final class AppModel {
         return false
     }
 
-    /// **메뉴바·범례에 보여줄 기기 속도** — 스파이크가 걸린 값.
+    /// **그래프 축 라벨** — 최대값과 "평소 수준" 을 함께 보여준다.
     ///
-    /// ## 왜 `deviceSpeed` 를 그대로 안 쓰는가
+    /// ## 왜 둘을 붙이나 — 2026-09-29 실측
     ///
-    /// `deviceSpeed` 는 **원본 실측값**이고, 그 자체가 맞다. 문제는
-    /// `TrafficStats` 카운터가 **주기적으로 보충**된다는 점이다(실측 2026-09-29:
-    /// 정상 1~5 KB/s 인데 보충 때 2~5 MB/s 로 1000배 튀었다가 바로 내려옴).
+    /// 기기(폰 전체) 카운터는 **주기적으로 보충**된다(지연 정산). 실측:
+    /// ```
+    /// 정상 구간   1 ~ 5 KB/s
+    /// 보충 구간   2 ~ 5 MB/s     ← 1000배 튀었다가 바로 내려옴
+    /// ```
+    /// 이건 **앱에서 제거할 수 없다.** 세 가지를 시도하고 실측했다:
+    /// 1. `NetworkStatsManager` → `SecurityException: uid -1 is forbidden` (권한 필요)
+    /// 2. `/proc/net/dev`·`/sys/class/net` → SELinux denied
+    /// 3. 서버 1초 폴링 → **정산이 네트워크 계층이라 무의미**(0.05초로도 5 MB 그대로)
     ///
-    /// 나눗셈은 정확했다. **나눈 대상이 보충분이었다.**
-    ///
-    /// → **표시 직전에만** 걸러낸다. 원본은 남겨두므로 나중에 "실제 몇 바이트냐" 를
-    /// 물으면 답할 수 있다. **데이터를 지우는 게 아니라 보여주는 값을 고르는 것이다.**
-    var displayDeviceSpeed: SpeedReading {
+    /// 필터로 지우려 하면 **3초짜리 실제 다운로드까지 사라진다.** 그래서 **지우지 않고
+    /// 두 값을 붙여서 보여준다** — 사용자가 "급증" 과 "평소" 를 구분할 수 있게.
+    var deviceAxisLabel: String {
         let h = history(for: .device)
-        let down = h.smoothed(true).last ?? 0
-        let up = h.smoothed(false).last ?? 0
-        return SpeedReading(downBps: down, upBps: up)
+        let all = h.series(true) + h.series(false)
+        return SpeedScale.axisLabel(peak: max(all.max() ?? 0, 1024), typical: h.typical(true))
     }
 
     // MARK: - 갱신

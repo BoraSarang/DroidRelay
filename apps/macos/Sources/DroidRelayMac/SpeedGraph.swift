@@ -20,6 +20,13 @@ struct SpeedGraph: View {
     let droidUp: [Int]
     let deviceDown: [Int]
     let deviceUp: [Int]
+    /// **기기 축 라벨** — 최대값 + "평시" 를 붙인 문자열.
+    ///
+    /// ## 왜 주입하는가
+    ///
+    /// 축 라벨 계산은 **Core 의 순수 함수**(`SpeedScale`)이고, 여기에는 문자열만
+    /// 넘긴다. 그래프가 계산을 하면 **표시가 규칙을 따르는지 알 방법이 없어진다.**
+    let deviceAxisLabel: String
 
     /// 계열별 색 — **Droid=주황(따뜻), 기기=파랑(차가움)** 으로 출처를 눈으로 구분한다.
     private static let droidColor = Color(red: 0.95, green: 0.55, blue: 0.15)
@@ -46,9 +53,13 @@ struct SpeedGraph: View {
                     legend("기기", Self.deviceColor, down: deviceDown.last ?? 0, up: deviceUp.last ?? 0)
                 }
                 Spacer()
-                Text(SpeedFormat.axis(peak))
+                // **축 라벨에 "평시" 를 함께 보여준다** — 기기 카운터는 지연 정산으로
+                // 주기적으로 튀는데(실측 2~5 MB/s), 그건 **앱에서 제거할 수 없다.**
+                // 지우면 실제 다운로드도 사라지므로 **숨기지 않고 두 값을 붙인다.**
+                Text(sources.contains(.device) ? deviceAxisLabel : SpeedFormat.axis(peak))
                     .font(.system(size: 9, design: .monospaced))
                     .foregroundStyle(.tertiary)
+                    .lineLimit(1)
             }
 
             // ── 그래프 ──
