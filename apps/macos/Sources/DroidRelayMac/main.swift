@@ -258,6 +258,11 @@ enum Diagnostics {
         if let r = await d.discover() {
             print("탐색 결과   : \(r.info.displayAddress) v\(r.info.version)")
             print("사용 전략   : \(r.strategy.displayName)  (\(String(format: "%.0f", Date().timeIntervalSince(t0) * 1000))ms)")
+            // **팝오버에 실제로 찍히는 문자열** (M-11) — 화면과 같은 함수를 쓴다.
+            // 화면 글자를 진단에서 따로 적으면 **화면과 진단이 서로 다른 말을 하게 된다.**
+            print("팝오버 표시 : \(DiscoveryBadge.line(strategy: r.strategy, address: r.info.displayAddress, version: r.info.version, isManual: r.strategy == .manual))")
+            print("빈 버전 표기 : \"\(DiscoveryBadge.line(strategy: .cached, address: r.info.displayAddress, version: "", isManual: false))\"  ← v 가 붙지 않아야 한다")
+            print("수동 입력 표기: \"\(DiscoveryBadge.line(strategy: .manual, address: r.info.displayAddress, version: r.info.version, isManual: true))\"")
             let c = RelayClient(base: r.info.baseURL)
             let jobs = await c.jobs()
             print("다운로드    : \(jobs.count)건")
