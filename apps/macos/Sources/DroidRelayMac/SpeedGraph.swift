@@ -34,6 +34,10 @@ struct SpeedGraph: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             // ── 범례 ──
+            //
+            // **범례의 현재값도 필터된 값을 쓴다** — `series.last` 는 원본이므로
+            // 스파이크가 걸린 프레임이면 라벨이 "5M" 로 뜬다. 축은 걸러진 값으로
+            // 잡혔는데 라벨만 튀면 **같은 화면에서 두 개가 다른 말을 한다.**
             HStack(spacing: 10) {
                 if sources.contains(.droid) {
                     legend("Droid", Self.droidColor, down: droidDown.last ?? 0, up: droidUp.last ?? 0)
