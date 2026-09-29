@@ -357,10 +357,18 @@ enum Diagnostics {
     /// ## 무엇을 확인하나
     ///
     /// 1. **실제 화면 목록** — 테스트는 1440×900 을 썼지만 이 Mac 은 3024×1964 다.
-    ///    "중앙" 이라는 말의 기준이 화면마다 다르다.
-    /// 2. **저장값이 없을 때의 좌표** — 사용자의 요청("가운데")이 실제로 성립하는가.
-    /// 3. **저장값이 있을 때** — 그 자리에 돌아오는가.
-    /// 4. **저장값이 화면 밖에 있을 때** — 가운데로 복귀하는가. **이게 조용한 실패를 막는다.**
+    /// 2. **실제 창을 띄운 뒤의 좌표** — **계산값이 아니라 진짜 좌표를 읽는다.**
+    /// 3. **저장값이 없을 때** — 사용자의 요청("가운데")이 실제로 성립하는가.
+    /// 4. **저장값이 화면 밖에 있을 때** — 가운데로 복귀하는가.
+    ///
+    /// ## 왜 "실제로 띄워서" 보는가 — 이 진단이 놓쳤던 것
+    ///
+    /// 첫 판에서 이건 **계산한 좌표만** 찍었다. 계산은 (670, 291) 이었고 테스트도 통과했는데
+    /// **실제 창은 화면 왼쪽 하단(0, 0)에 떴다.**
+    ///
+    /// → **계산이 맞다 ≠ 창이 그곳에 간다.** `setFrameOrigin` 이 호출되지 않았거나,
+    /// 호출된 뒤 다른 코드가 옮겼거나 둘 중 하나다. **창을 실제로 띄우고 `w.frame` 을
+    /// 읽는 것만이 이 둘을 구분한다.**
     @MainActor
     static func settingsCheck() async {
         print("=== DroidRelay 설정 창 위치 진단 ===")
@@ -374,29 +382,37 @@ enum Diagnostics {
         for (i, f) in frames.enumerated() {
             print("  [\(i)] \(i == 0 ? "주 화면 " : "추가     ")\(fmt(f))")
         }
-        print("저장된 좌표  : \(WindowPlacement.loadOrigin().map { "(\(Int($0.x)), \(Int($0.y)))" } ?? "없음 — 처음 실행")")
+        let savedBefore = WindowPlacement.loadOrigin()
+        print("저장된 좌표  : \(savedBefore.map { "(\(Int($0.x)), \(Int($0.y)))" } ?? "없음 — 처음 실행")")
 
-        // 실제 창 크기를 그대로 쓴다 — 가정한 크기로 재면 본래 문제가 된다.
+        // 실제 창을 **진짜로 띄운다** — 계산값만으로는 알 수 없다.
         let c = SettingsWindowController(model: AppModel())
         guard let w = c.window else { print("창 생성 실패"); NSApp.terminate(nil); return }
         let size = w.frame.size
         print("창 크기      : \(Int(size.width))×\(Int(size.height))")
+        print("띄우기 전    : \(fmt(w.frame))  ← 이것이 (0,0) 이면 init 이 이미 잘못됐다")
 
-        let saved = WindowPlacement.loadOrigin()
-        let got = WindowPlacement.resolve(saved: saved, size: size, visible: frames)
-        let centered = WindowPlacement.centered(in: frames[0], size: size)
-        print("해결된 좌표  : (\(Int(got.x)), \(Int(got.y)))")
-        print("가운데 기준  : (\(Int(centered.x)), \(Int(centered.y)))  → \(got == centered ? "가운데 ✓" : "저장 위치 ✓")")
-        print("보이는가     : \(WindowPlacement.canGrab(got, size: size, in: frames) ? "yes — 사용자가 찾을 수 있다" : "NO — 창을 못 찾는다")")
-        let title = WindowPlacement.titleBarRect(origin: got, size: size)
-        print("제목바 띠   : \(fmt(title))")
+        // **계산값만으로는 부족하다 — 실제로 띄워서 좌표를 읽는다.**
+        c.applyPlacement()
+        try? await Task.sleep(for: .milliseconds(400))
+        print("applyPlacement 후 : \(fmt(w.frame))  → \(w.frame.origin == WindowPlacement.centered(in: frames[0], size: w.frame.size) ? "가운데 ✓" : "저장 위치 ✓ (사용자가 옮긴 곳)")")
+
+        c.present()
+        try? await Task.sleep(for: .milliseconds(400))
+        let real = w.frame
+        let centered = WindowPlacement.centered(in: frames[0], size: real.size)
+        print("present 후 실제  : \(fmt(real))")
+        print("  기대값         : \(fmt(CGRect(origin: centered, size: real.size)))")
+        print("  → \(real.origin == centered ? "일치 ✓" : "불일치 ✗ — 창이 다른 곳으로 옮겨졌다")")
+        print("제목바 띠   : \(fmt(WindowPlacement.titleBarRect(origin: real.origin, size: real.size)))")
+        print("보이는가     : \(WindowPlacement.canGrab(real.origin, size: real.size, in: frames) ? "yes — 사용자가 찾을 수 있다" : "NO — 창을 못 찾는다")")
 
         // **저장값을 일부러 화면 밖에 두고** 가운데로 돌아오는지 본다 — 이게 핵심 규칙.
         let lost = CGPoint(x: frames[0].maxX + 2000, y: frames[0].maxY)
-        let rescued = WindowPlacement.resolve(saved: lost, size: size, visible: frames)
+        let rescued = WindowPlacement.resolve(saved: lost, size: real.size, visible: frames)
         print("화면 밖 복귀 : (\(Int(lost.x)), \(Int(lost.y))) → (\(Int(rescued.x)), \(Int(rescued.y)))  → \(rescued == centered ? "가운데로 복귀 ✓" : "복귀 실패 ✗")")
         // **저장값은 건드리지 않는다** — 진단이 사용자의 배치를 바꾸면 안 된다.
-        print("저장된 좌표  : \(WindowPlacement.loadOrigin().map { "(\(Int($0.x)), \(Int($0.y))) — 안 건드림" } ?? "없음 — 안 건드림")")
+        print("저장된 좌표  : \(WindowPlacement.loadOrigin() == savedBefore ? "변화 없음 ✓" : "바뀜 ✗ — 진단이 배치를 망가뜨렸다")")
         print("=== 끝 ===")
         NSApp.terminate(nil)
     }

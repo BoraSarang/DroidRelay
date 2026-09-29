@@ -152,6 +152,50 @@ final class WindowPlacementTests: XCTestCase {
         XCTAssertTrue(WindowPlacement.canGrab(CGPoint(x: 300, y: 100), size: win, in: screens()))
     }
 
+    // MARK: - 창 생성 위치 (왼쪽 하단 버그)
+
+    /// **창을 만들 때부터 가운데여야 한다** — 이게 왼쪽 하단 버그의 직접 재현이다.
+    ///
+    /// 원래 `NSWindow(contentRect: NSRect(x: 0, y: 0, …))` 로 만들었다.
+    /// **`y: 0` 은 화면 아래쪽**이고 사용자가 실제로 본 게 그거였다.
+    ///
+    /// "나중에 `applyPlacement()` 로 옮기니까 괜찮지 않나" — 아니다.
+    /// **창이 뜨는 첫 순간이 (0,0) 이고**, 그 사이에 사용자는 화면을 본다.
+    func test_창을_만들_때부터_가운데여야_한다() {
+        let o = WindowPlacement.initialContentOrigin(in: main, contentSize: win)
+        XCTAssertGreaterThan(o.y, 0, "y 가 0 이면 화면 아래쪽이다 — 이게 버그였다")
+        XCTAssertGreaterThan(o.x, 0, "x 가 0 이면 화면 왼쪽이다 — 이것도 버그였다")
+    }
+
+    /// **제목바까지 붙인 최종 프레임이 화면 안에 완전히 들어온다.**
+    ///
+    /// 실제 초기 프레임은 `(0, -28)` 이었다. `contentRect` 는 **내용물** 영역이라
+    /// 위로 제목바가 붙고, **그만큼 화면 밖으로 나갔다.** 이 테스트가 그걸 막는다.
+    func test_제목바까지_붙인_프레임이_화면_안에_온다() {
+        let o = WindowPlacement.initialContentOrigin(in: main, contentSize: win)
+        let f = WindowPlacement.frameAfterTitleBar(contentOrigin: o, contentSize: win)
+        XCTAssertTrue(main.contains(f), "창 전체가 화면 안이어야 한다 — 실제: \(f)")
+        XCTAssertGreaterThanOrEqual(f.minY, 0, "제목바가 화면 위로 삐져나가지 않는다")
+    }
+
+    /// **내용물을 가운데에 넣으면 창 전체도 가운데다** — 제목바가 위쪽에 붙으므로.
+    func test_내용물_가운데면_창_전체도_가운데다() {
+        let o = WindowPlacement.initialContentOrigin(in: main, contentSize: win)
+        let f = WindowPlacement.frameAfterTitleBar(contentOrigin: o, contentSize: win)
+        // 창 전체의 중심이 화면 중심과 일치해야 — 수직으로 정확히
+        XCTAssertEqual(f.midX, main.midX, accuracy: 0.001, "가로 중앙")
+        XCTAssertEqual(f.midY, main.midY, accuracy: 0.001, "세로 중앙")
+    }
+
+    /// **제목바는 창 위쪽에 붙는다** — 이걸 빼먹으면 (0, -28) 이 그대로 통과한다.
+    func test_제목바는_창_위쪽에_붙는다() {
+        let o = CGPoint(x: 100, y: 200)
+        let f = WindowPlacement.frameAfterTitleBar(contentOrigin: o, contentSize: win)
+        XCTAssertEqual(f.minY, o.y - WindowPlacement.titleBarHeight,
+                       "제목바는 위쪽 — 이게 틀리면 창이 위로 삐져나간다")
+        XCTAssertEqual(f.maxY, o.y + win.height)
+    }
+
     // MARK: - 저장소
 
     /// **키 쌍이 다 있어야 좌표로 인정한다** — x 만 있고 y 가 없으면 쓰레기다.
