@@ -185,7 +185,17 @@ final class StatusItemController {
         p.animates = true
         // **그래프(≈60pt) + 탭/목록/통계가 함께 들어가야 한다.**
         // 420 으로 고정하면 아래 내용이 잘린다 — 고정 높이를 유지하는 편이 덜 깜빡인다.
-        p.contentSize = NSSize(width: 352, height: 520)
+        //
+        // ## 크기는 `PopoverMetrics` 한 곳에서 온다 (M-26)
+        //
+        // 이전엔 **352 를 여섯 군데에 흩어 적었다** — 여기 `contentSize` 하나,
+        // `PopoverView` 에 네 개, `SpeedGraph` 에 그래프 폭 하나.
+        // 그래서 **한 곳을 넓혀도 나머지 그대로**여서 "그래프는 넓어졌는데
+        // 창은 그대로" 인 **반쪽만 고쳐진** 상태가 된다. 실제로 그렇게 고장 났다.
+        //
+        // **창 크기와 화면 안의 `.frame(width:)` 은 같은 값이어야 한다.**
+        // 다르면 **내용물이 창 밖으로 넘치거나, 창이 값보다 넓어 빈 공간이 생긴다.**
+        p.contentSize = NSSize(width: PopoverMetrics.width, height: PopoverMetrics.height)
         p.contentViewController = NSHostingController(
             rootView: PopoverContainer(model: model) { [weak self] in self?.showSettingsWindow() }
         )
@@ -212,6 +222,25 @@ final class StatusItemController {
             // 팝오버 안의 컨트롤이 키보드를 받을 수 있게 활성화
             NSApp.activate(ignoringOtherApps: true)
         }
+    }
+
+    /// **팝오버의 실제 크기** — `contentSize` 값을 그대로 읽는다 (M-26).
+    ///
+    /// **왜 상수를 그냥 안 읽고 창에서 읽는가**
+    ///
+    /// `PopoverMetrics.width` 를 그대로 찍으면 **자기 자신을 검증한 것** 이다.
+    /// 상수를 적어 두고 **같은 상수를 읽으면 무조건 일치한다.**
+    /// 실제로 창이 그 크기로 만들어졌는지 보려면 **`NSPopover` 안에 들어있는 값을
+    /// 읽어야 한다.** 그래야 `contentSize` 와 화면 안의 `.frame(width:)` 이
+    /// 어긋났을 때 — 즉 **내용물이 창 밖으로 넘칠 때** 잡힌다.
+    var debugPopoverWidth: String {
+        guard let p = popover else { return "**nil — install() 이 안 돌았다**" }
+        let actual = p.contentSize.width
+        let want = PopoverMetrics.width
+        return String(format: "%.0fpt  (상수 %.0f · %@)  %@",
+                      actual, want,
+                      p.contentViewController == nil ? "컨트롤러 nil" : "컨트롤러 ok",
+                      abs(actual - want) < 0.5 ? "일치" : "★ 어긋남 — 창이 상수와 다르다")
     }
 
     /// 팝오버가 실제로 붙어 있는지 — `--watch` 로 확인한다.

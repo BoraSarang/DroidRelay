@@ -244,6 +244,45 @@ struct SettingsView: View {
                 .labelsHidden()
                 .disabled(!model.deviceSpeedAvailable)
             }
+
+            // **무엇을 셀지** — 켜냐/끄냐와는 다른 결정이라 별도 줄로 둔다 (M-27).
+            //
+            // ## 왜 "기기 속도" 토글 안에 넣지 않았나
+            //
+            // `showDevice` 는 **보이냐 마냐**이고 이건 **무엇을 세냐**다.
+            // 한 줄에 넣으면 "기기" 를 끄려고 했는데 **범위까지 같이 초기화**돼서
+            // **원인 없이 설정이 사라진다.** → **의도가 다른 두 가지는 분리한다.**
+            HStack(alignment: .center, spacing: 8) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("기기 속도 범위").font(.system(size: 12))
+                    Text(model.trafficScopeSetting.scope.explanation)
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    // **설정과 서버가 다를 때만** 나타난다. 평범하면 말할 게 없다.
+                    if let note = model.deviceScopeNote {
+                        Text(note)
+                            .font(.system(size: 10))
+                            .foregroundStyle(Color.orange)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                Spacer(minLength: 4)
+                Picker("", selection: Binding(
+                    get: { model.trafficScopeSetting.scope },
+                    set: { model.trafficScopeSetting.scope = $0 }
+                )) {
+                    ForEach(TrafficScope.allCases, id: \.self) { s in
+                        Text(s.label).tag(s)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .controlSize(.small)
+                .frame(width: 92)
+                .disabled(!model.deviceSpeedAvailable)
+                .help(model.trafficScopeSetting.scope.explanation)
+            }
         }
     }
 

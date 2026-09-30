@@ -2,7 +2,8 @@ import SwiftUI
 import DroidRelayCore
 
 /// 메뉴바 팝오버 (목업 A).
-/// - 폭 352px 고정, 항목 많으면 스크롤
+/// - 폭은 `PopoverMetrics.width` 한 곳에서 온다 (440pt — M-26 에서 실측으로 넓힘)
+/// - 항목 많으면 스크롤
 /// - 하단에 서버 주소 + 자동 발견 상태 표시
 struct PopoverView: View {
     @Bindable var model: AppModel
@@ -30,11 +31,19 @@ struct PopoverView: View {
                     // 튀는 값이 있지만 지우지 않고 구분 가능하게 만든다.
                     deviceAxisLabel: model.deviceAxisLabel
                 )
-                .padding(.horizontal, 12)
+                // **여백도 상수를 쓴다 — 12 를 여기 또 적으면 안 된다.**
+                //
+                // `graphWidth = width − graphInset×2` 인데 여백이 다른 값이면
+                // **계산은 6 이라 하고 화면은 12 를 뺀다.** 그래프가 조용히 눌리거나
+                // 팝오버 밖으로 넘친다. **같은 값을 두 벌 쓰면 언제든 어긋난다.** (M-26)
+                .padding(.horizontal, PopoverMetrics.graphInset)
                 .padding(.vertical, 8)
                 // **폭을 명시한다.** Canvas 는 제안된 크기를 그대로 쓰는데, VStack 안에서
                 // 제안 폭이 0 이면 그래프가 0 폭이 되고 팝오버 전체가 사라진다.
-                .frame(width: 328)
+                //
+                // **값은 `PopoverMetrics.graphWidth` 다** — 팝오버 폭에서 좌우 여백을 뺀
+                // 값이라 **여백을 바꾸면 그래프도 같이 따라간다.** (M-26)
+                .frame(width: PopoverMetrics.graphWidth)
                 Divider().opacity(0.5)
             }
             tabBar
@@ -63,7 +72,7 @@ struct PopoverView: View {
             Divider().opacity(0.5)
             footer
         }
-        .frame(width: 352)
+        .frame(width: PopoverMetrics.width)
     }
 
     // MARK: - 탭바 (M3)
@@ -135,7 +144,7 @@ struct PopoverView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
-        .frame(width: 352)
+        .frame(width: PopoverMetrics.width)
         .background(Color.orange.opacity(0.12))
     }
 
@@ -209,7 +218,7 @@ struct PopoverView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .frame(width: 352, alignment: .leading)
+        .frame(width: PopoverMetrics.width, alignment: .leading)
         // **빨간 배경 = 되돌릴 수 없다.** 사용자가 문구를 다 읽지 않아도 구분된다.
         .background((c.spec.isDestructive ? Color.red : Color.accentColor).opacity(0.10))
         Divider().opacity(0.5)
@@ -1090,7 +1099,7 @@ struct TorrentRow: View {
 ///
 /// ## 왜 조작은 행 전체에 걸지 않나
 ///
-/// 352pt 폭에 이름·크기·날짜·버튼 3개를 다 넣으면 이름이 두 글자만 보인다.
+/// `PopoverMetrics.width` 폭에 이름·크기·날짜·버튼 3개를 다 넣으면 이름이 두 글자만 보인다.
 /// 그리고 **파괴 동작(휴지통)을 한 번의 클릭으로 단추에 걸어두면 안 된다** —
 /// 사고의 대가가 크다. 그래서 조작은 메뉴로 숨기고, `누르면 들어가기` 만 직접 누른다.
 ///

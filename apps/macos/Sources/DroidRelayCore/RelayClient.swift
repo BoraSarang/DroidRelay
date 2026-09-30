@@ -249,17 +249,86 @@ public struct RelayClient: Sendable {
     ///
     /// `nil` 은 **서버가 미지원** 이라는 뜻이다. `0` 과 구분해야 한다 — 구분 못 하면
     /// 스위치를 켰는데 항상 0 이 나오는 "고장 난 기능" 이 된다.
-    public func deviceTraffic() async -> DeviceTraffic? {
-        guard let o = try? await getJSON("api/net/speed") else { return nil }
-        guard (o["supported"] as? Bool) == true else { return nil }
+    /// **기기 트래픽 누적값** — `nil` 은 **서버가 미지원** 이라는 뜻이다.
+    ///
+    /// `0` 과 구분해야 한다 — 구분 못 하면 스위치를 켰는데 항상 0 이 나오는
+    /// **"고장 난 기능"** 이 된다.
+    ///
+    /// - Parameter scope: 원하는 범위. **쿼리로 실려 서버가 실제로 고른다.**
+    ///   생략하면 서버 기본값(외부만)을 쓴다.
+    public func deviceTraffic(scope: TrafficScope? = nil) async -> DeviceTraffic? {
+        try? await deviceTrafficChecked(scope: scope)
+    }
+
+    /// **`nil` 의 원인을 알려주는 版本** — 진단 전용.
+    ///
+    /// ## 왜 둘로 나눴나
+    ///
+    /// `deviceTraffic()` 는 **네트워크 실패와 "서버 미지원" 을 모두 `nil` 로 준다.**
+    /// 화면에서는 둘이 똑같이 "값이 안 나온다" 로 보이며 **뭐가 잘못됐는지 알 수 없다.**
+    /// (M-14 에서 이미 한 번 겪었다 — "속도가 0" 과 "서버에 값이 없다" 를 못 구분)
+    ///
+    /// → **진단에서는 원인을 봐야 한다** 그래서 이 메서드가 사유를 던진다.
+    public func deviceTrafficChecked(scope: TrafficScope? = nil) async throws -> DeviceTraffic {
+        // **★ 쿼리가 붙은 경로다** — `appendingPathComponent` 로 붙이면 `?` 가
+        // 경로로 인코딩돼 **서버가 파라미터를 못 본다.**
+        // (M-16 에서 슬래시 문제로 이미 한 번 같은 함정을 밟았다)
+        // → **URLComponents** 로 직접 만든다.
+        var comps = URLComponents(
+            url: base.appendingPathComponent("api/net/speed"), resolvingAgainstBaseURL: false
+        )
+        if let scope {
+            comps?.queryItems = [URLQueryItem(name: "scope", value: scope.queryValue)]
+        }
+        guard let url = comps?.url else { throw URLError(.badURL) }
+        guard let o = try? await getJSON(url) else {
+            throw URLError(.cannotConnectToHost)   // 네트워크·파싱 실패
+        }
+        guard (o["supported"] as? Bool) == true else {
+            let note = (o["note"] as? String) ?? "사유 없음"
+            throw TrafficScopeError.unsupported(note)
+        }
+        // ## 왜 `int64Value` 인가 — **비유는 틀렸다. 결론은 맞다.**
+        //
+        // 값이 음수로 나와서 **"32비트 `intValue` 가 좁혔다"** 고 단정했고,
+        // 그게 **틀렸다.** 같은 응답을 두 경로로 나눠 재현한 결과:
+        //
+        // ```
+        // JSON          txTotal = 71,693,545,994
+        // intValue   →  71,693,545,994     ← 64비트 macOS 에선 안 잘린다
+        // 문자열 직접 →  71,693,545,994     ← 동일
+        // ```
+        //
+        // **macOS 는 64비트라 `intValue` 도 64비트**다. 좁히기가 원인이 아니었다.
+        // (그래도 `int64Value` 를 쓴다 — **형이 값의 범위를 보장하는 쪽**이 맞고,
+        //  someday 32비트 빌드가 생겨도 여기서는 안전하다.)
         return DeviceTraffic(
-            rxTotal: (o["rxTotal"] as? NSNumber)?.intValue ?? 0,
-            txTotal: (o["txTotal"] as? NSNumber)?.intValue ?? 0
+            rxTotal: DeviceTraffic.clampTotal(o["rxTotal"]),
+            txTotal: DeviceTraffic.clampTotal(o["txTotal"]),
+            // **서버가 실제로 쓴 범위** — 요구한 것과 다를 수 있다(구버전 서버).
+            scope: TrafficScope.parse(o["scope"] as? String)
         )
     }
 
+    /// **서버가 기기 카운터를 지원하지 않는다** — 사유를 그대로 담는다.
+    ///
+    /// **사유를 버리지 않는다.** M-24 에서 `rmnet*` 못 찾는 경우를
+    /// "미지원" 이라는 말 한마디로 소비했다가 **왜 안 되는지 알 수 없었다.**
+    public enum TrafficScopeError: LocalizedError {
+        case unsupported(String)
+        public var errorDescription: String? {
+            switch self {
+            case .unsupported(let why): "기기 트래픽 미지원 — \(why)"
+            }
+        }
+    }
+
     private func getJSON(_ path: String) async -> [String: Any]? {
-        guard let d = try? await get(path),
+        await getJSON(base.appendingPathComponent(path))
+    }
+
+    private func getJSON(_ url: URL) async -> [String: Any]? {
+        guard let d = try? await get(url),
               let any = try? JSONSerialization.jsonObject(with: d, options: [.fragmentsAllowed]),
               let o = any as? [String: Any]
         else { return nil }

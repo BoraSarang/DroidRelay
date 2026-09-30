@@ -86,6 +86,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { await Diagnostics.settingsCheck() }
             return
         }
+        // **속도 표시가 두 줄로 깨지지 않는지** — 높이로 판정한다.
+        //
+        // ## 왜 전용 모드인가
+        //
+        // "한 줄로 나온다" 는 **서술**이다. 맞았는지 틀렸는지는 **숫자**로 판정해야 한다.
+        // 줄이 하나면 12pt, 둘이면 23pt 다.
+        //
+        // `--title-check` 는 메뉴바 줄을 보고 `--popover-check` 는 팝오버가
+        // **뜨는**지 본다. **셋 다 "줄이 깨지는지" 를 못 본다.**
+        // `PopoverMetrics` 계산만으로도 못 본다 — **SwiftUI 레이아웃을 통과하지 않기 때문.**
+        //
+        // → **실제 뷰를 `NSHostingView` 에 넣고 높이를 잰다.** (M-21 교훈)
+        if CommandLine.arguments.contains("--legend-check") {
+            Task { await Diagnostics.legendCheck() }
+            return
+        }
         // **실행 중인 앱이 진짜로 무엇을 그리는지** 파일로 남긴다.
         //
         // `--title-check` 는 별도 프로세스라 상태 항목이 "살아 있는" 앱과 다르다.
@@ -240,6 +256,112 @@ private actor TickBox {
     func add(_ e: [String]) { all.append(contentsOf: e) }
 }
 enum Diagnostics {
+    /// **그래프 위 속도 표시가 한 줄로 안 깨지는지** — 실측 전용 (M-26).
+    ///
+    /// ## 왜 전용 모드인가
+    ///
+    /// **"한 줄로 나온다" 는 서술이다.** 맞았는지 틀렸는지는 **높이**로 판정한다.
+    /// 줄이 하나면 12pt, 둘이면 24pt 다. → **실제로 배치해서 높이를 잰다.**
+    ///
+    /// ## 왜 계산만으로 부족한가 — M-21 에서 배운 것
+    ///
+    /// M-21 에서 `WindowPlacement.resolve` 가 **정확한 좌표 (670, 291) 를 냈고
+    /// 테스트도 100% 통과했는데 실제 창은 (0, 0) 에 있었다.**
+    ///
+    /// > **계산이 맞다 ≠ 그 계산이 화면에 간다.**
+    ///
+    /// `PopoverMetrics` 는 이 버그를 못 재현한다. **글꼴 폭을 계수로 재기 때문**이고,
+    /// 무엇보다 **SwiftUI 의 레이아웃 엔진을 한 번도 통과하지 않는다.**
+    /// `fixedSize` · `lineLimit` · `truncationMode` 가 실제로 어떻게 배분하는지는
+    /// **SwiftUI 만 안다.** → 여기서 **실제 뷰를 `NSHostingView` 에 넣고 잰다.**
+    ///
+    /// ## 무엇을 확인하나
+    ///
+    /// 1. **범례가 요구하는 실제 폭** — SwiftUI 가 스스로 말하게 한다.
+    /// 2. **그 값을 담을 때의 실제 높이** — **한 줄인지** 의 판정이다.
+    /// 3. **계산값과 실제값의 차이** — 둘이 어긋나면 Core 쪽 계수를 고쳐야 한다.
+    /// 4. **팝오버 창이 실제로 그 폭인가** — 상수가 아니라 **창에서 읽는다.**
+    @MainActor
+    static func legendCheck() async {
+        print("=== DroidRelay 그래프 범례 한 줄 진단 (M-26) ===")
+        // **사용자 스크린샷의 값을 그대로 쓴다.** 실제 서버 값으로 재면
+        // "269K" 처럼 자릿수가 짧아 **부족한 순간을 놓친다.**
+        let values: [SpeedSource: (down: String, up: String)] = [
+            .droid:  ("707K", "762K"),
+            .device: ("707K", "762K"),
+        ]
+        let axis = "1.0 MB/s · 보통 3.1 KB/s"
+        let sources: [SpeedSource] = [.droid, .device]
+
+        // ── 1. 계산값 ──
+        let 계산 = PopoverMetrics.legendRowWidth(sources: sources, values: values, axisLabel: axis)
+        print("계산 필요폭  : \(String(format: "%.1f", 계산))pt")
+        print("그래프 가용폭: \(String(format: "%.1f", PopoverMetrics.graphWidth))pt  (팝오버 \(Int(PopoverMetrics.width)) − 여백 \(Int(PopoverMetrics.graphInset))×2)")
+        print(PopoverMetrics.describe(sources: sources, values: values, axisLabel: axis))
+
+        // ── 2. 실제 SwiftUI 배치 ──
+        // **계산이 아니라 뷰를 실제로 넣는다.** 여기가 이 진단의 전부다.
+        //
+        // **`SpeedLegend` 만 따로 재는 이유** — 첫 판은 `SpeedGraph` 전체를 재고
+        // **62pt 가 나왔다.** 62 = 범례 12 + 간격 4 + 그래프 46 이므로
+        // **범례는 이미 한 줄이었는데**, "20pt 미만이어야 한 줄" 이라는 기준과
+        // 맞지 않아 **"깨진다" 고 잘못 판정했다.**
+        //
+        // → **틀린 건 판정 기준이 아니라 판정 대상이었다.** 범례만 떼어 본다.
+        let legend = SpeedLegend(
+            sources: sources,
+            droid: (down: 707_000, up: 762_000),
+            device: (down: 707_000, up: 762_000),
+            axisLabel: axis
+        )
+        // **(가) 폭을 준다** — 실제 화면과 같은 조건이어야 접히는 것도 재현된다.
+        // **높이는 준다** — 높이가 없으면 두 줄이 되어야 하는데 **잘려서 한 줄처럼 보인다.**
+        let 제한된 = NSHostingView(
+            rootView: legend.frame(width: PopoverMetrics.graphWidth, alignment: .leading)
+        )
+        // **(나) 폭을 주지 않는다** — 그러면 **필요한 만큼만** 차지한다.
+        // 이게 "SwiftUI 가 스스로 말하는 필요폭" 이다.
+        let 자유 = NSHostingView(rootView: legend)
+
+        try? await Task.sleep(for: .milliseconds(300))   // 레이아웃이 끝날 때까지 양보
+        제한된.layoutSubtreeIfNeeded()
+        자유.layoutSubtreeIfNeeded()
+
+        let 제한크기 = 제한된.fittingSize
+        let 자유폭 = 자유.fittingSize.width
+        print("실제 필요폭  : \(String(format: "%.1f", 자유폭))pt   ← 폭을 주지 않고 SwiftUI 가 낸 값")
+        print("가용폭 넣은 높이: \(String(format: "%.1f", 제한크기.height))pt   ← 이게 한 줄/두 줄의 판정값")
+        print("계산과의 차이: \(String(format: "%+.1f", 자유폭 - 계산))pt  "
+              + (자유폭 - 계산 < -2 ? "★ Core 계수가 과대 — 실제보다 넓다고 계산했다"
+                 : 자유폭 - 계산 > 8 ? "★ Core 계수가 과소 — 접힘을 놓칠 수 있다" : "일치"))
+
+        // ── 3. 한 줄인가 (이게 판정) ──
+        // 9.5pt 한 줄은 12pt 안팎, 두 줄이면 23pt 이상이다.
+        let 한줄 = 제한크기.height < 20
+        print("한 줄 여부   : \(한줄 ? "OK — 접히지 않는다" : "★ 두 줄로 깨진다")  (기준 20pt)")
+        if !한줄 {
+            print("             → 범례 `Text` 에 `lineLimit(1)`+`fixedSize` 가 없거나,")
+            print("               `PopoverMetrics.width` 가 `graphWidth` 보다 좁다.")
+        }
+        if 자유폭 > PopoverMetrics.graphWidth {
+            print("             ★ 필요폭 \(String(format: "%.1f", 자유폭))pt > 가용폭 "
+                  + "\(Int(PopoverMetrics.graphWidth))pt — 접힌다")
+        }
+
+        // ── 4. 창이 실제로 그 폭인가 (상수가 아니라 창에서 읽는다) ──
+        // **팝오버를 먼저 만들어야** `contentSize` 를 읽을 수 있다 —
+        // `install()` 은 메뉴바 항목만 만들고 팝오버는 **누를 때** 만든다.
+        let c = StatusItemController(model: AppModel())
+        c.install()
+        c.forceShowPopover()
+        try? await Task.sleep(for: .milliseconds(600))
+        print("팝오버 폭    : \(c.debugPopoverWidth)")
+        print("설정 창 폭   : \(Int(SettingsWindowController.contentSize.width))pt  "
+              + "— 팝오버가 이보다 넓으면 두 창이 같은 앱으로 읽히지 않는다")
+        print("=== 끝 ===")
+        NSApp.terminate(nil)
+    }
+
     static func run() async {
         let i = NetworkInfo.currentInterface()
         print("=== DroidRelay 진단 ===")
@@ -287,11 +409,45 @@ enum Diagnostics {
             // 속도 — 메뉴바 2줄이 실제로 이런 문자열이 된다
             let droid = await c.droidSpeed()
             print("Droid 속도  : ↓ \(SpeedFormat.text(droid.downBps))  ↑ \(SpeedFormat.text(droid.upBps))")
-            // 기기 = 누적 카운터. 속도는 클라이언트가 시간 차로 나눈다.
-            if let t = await c.deviceTraffic() {
-                print("기기 카운터 : rx=\(t.rxTotal) tx=\(t.txTotal) (누적 — 속도는 클라이언트가 계산)")
+            // 기기 = 누적 카운터. 속도는 클라이언트가 시간 차로 나눈다 (M-27).
+            //
+            // **★ 두 모드를 다 찍는다** — 하나만 찍으면 **어느 경로가 문제인지 모른다.**
+            // `external` 이 0 이면 서버가 rmnet 을 못 찾는 것이고, `all` 이 0 이면
+            // 요청 자체가 실패한 것이다. **"서버 미지원" 이라는 말은 원인을 감춘다.**
+            let 설정 = TrafficScopeSetting.load()
+            print("기기 범위 설정: \(설정.scope.rawValue) (기본 = \(TrafficScope.default.rawValue))")
+            // **설정한 모드만 먼저 찍는다** — 이것이 **실제로 화면에 나오는 값**이다.
+            if let t = try? await c.deviceTrafficChecked(scope: 설정.scope) {
+                print("기기 카운터 : rx=\(t.rxTotal) tx=\(t.txTotal)"
+                      + "  범위=\(t.scope?.rawValue ?? "없음(구버전)")  (누적 — 속도는 클라이언트가 계산)")
             } else {
                 print("기기 카운터 : (서버 미지원 — /api/net/speed 없거나 supported=false)")
+            }
+            // **그다음 나머지 구간** — "왜 이 값인지" 를 비교하기 위해 본다. (M-28: 3구간)
+            //
+            // **이게 왜 필요한가** — 세 구간이 **서로 다른 값을 본다.**
+            // M-28 실측 (동일 구간, 세 값이 각각 다름):
+            // ```
+            // swlan0   Δrx=28,368  Δtx=60,495   ← 핫스팟 ↔ 클라이언트
+            // external Δrx=547     Δtx=443      ← 셀룰러 (거의 0)
+            // all      Δrx=25,286  Δtx=63,268   ← ≈ swlan0 합계와 일치 ✓
+            // ```
+            // **하나만 찍으면 "설정이 안 먹혔다" 는 잘못된 결론을 만든다.**
+            for s in TrafficScope.allCases where s != 설정.scope {
+                do {
+                    let t = try await c.deviceTrafficChecked(scope: s)
+                    print("  비교(\(s.rawValue)): rx=\(t.rxTotal) tx=\(t.txTotal)")
+                } catch {
+                    print("  비교(\(s.rawValue)): 실패 — \(error)")
+                }
+            }
+            // **설정과 서버가 실제로 쓴 값의 일치 여부** — 구버전 서버 대처의 근거.
+            if let t = try? await c.deviceTrafficChecked(scope: 설정.scope) {
+                if let used = t.scope, used != 설정.scope {
+                    print("범위 불일치 : 설정 '\(설정.scope.rawValue)' · 서버 '\(used.rawValue)'")
+                } else if t.scope == nil {
+                    print("범위        : 서버가 이 필드를 모른다 (구버전) — 설정이 지켜지지 않을 수 있다")
+                }
             }
             let st = SMAppService.mainApp.status
             let stName = switch st {

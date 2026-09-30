@@ -413,6 +413,30 @@ final class AppModel {
         }
     }
 
+    /// **기기 트래픽을 어디까지 셀 것인가** (M-27). 기본은 **외부만**.
+    ///
+    /// ## 왜 별도 설정인가 — `speedSetting` 과 합치지 않는다
+    ///
+    /// `showDevice` 는 **보이냐 마냐**(열을 만들지 말지)이고,
+    /// 이건 **무엇을 세냐**다. 둘을 한 스위치에 넣으면
+    /// "기기" 를 끄려고 했는데 **범위까지 같이 초기화**된다.
+    /// → **의도가 다른 두 가지라 별도로 둔다.**
+    var trafficScopeSetting = TrafficScopeSetting.load() {
+        didSet {
+            trafficScopeSetting.save()
+            // **옛 카운터와 비교하면 음수 속도가 나온다** — 기준점을 버린다.
+            lastDeviceTraffic = nil
+            deviceScopeNote = nil
+            Task { await sampleDeviceTraffic() }
+        }
+    }
+
+    /// **설정한 범위와 서버가 실제로 쓴 범위가 다를 때의 설명** (M-27).
+    ///
+    /// **평범한 상태에서는 `nil`** — 모든 곳에 설명을 붙이지 않는다.
+    /// **문제가 생겼을 때만** 화면에 나타난다.
+    var deviceScopeNote: String?
+
     /// **SSE 안전망 폴링 주기(초)** — 설정 화면에서 고른다.
     ///
     /// ## 왜 바꾸면 바로 반영되나
@@ -1013,12 +1037,15 @@ final class AppModel {
     /// 스위치를 켜놓고 항상 0 이 보이는 **고장 난 기능** 이 된다.
     private func sampleDeviceTraffic() async {
         guard let s = server else { return }
-        let cur = await RelayClient(base: s.baseURL).deviceTraffic()
+        let want = trafficScopeSetting.scope
+        let cur = await RelayClient(base: s.baseURL).deviceTraffic(scope: want)
         guard let cur else {
             if deviceSpeedAvailable { deviceSpeedAvailable = false; deviceSpeed = .init(downBps: 0, upBps: 0) }
+            deviceScopeNote = nil
             return
         }
         deviceSpeedAvailable = true
+        deviceScopeNote = Self.scopeNote(requested: want, used: cur.scope)
         let now = Date()
         let dt = now.timeIntervalSince(lastDeviceTraffic?.at ?? now)
         deviceSpeed = DeviceTrafficRate.rate(
@@ -1026,6 +1053,15 @@ final class AppModel {
         )
         lastDeviceTraffic = (cur, now)
         history(for: .device).push(deviceSpeed)
+    }
+
+    /// **요구한 범위와 서버가 실제로 쓴 범위가 다를 때만 경고를 만든다.**
+    ///
+    /// **규칙은 Core 의 `TrafficScope.mismatchNote` 다** — 여기에 다시 적지 않는다.
+    /// **규칙을 두 벌 쓰면 한쪽만 고쳐지고 테스트는 통과한 채로 화면이 틀어진다.**
+    /// (M-27 에서 실제로 그렇게 될 뻔했다 — 테스트가 규칙을 복사본으로 돌리고 있었다)
+    static func scopeNote(requested: TrafficScope, used: TrafficScope?) -> String? {
+        TrafficScope.mismatchNote(requested: requested, used: used)
     }
 
     func disconnect() {
