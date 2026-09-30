@@ -79,10 +79,35 @@ internal fun Route.netSpeedRoutes(context: Context, serverRef: RelayServer) {
     }
 }
 
-/** 트래픽 범위. **요청이 없거나 모르는 값이면 `ALL` 로 본다** — 옛 동작 유지. */
+/**
+ * 트래픽 범위. **요청이 없거나 모르는 값이면 `ALL` 로 본다** — 옛 동작 유지.
+ *
+ * ## 왜 세 구간인가 (M-28)
+ *
+ * M-27 은 두 구간(`external` / `all`) 이었다. 실측에서 결함이 드러났다 —
+ * **핫스팟 ↔ 클라이언트 구간이 어느 쪽에도 제대로 안 잡혔다.**
+ *
+ * 통제 실험 (11MB 다운로드, 실제 전송 확인됨):
+ * ```
+ * swlan0      Δtx = 11,693,373   ← 실제로 클라이언트에 전송된 양 (11.36MB) ★ 일치
+ * rmnet_data1 Δrx =    295,326   ← 셀룰러 경유 2.6%뿐
+ * external    Δrx =          0   ← ★ 화면에 0 이 뜬다
+ * ```
+ *
+ * `external` = `rmnet*`(셀룰러)만 세므로 **핫스팟 구간이 통째로 누락**된다.
+ * 이 앱의 목적이 핫스팟으로 파일을 주고받는 것인데, **그게 안 보이는 지표**다.
+ *
+ * | 구간 | 세는 것 | 용도 |
+ * |---|---|---|
+ * | `EXTERNAL` | 활성 `rmnet*` (IPA 제외) | 폰이 **셀룰러로** 나간 양 |
+ * | `HOTSPOT` | `swlan0` | **클라이언트와 핫스팟으로** 주고받은 양 |
+ * | `ALL` | 모든 인터페이스 | 전체 |
+ */
 internal enum class TrafficScope(val raw: String) {
-    /** 핫스팟 내부를 뺀, 기기가 밖으로 나갔다 오는 양. **기본값.** */
+    /** 활성 셀룰러(`rmnet*`). 핫스팟 내부 제외. **기본값.** */
     EXTERNAL("external"),
+    /** 핫스팟 AP(`swlan0`) — 클라이언트와 주고받은 양. */
+    HOTSPOT("hotspot"),
     /** 모든 인터페이스. 핫스팟 내부 포함. */
     ALL("all");
 
@@ -95,7 +120,7 @@ internal enum class TrafficScope(val raw: String) {
 internal object DeviceTrafficReader {
 
     /**
-     * `@Volatile` — 이 폴링은 Ktor 워커 스레드에서 돌고 API 요청도 다른 스레드에서
+     * @Volatile — 이 폴링은 Ktor 워커 스레드에서 돌고 API 요청도 다른 스레드에서
      * 들어온다. **가시성 보장 없으면 1회 늦게 반영될 수 있다.**
      *
      * **리플렉션 Method 도 캐시한다** — 부를 때마다 클래스를 찾으면
@@ -105,8 +130,30 @@ internal object DeviceTrafficReader {
     @Volatile private var reflectTx: Method? = null
     @Volatile private var reflectChecked = false
 
-    /** **이 기기의 `rmnet*` 인터페이스 목록** — 이름이 기기마다 다르므로 고정하지 않는다. */
-    @Volatile private var rmnetIfaces: List<String>? = null
+    /**
+     * **이 기기의 셀룰러 인터페이스 목록** — 이름이 기기마다 다르므로 고정하지 않는다.
+     *
+     * ## ★ 만료 시각을 둔다 (M-28)
+     *
+     * 이전엔 **영구 캐시**였다. 셀룰러가 재접속되면 인터페이스가 바뀐다
+     * (`data1` → `data5` 등). 영구 캐시는 **죽은 이름을 계속 읽는다** —
+     * 0 을 계속 반환해 속도가 0 으로 굳는다.
+     *
+     * → **30초마다 다시 찾는다.** 1초 폴링 중 `getNetworkInterfaces()` 는
+     * 시스템 IPC 라 비용이 있다. **캐시가 목적인데 매번 부르면 캐시가 없다.**
+     */
+    @Volatile private var rmnetCache: IfaceCache? = null
+
+    /** 핫스팟 AP 인터페이스 캐시 — 같은 만료 규칙. */
+    @Volatile private var hotspotCache: IfaceCache? = null
+
+    /** **캐시 + 그게 언제까지 유효한지.** 데이터와 만료를 한 쌍으로 다룬다. */
+    private data class IfaceCache(val names: List<String>?, val expiresAt: Long) {
+        fun alive(now: Long) = now < expiresAt
+    }
+
+    /** **30초** — 재접속 직후 어긋남은 허용한다(점진적). */
+    private const val CACHE_TTL_MS = 30_000L
 
     // MARK: - 테스트용 진입점
 
@@ -164,11 +211,11 @@ internal object DeviceTrafficReader {
                     note = "기기 전체 조회 권한 없음: ${e.message}")
             }
         }
-        return readExternal(scope)
+        return if (scope == TrafficScope.HOTSPOT) readHotspot(scope) else readExternal(scope)
     }
 
     /**
-     * **`rmnet*` 합계** = "기기가 외부로 나갔다 오는 양".
+     * **`rmnet*` 합계** = "기기가 **셀룰러로** 나갔다 오는 양".
      *
      * ## 왜 합으로 빼지 않는가
      *
@@ -176,11 +223,48 @@ internal object DeviceTrafficReader {
      * (카운터 리셋·인터페이스 추가·셀룰러 재접속). → **직접 읽는다.**
      */
     private fun readExternal(scope: TrafficScope): DeviceTraffic {
-        val ifaces = rmnetIfaces ?: discoverRmnets()?.also { rmnetIfaces = it }
+        val ifaces = rmnetIfaces()
         if (ifaces.isNullOrEmpty()) {
             return DeviceTraffic(0, 0, supported = false, scope = scope.raw,
                 note = "셀룰러 인터페이스(rmnet*) 를 찾지 못했습니다")
         }
+        return sum(ifaces, scope, "셀룰러 인터페이스(rmnet*) 를 찾지 못했습니다")
+    }
+
+    /**
+     * **핫스팟 AP 인터페이스 합계** = "클라이언트와 주고받은 양". (M-28 신규)
+     *
+     * ## 왜 이 구간이 꼭 필요한가
+     *
+     * 실측: 11MB 를 클라이언트에 내려줬을 때 `swlan0 Δtx = 11,693,373` 이지만
+     * `rmnet Δrx = 295,326` (2.6%) 뿐이었고 **`external` 은 0** 이었다.
+     * → 이 앱의 **핵심 동작이 안 보이는 값**이었다.
+     *
+     * ## 이름이 기기마다 다르다
+     *
+     * 삼성 `swlan0` · AOSP `wlan1`(AP) / `wlan0`(STA 모드에선 STA).
+     * **정확한 이름이 아니라 "핫스팟 AP 인 것"으로 판정**해야 하는데,
+     * 앱은 `NetworkInterface` 로 IP 가 붙은 것만 본다.
+     * → **패턴 후보를 넓게 잡고**, 그래도 없으면 **미지원으로 알린다.**
+     */
+    private fun readHotspot(scope: TrafficScope): DeviceTraffic {
+        val ifaces = hotspotIfaces()
+        if (ifaces.isNullOrEmpty()) {
+            return DeviceTraffic(0, 0, supported = false, scope = scope.raw,
+                note = "핫스팟 인터페이스(swlan0 등) 를 찾지 못했습니다 — 핫스팟을 켜면 표시됩니다")
+        }
+        return sum(ifaces, scope, "핫스팟 인터페이스를 읽지 못했습니다")
+    }
+
+    /**
+     * **목록을 합산한다** — 두 구간이 같은 계산을 쓰므로 한 곳에 모은다.
+     *
+     * ## 왜 합쳤나
+     *
+     * `readExternal` 과 `readHotspot` 이 **같은 루프를 두 번 복사**하면
+     * 한쪽만 고쳐진다. **실패 처리 규칙**(전부 실패만 미_SUPPORT)이 두 벌 생긴다.
+     */
+    private fun sum(ifaces: List<String>, scope: TrafficScope, notFound: String): DeviceTraffic {
         var rx = 0L; var tx = 0L
         var failed: String? = null
         for (i in ifaces) {
@@ -202,24 +286,96 @@ internal object DeviceTrafficReader {
     }
 
     /**
-     * **이 기기의 셀룰러 인터페이스를 찾는다.**
+     * **활성 셀룰러 인터페이스 목록** — 캐시 + 만료.
      *
-     * ## 이름을 하드코딩하지 않는다
+     * ## ★ `rmnet_ipa0` 를 왜 뺀다 (M-28 실측)
      *
-     * 실측된 이름들 (이 기기 = 삼성):
+     * 처음엔 "누락된 40GB" 라 판단했다. **틀렸고, 실측이 뒤집었다.**
+     * 같은 구간 tx:
      * ```
-     * rmnet_ipa0, rmnet_data0 … rmnet_data14
+     * rmnet_ipa0  Δtx = 5,717,550 B
+     * rmnet_data1 Δtx = 5,677,102 B   ← 99.2% 일치
      * ```
-     * Qualcomm·MTK 는 다르다. → **패턴으로 찾고, 못 찾으면 미지원으로 알린다.**
-     * 0 을 반환하면 **"트래픽이 없다"** 와 구분되지 않는다.
+     * → `ipa0` 는 **쿨컴 IPA 오프로드 가상 장치**다. `data1` 을 **그대로 통과**시킨다.
+     * `dumpsys netstats` 에도 **한 번도 안 나온다** — 시스템이 트래픽 경로로 안 쓴다.
+     *
+     * → **더하면 2배 계상이다.**
+     *
+     * ## 그래도 명시적으로 뺀다
+     *
+     * `NetworkInterface` 는 IP 없는 걸 안 보이므로 **지금은 자동으로 빠진다.**
+     * 그러나 **"왜 빠지는지" 를 코드에 적어야** 다음 사람이 중복 계상을 고치지 않는다.
+     * (규칙 4: 추측 금지 — 근거를 남긴다)
      */
-    private fun discoverRmnets(): List<String>? {
-        val names = try { NetworkInterfaceNames.all() } catch (e: Exception) { return null }
-        val hit = names.filter { it.startsWith("rmnet") }
-        // **`rmnet*` 가 하나도 없으면 셀룰러가 없는 기기**(Wi-Fi 전용)일 수 있다.
-        // 그래도 미지원으로 알린다 — 0 과 구분돼야 한다.
-        return hit.ifEmpty { null }
+    private fun rmnetIfaces(): List<String>? {
+        val now = System.currentTimeMillis()
+        rmnetCache?.takeIf { it.alive(now) }?.let { return it.names }
+        val hit = try { NetworkInterfaceNames.all().filter(::isActiveCellular) } catch (e: Exception) { null }
+        val c = IfaceCache(hit, now + CACHE_TTL_MS)
+        rmnetCache = c
+        return hit
     }
+
+    /**
+     * **활성 셀룰러 판정** — `rmnet` 계열이면서 **오프로드 장치는 아니다.**
+     *
+     * `ipa`(Inline Packet Architecture) = 하드웨어 오프로드용 가상 장치 → **제외**.
+     */
+    internal fun isActiveCellular(name: String): Boolean =
+        name.startsWith("rmnet") && !OFFLOAD_MARKERS.any { name.contains(it) }
+
+    /**
+     * **오프로드 마커** — 실측된 `rmnet_ipa0` 을 잡는다.
+     *
+     * Qualcomm `ipa` · MTK `ccmni` 계열은 **이중 계상된다.**
+     */
+    private val OFFLOAD_MARKERS = listOf("ipa", "ccmni")
+
+    /**
+     * **핫스팟 AP 인터페이스 목록** — 캐시 + 만료.
+     *
+     * ## 판정 근거
+     *
+     * 앱은 `NetworkInterface` 로 **IP 가 붙은 것만** 본다. 핫스팟은 `swlan0` 에
+     * IP 가 붙으므로 **보인다.** (실측 확인)
+     *
+     * 다만 기기마다 이름이 다르다. 삼성 `swlan0` · AOSP `wlan1` 등.
+     * → **확실한 후보만** 잡는다. `wlan0` 은 STA 모드(폰이 클라이언트일 때)
+     * 이므로 **동시에 잡으면 안 된다** — 없는 값을 만들어낸다.
+     */
+    private fun hotspotIfaces(): List<String>? {
+        val now = System.currentTimeMillis()
+        hotspotCache?.takeIf { it.alive(now) }?.let { return it.names }
+        val names = try { NetworkInterfaceNames.all() } catch (e: Exception) { null }
+        val hit = names?.filter(::isHotspotAp)
+        val c = IfaceCache(hit, now + CACHE_TTL_MS)
+        hotspotCache = c
+        return hit
+    }
+
+    /**
+     * **핫스팟 AP 판정** — **AP 모드에서 쓰이는 이름만** 인정한다.
+     *
+     * ## 왜 `wlan` 을 통째로 받지 않는가
+     *
+     * `wlan0` 은 **STA 모드**(폰이 공유기에 접속)일 때의 이름이다.
+     * 핫스팟과 STA 는 **동시에 활성화되지 않으므로**, `wlan*` 을 넓게 잡으면
+     * **핫스팟이 아닌데 핫스팟 값을 보이는** 잘못된 표시가 난다.
+     *
+     * → **`swlan`(SoftAP)이 명시적 표식**이라 그것만 믿는다. 없으면 **미지원.**
+     */
+    internal fun isHotspotAp(name: String): Boolean = HOTSPOT_MARKERS.any { name.startsWith(it) }
+
+    /**
+     * 핫스팟 AP 이름 표식.
+     *
+     * - `swlan` — 삼성 SoftAP (실측 확인)
+     * - `ap` — AOSP SoftAP (`ap0`, `ap1`)
+     *
+     * `wlan` 을 넣지 않는 이유 = [isHotspotAp] 참고.
+     */
+    private val HOTSPOT_MARKERS = listOf("swlan", "ap")
+
 
     /** **리플렉션 호출** — 실패하면 사유를 **문자열로** 돌려준다. 조용히 0 아님. */
     private fun invoke(name: String, arg: String): Any = try {

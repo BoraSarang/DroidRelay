@@ -4,6 +4,7 @@ import com.borasarang.droidrelay.relay.DeviceTrafficReader
 import com.borasarang.droidrelay.relay.TrafficScope
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -123,7 +124,93 @@ class TrafficScopeTest {
         assertEquals(true, t.supported)
     }
 
-    // MARK: - 4. ALL 은 숨기지 않는다
+    // MARK: - 4. 오프로드 인터페이스 제외 (M-28)
+
+    /**
+     * **`rmnet_ipa0` 은 합산에서 제외한다 — 2배 계상되기 때문이다.**
+     *
+     * ## 실측 근거 (M-28)
+     *
+     * 처음엔 "누락된 40GB" 라 판단했다. **틀렸고 실측이 뒤집었다.**
+     * 같은 구간 tx 증분:
+     * ```
+     * rmnet_ipa0  Δtx = 5,717,550
+     * rmnet_data1 Δtx = 5,677,102   ← 99.2% 일치
+     * ```
+     * → `ipa0` 는 **쿨컴 IPA 오프로드 가상 장치**다. `data1` 을 **그대로 통과**시킨다.
+     * `dumpsys netstats` 에도 **한 번도 안 나온다** — 시스템이 트래픽 경로로 안 쓴다.
+     *
+     * → **더하면 2배 계상이다.**
+     */
+    @Test
+    fun `ipa_오프로드는_제외한다_중복계상_방지`() {
+        // **★ JUnit 은 메시지가 첫 인자다** — `assertTrue(조건, 메시지)` 가 아니라
+        // `assertTrue(메시지, 조건)` 이다. 순서를 바꾸면 컴파일 에러로 잡힌다.
+        assertFalse(
+            "ipa0 는 오프로드 장치다 — 더하면 2배 계상된다",
+            DeviceTrafficReader.isActiveCellular("rmnet_ipa0")
+        )
+    }
+
+    /** **일반 셀룰러 인터페이스는 통과시킨다** — 위 테스트가 과다 제외로 새지 않았는지. */
+    @Test
+    fun `일반_rmnet은_통과시킨다`() {
+        for (name in listOf("rmnet_data0", "rmnet_data1", "rmnet_data2", "rmnet_data14")) {
+            assertTrue("$name 은 활성 셀룰러다", DeviceTrafficReader.isActiveCellular(name))
+        }
+    }
+
+    // MARK: - 5. 핫스팟 AP 판정 (M-28)
+
+    /**
+     * **핫스팟 AP 인터페이스만 `hotspot` 으로 인정한다.**
+     *
+     * ## 왜 `wlan` 을 통째로 받지 않는가
+     *
+     * `wlan0` 은 **STA 모드**(폰이 공유기에 접속)일 때의 이름이다.
+     * 핫스팟과 STA 는 **동시에 활성화되지 않으므로**, `wlan*` 을 넓게 잡으면
+     * **핫스팟이 아닌데 핫스팟 값을 보이는** 잘못된 표시가 난다.
+     */
+    @Test
+    fun `핫스팟은_swlan과_ap만_인정한다`() {
+        assertTrue("삼성 SoftAP (실측 확인)", DeviceTrafficReader.isHotspotAp("swlan0"))
+        assertTrue("swlan1 도 SoftAP", DeviceTrafficReader.isHotspotAp("swlan1"))
+        assertTrue("AOSP SoftAP", DeviceTrafficReader.isHotspotAp("ap0"))
+    }
+
+    /** **STA 모드 인터페이스는 핫스팟이 아니다** — 없으면 안 되는 값을 만들어낸다. */
+    @Test
+    fun `sta_mode_wlan0은_핫스팟이_아니다`() {
+        assertFalse(
+            "wlan0 은 STA 모드 — 핫스팟 값으로 쓰면 거짓말이다",
+            DeviceTrafficReader.isHotspotAp("wlan0")
+        )
+    }
+
+    /** **셀룰러도 핫스팟이 아니다** — 두 축이 섞이면 안 된다. */
+    @Test
+    fun `cellular은_핫스팟으로_안_잡힌다`() {
+        assertFalse(DeviceTrafficReader.isHotspotAp("rmnet_data1"))
+    }
+
+    // MARK: - 6. 3구간 파라미터
+
+    /** **`hotspot` 파라미터가 그대로 읽힌다** — M-28 신규 구간. */
+    @Test
+    fun `hotspot_구간을_읽는다`() {
+        assertEquals(TrafficScope.HOTSPOT, TrafficScope.of("hotspot"))
+        assertEquals("hotspot", TrafficScope.HOTSPOT.raw)
+    }
+
+    /** **구버전 클라이언트는 `hotspot` 을 모른다** — 그래서 `external`/`all` 은 그대로여야 한다. */
+    @Test
+    fun `구간은_세_개다_그리고_기본은_외부`() {
+        assertEquals(3, TrafficScope.entries.size)
+        // **새 클라이언트가 파라미터를 안 보내는 일은 없다** (항상 보낸다)
+        assertEquals("external", TrafficScope.EXTERNAL.raw)
+    }
+
+    // MARK: - 7. ALL 은 숨기지 않는다
 
     /** **`all` 은 숨김 없이 그대로 보낸다** — 예전 동작이고 거짓말이 아니다. */
     @Test

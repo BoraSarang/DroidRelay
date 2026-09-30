@@ -423,10 +423,16 @@ enum Diagnostics {
             } else {
                 print("기기 카운터 : (서버 미지원 — /api/net/speed 없거나 supported=false)")
             }
-            // **그다음 나머지 모드** — "왜 이 값인지" 를 비교하기 위해 본다.
+            // **그다음 나머지 구간** — "왜 이 값인지" 를 비교하기 위해 본다. (M-28: 3구간)
             //
-            // **이게 왜 필요한가** — `external` 이 0 이면 **rmnet 못 찾음**(서버 문제)이고,
-            // `all` 이 0 이면 **요청 실패**다. **"서버 미지원" 이라는 말은 원인을 감춘다.**
+            // **이게 왜 필요한가** — 세 구간이 **서로 다른 값을 본다.**
+            // M-28 실측 (동일 구간, 세 값이 각각 다름):
+            // ```
+            // swlan0   Δrx=28,368  Δtx=60,495   ← 핫스팟 ↔ 클라이언트
+            // external Δrx=547     Δtx=443      ← 셀룰러 (거의 0)
+            // all      Δrx=25,286  Δtx=63,268   ← ≈ swlan0 합계와 일치 ✓
+            // ```
+            // **하나만 찍으면 "설정이 안 먹혔다" 는 잘못된 결론을 만든다.**
             for s in TrafficScope.allCases where s != 설정.scope {
                 do {
                     let t = try await c.deviceTrafficChecked(scope: s)

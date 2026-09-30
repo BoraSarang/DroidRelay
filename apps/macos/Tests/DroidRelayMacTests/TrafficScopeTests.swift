@@ -83,12 +83,54 @@ final class TrafficScopeTests: XCTestCase {
     ///
     /// 같으면 사용자는 **차이가 뭔지 알 수 없고**, 그냥 있는 그대로 누른다.
     func test_설명문이_구분된다() {
-        XCTAssertNotEqual(TrafficScope.external.explanation, TrafficScope.all.explanation)
-        XCTAssertNotEqual(TrafficScope.external.label, TrafficScope.all.label)
+        for a in TrafficScope.allCases {
+            for b in TrafficScope.allCases where a != b {
+                XCTAssertNotEqual(a.explanation, b.explanation, "\(a) 와 \(b) 설명이 같다")
+                XCTAssertNotEqual(a.label, b.label, "\(a) 와 \(b) 라벨이 같다")
+            }
+        }
         // **"전체" 쪽에 핫스팿 때문에 커진다는 사실이 있어야 한다** —
         // 이게 사용자가 이 기능을 요청한 이유다.
         XCTAssertTrue(TrafficScope.all.explanation.contains("핫스팟"),
                       "'전체' 설명에 핫스팟 언급이 없다 — 왜 기본이 아닌지 설명이 안 된다")
+    }
+
+    // MARK: - 4b. 핫스팟 구간 (M-28)
+
+    /// **구간은 세 개다** — `external` / `hotspot` / `all`.
+    func test_구간은_세_개다() {
+        XCTAssertEqual(3, TrafficScope.allCases.count)
+        XCTAssertEqual([.external, .hotspot, .all], TrafficScope.allCases)
+    }
+
+    /// **기본은 여전히 "외부만"** — 새 구간이 추가돼도 기본이 바뀌면 안 된다.
+    func test_기본은_여전히_외부만이다() {
+        XCTAssertEqual(.external, TrafficScope.default)
+    }
+
+    /// **핫스팟 설명에 방향이 드러나야 한다** — 모호하면 쓸 수 없다.
+    ///
+    /// M-28 실측: 11MB 를 내려줬는데 `external` 이 0 이었다.
+    /// **사용자는 "설정이 안 먹혔다" 고 생각했다.** 실제로는 세는 대상이 달랐다.
+    func test_핫스팟_설명에_방향이_드러난다() {
+        let e = TrafficScope.hotspot.explanation
+        XCTAssertTrue(e.contains("클라이언트"), "핫스팟 설명에 '클라이언트' 가 없다 — 무엇이 오가는지 안 보인다")
+        XCTAssertTrue(e.contains("주고받은"), "핫스팟 설명에 방향어가 없다")
+    }
+
+    /// **`hotspot` 이 오면 `hotspot` 으로 읽는다** — 라벨이 섞이면 안 된다.
+    func test_핫스팟_파라미터를_읽는다() {
+        XCTAssertEqual(.hotspot, TrafficScope.parse("hotspot"))
+        XCTAssertNil(TrafficScope.parse("HOTSPOT"), "대소문자 구분 — 서버는 raw 그대로 비교한다")
+    }
+
+    /// **불일치 안내가 3구간에서도 동작한다** — 규칙은 구간 수와 무관해야 한다.
+    func test_불일치_안내가_핫스팟에도_동작한다() {
+        XCTAssertNil(TrafficScope.mismatchNote(requested: .hotspot, used: .hotspot))
+        let note = TrafficScope.mismatchNote(requested: .hotspot, used: .external) ?? ""
+        XCTAssertFalse(note.isEmpty, "핫스팟을 골랐는데 서버가 외부로 셌으면 말해야 한다")
+        XCTAssertTrue(note.contains("핫스팟") && note.contains("외부"),
+                      "안내에 두 구간 이름이 모두 있어야 한다 — 실제: \(note)")
     }
 
     // MARK: - 5. DeviceTraffic — scope 전달
