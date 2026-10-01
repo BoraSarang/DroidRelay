@@ -814,9 +814,10 @@ internal object RangeParser {
 internal const val BUFFER_SIZE = 64 * 1024
 internal const val SERVE_BUFFER_SIZE = 256 * 1024
 
-private fun fmt(n: Long): String = when {
+/** 전송량 표기 — 단위 경계 1024/1024²/1024³ (MB 분기가 GB 나눗셈을 쓰면 250MB가 "0.2MB"로 찍힌다) */
+internal fun fmt(n: Long): String = when {
     n < 1_048_576 -> "${n / 1024}KB"
-    n < 1_073_741_824 -> String.format("%.1fMB", n / 1_073_741_824.0)
+    n < 1_073_741_824 -> String.format("%.1fMB", n / 1_048_576.0)
     else -> String.format("%.2fGB", n / 1_073_741_824.0)
 }
 
