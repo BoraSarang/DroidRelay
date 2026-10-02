@@ -1,7 +1,59 @@
 # Changelog
 
-## [v0.50.0] — 보관함 다운로드 속도 진단 + Serve 로그 단위 버그
+## [Unreleased] — 크래시 수정 · 맥 설정 창 반응 (T-1088, T-1089)
 
+> Android 테스트 348건 중 347 통과 (신규 6건 0 실패 · `CronParserPerfTest` 1건은 사전 존재 실패)
+> macOS 테스트 **302 → 324** 건 0 실패 (신규 22)
+> error_code: 신규 없음 · perf: 없음 · cache: 없음
+
+### Fixed [android] — `BootReceiver` 이중 `finish()` 크래시 (T-1088)
+
+실측 크래시 1건 (2026-09-30 00:11:33):
+```
+FATAL EXCEPTION: queued-work-looper
+java.lang.IllegalStateException: Broadcast already finished
+    at BroadcastReceiver$PendingResult.sendFinished(BroadcastReceiver.java:313)
+```
+
+`goAsync()` 의 `PendingResult` 는 한 번만 `finish()` 가능하다. `finally` 와
+`job.invokeOnCompletion` **둘 다** 실행되어 중복 호출됐다. 후자는 "백업"으로 붙었으나
+**백업이 아니라 중복**이었다 — `invokeOnCompletion` 은 `finally` **이후** 발화한다.
+
+`runCatching` 으로 감싸도 잡히지 않는다. 예외는 감싼 블록이 아니라
+`queued-work-looper` 스레드에서 나중에 asynchronously 터지기 때문이다.
+
+→ `SingleFinish`(신규) 가 `compareAndSet` 으로 종료 1회를 보장.
+종료 지점을 몇 개 더 추가해도(타임아웃·취소) 중복이 되지 않는다.
+
+**검증** — 버그 재현: 원래 동작으로 되돌리면 6건 중 **5건 실패**.
+APK 디스어셈블로 `invokeOnCompletion` 0건, 모든 종료 경로가 `SingleFinish.finish()` 경유 확인.
+
+### Fixed [macos] — 설정 창 "다시 찾기" 무반응 (T-1089)
+
+사용자 보고: **"설정 → 다시 찾기 했을때 찾았을때의 반응이 없네. 설정에서 주소 채워줘야 하고
+찾았습니다 또는 실패 했습니다. 등이 있어야 하는데"**
+
+`--diagnose` 실측으로 **탐색은 40ms 에 정상 성공**. 결함은 탐색이 아니라 **결과를 말하지 않은 것**이었다.
+① 상태 표시가 **팝오버에만** 있고(M-22) 설정 창은 별도 `NSWindow`(M-18)이라 공유하지 않음
+② 주소 `@State` 가 `onAppear` 에서만 채워져 `connect()` 후에도 갱신되지 않음
+
+→ `SettingsDiscovery`(신규 Core) · `DiscoveryStatusLine` 뷰 · 성공 시 주소 자동 채움 ·
+탐색 중 버튼 비활성. 문구는 `DiscoveryBadge` 를 **재사용**(복사본 두 벌 금지 — M-27 교훈).
+
+**실측 (AX 덤프, 외부 프로세스)**
+| 상태 | 화면 |
+|---|---|
+| 서버 있음 | `10.38.120.211:3000 · v0.50.0 · 게이트웨이` + 주소칸 `10.38.120.211:3000` |
+| 서버 중단 | `연결 실패 — 같은 공유기의 폰인지, 주소가 맞는지 확인` + `다시 찾기` 재활성 |
+| 뷰 높이 | 4상태 모두 13.0pt 한 줄 · 필요폭 최대 294pt / 가용 420pt |
+
+**진단이 내 진단을 잡았다** — 첫 판은 창 안에서 AX 트리를 훑어 **"화면에 없습니다 ✗"** 라고
+보고하려 했다. `Tools/DumpAX.swift` 주석이 답을 말해 주었다:
+**자기 자신을 원격 AX 로 질의하면 항상 0개가 나온다(실측)**.
+0개는 *못 찾은 것*이지 *없다*는 뜻이 아니다 — M-26 교훈 "과소평가는 조용히 못-found 한다" 의 재현.
+→ 창을 띄워둔 채 **외부** 프로세스로 덤프해 해결.
+
+## [v0.50.0] — 보관함 다운로드 속도 진단 + Serve 로그 단위 버그
 > T-1086 (코드 수정) · T-1087 (진단) · Android 테스트 342건 중 341 통과 0 신규 실패
 > 실측: 12.78 MB/s → **65.1 MB/s** (5GHz/80MHz 전환)
 

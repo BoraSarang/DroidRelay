@@ -126,6 +126,56 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     }
 }
 
+/// **설정 창의 탐색 상태 한 줄** (T-1089).
+///
+/// ## 왜 별도 뷰인가
+///
+/// "이 문구가 **화면에 실제로 그려지는가**" 를 검증하려면
+/// **화면이 쓰는 그 뷰**를 그대로 `NSHostingView` 에 넣어 재야 한다.
+/// (M-26 교훈 — 별도로 만든 복사본을 재면 **다른 것을 재게 된다**)
+///
+/// `--discovery-check` 가 이 뷰를 그대로 재므로,
+/// **진단과 화면이 다른 말을 하는 일이 구조적으로 불가능**하다.
+struct DiscoveryStatusLine: View {
+    let state: SettingsDiscovery.State
+    let text: String
+
+    private var color: Color {
+        switch SettingsDiscovery.Tone(state) {
+        case .bad: return .orange
+        case .ok: return .primary
+        case .working: return .secondary
+        case .neutral: return .secondary
+        }
+    }
+
+    /// **기호가 상태를 먼저 말한다** — 글자를 다 읽기 전에도
+    /// "찾고 있다 / 찾았다 / 실패했다" 가 보이게 한다.
+    private var icon: String {
+        switch state {
+        case .idle: return "circle"
+        case .searching: return "magnifyingglass"
+        case .found: return "checkmark.circle.fill"
+        case .failed: return "exclamationmark.circle.fill"
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Image(systemName: icon)
+                .font(.system(size: 9))
+                .foregroundStyle(color)
+            Text(text)
+                .font(.system(size: 10.5))
+                .foregroundStyle(color)
+                // **한 곳만 양보한다** — 값이 먼저 사라져서는 안 된다 (M-26).
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Spacer(minLength: 0)
+        }
+    }
+}
+
 /// **설정 창 내용** — 주소 · 폴링 주기 · 속도 표시 · 자동 실행.
 struct SettingsView: View {
     @Bindable var model: AppModel
@@ -160,24 +210,62 @@ struct SettingsView: View {
 
     // MARK: - 서버
 
+    /// **연결 영역** — 상태 한 줄 · 주소 · "다시 찾기".
+    ///
+    /// ## 왜 상태 한 줄이 이 자리에 있나 (T-1089)
+    ///
+    /// 사용자 보고가 그대로였다:
+    /// > "설정 → 다시 찾기 했을때 찾았을때의 반응이 없네.
+    /// > 설정에서 주소 채워줘야 하고 찾았습니다 또는 실패 했습니다. 등이 있어야 하는데"
+    ///
+    /// `--diagnose` 실측으로 **탐색은 40ms 에 정상 성공**한다.
+    /// 즉 문제가 탐색이 아니라 **결과를 말하지 않은 것**이었다.
+    ///
+    /// 상태 표시는 **팝오버에만** 있었다(`DiscoveryBadge`, M-22).
+    /// 설정 창은 별도 `NSWindow`(M-18)이므로 그 줄을 공유하지 않는다.
+    /// → **여기에도 같은 줄을 둔다.** 문구 구성은 Core 를 재사용한다
+    /// (복사본을 두 벌 쓰면 한쪽만 고쳐지고 화면과 진단이 다른 말을 한다 — M-27).
     private var connection: some View {
         VStack(alignment: .leading, spacing: 10) {
             header("DroidRelay 연결")
             Text("자동으로 찾지 못하면 주소를 직접 입력하세요.")
                 .font(.system(size: 11.5)).foregroundStyle(.secondary)
+
+            // ── 상태 한 줄 ──
+            // **탐색 결과가 여기서 말해진다.** 없으면 사용자는
+            // "버튼을 눌렀다" 와 "아무 일도 없었다" 를 구분할 수 없다.
+            DiscoveryStatusLine(state: model.discoveryState,
+                                text: model.settingsStatusLine)
+
             HStack {
                 TextField("10.0.0.5:3000", text: $address)
                     .textFieldStyle(.roundedBorder)
                 Button("연결") { Task { await model.useManualAddress(address) } }
-                    .disabled(address.isEmpty)
+                    .disabled(address.isEmpty || !canConnect)
             }
             HStack {
                 Text("자동 검색으로 다시 시도").font(.system(size: 12))
                 Spacer()
                 Button("다시 찾기") { Task { await model.connect() } }
+                    // **탐색 중에 또 누르면 두 번 돈다.** 막는다.
+                    .disabled(!canConnect)
             }
         }
+        // **탐색 결과가 도착하면 주소를 채운다** — 성공했을 때만.
+        //
+        // 실패하면 `discoveredAddress` 가 `nil` 이므로 **사용자가 직접 친 값이 그대로 남는다.**
+        // 지우면 "자동으로 안 붙어서 내가 이 주소로 시도해 보려던" 이유를 잃는다.
+        .onChange(of: model.discoveryState) { _, _ in
+            address = SettingsDiscovery.addressField(current: address,
+                                                     found: model.discoveredAddress)
+        }
     }
+
+    // MARK: - 상태 표시 조각
+
+    /// **탐색 중에는 연결 버튼도 막는다** — 재탐색과 수동 연결이 겹치면
+    /// 어느 쪽 결과가 화면에 남는지 알 수 없다.
+    private var canConnect: Bool { model.discoveryState.isButtonEnabled }
 
     // MARK: - 폴링 주기
 

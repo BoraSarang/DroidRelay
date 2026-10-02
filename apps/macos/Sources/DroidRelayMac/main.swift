@@ -86,6 +86,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { await Diagnostics.settingsCheck() }
             return
         }
+        // **설정 창이 "다시 찾기" 결과를 말하는가** — 실제로 화면에 있는지로 판정한다. (T-1089)
+        //
+        // ## 왜 전용 모드인가
+        //
+        // 사용자 보고: "설정 → 다시 찾기 했을때 찾았을때의 반응이 없네".
+        // `--diagnose` 는 StatusItem 을 안 만들고, `--settings-check` 는 **창 위치만** 본다.
+        // **셋 다 "결과가 화면에 있는지" 를 검증하지 못한다.**
+        //
+        // → **실제 창을 띄우고, 그 안의 AX 트리에서 문구를 찾는다.**
+        // "코드에 `Text` 가 있다" 와 "화면에 보인다" 는 다른 말이다 (M-21 교훈).
+        if CommandLine.arguments.contains("--discovery-check") {
+            Task { await Diagnostics.discoveryCheck() }
+            return
+        }
         // **속도 표시가 두 줄로 깨지지 않는지** — 높이로 판정한다.
         //
         // ## 왜 전용 모드인가
@@ -580,6 +594,103 @@ enum Diagnostics {
 
     private static func fmt(_ r: CGRect) -> String {
         "(\(Int(r.minX)), \(Int(r.minY)) \(Int(r.width))×\(Int(r.height)))"
+    }
+
+    @MainActor
+    /// **설정 창 "다시 찾기" 반응 진단** (T-1089).
+    ///
+    /// ## 왜 이렇게 검증하나
+    ///
+    /// 사용자 보고는 "반응이 없다" 였다. `--diagnose` 실측으로는 **탐색이 40ms 에 성공**한다.
+    /// 즉 결함은 탐색이 아니라 **결과를 말하지 않은 것**이었고,
+    /// 그래서 이건 **탐색이 아니라 표시**의 문제다.
+    ///
+    /// → 코드의 계산값만으로는 부족하다. **실제 창을 띄우고 그 안의 문구를 찾는다.**
+    /// (M-21: "계산이 맞다 ≠ 창이 그곳에 간다" / M-26: "코드에 Text 가 있다 ≠ 화면에 보인다")
+    static func discoveryCheck() async {
+        print("=== DroidRelay 설정 창 발견 상태 진단 (T-1089) ===")
+
+        // ── 1. 순수 함수 — 네 가지 상태의 문구 ──
+        // **화면과 같은 함수**로 찍는다. 따로 적으면 화면과 진단이 다른 말을 한다 (M-22 교훈).
+        print("\n[1] 상태별 문구 (SettingsDiscovery.status — 화면과 동일)")
+        let cases: [(SettingsDiscovery.State, String?, String?)] = [
+            (.idle, nil, nil),
+            (.searching, nil, nil),
+            (.found(.gateway), "10.38.120.211:3000", "0.50.0"),
+            (.found(.subnetScan), "10.38.120.211:3000", "0.50.0"),
+            (.failed, nil, nil),
+        ]
+        for (st, addr, ver) in cases {
+            let tone = SettingsDiscovery.Tone(st)
+            print("  \(String(describing: st).padding(toLength: 22, withPad: " ", startingAt: 0)) → \(SettingsDiscovery.status(st, address: addr, version: ver))   [tone=\(tone)]")
+        }
+
+        // ── 2. 주소 칸 — 실패가 사용자의 입력을 지우지 않는가 ──
+        print("\n[2] 주소 칸 (SettingsDiscovery.addressField)")
+        let 직접 = "192.168.0.77:8080"
+        print("  성공 시 덮어씀 : \"\(SettingsDiscovery.addressField(current: "", found: "10.38.120.211:3000"))\"")
+        print("  실패 시 보존   : \"\(SettingsDiscovery.addressField(current: 직접, found: nil))\"  → \(SettingsDiscovery.addressField(current: 직접, found: nil) == 직접 ? "보존 ✓" : "★ 지워졌다 ✗")")
+        print("  탐색 중 보존   : \"\(SettingsDiscovery.addressField(current: "10.0.0.", found: nil))\"")
+        print("  버튼 활성(탐색중): \(SettingsDiscovery.State.searching.isButtonEnabled ? "활성 ✗ 중복 실행 가능" : "비활성 ✓")")
+
+        // ── 3. ★ 실제 뷰를 그려서 상태 줄이 **높이를 차지하는지** 본다 ──
+        //
+        // ## 왜 AX 조회가 아니라 높이인가 (M-21 / M-26 교훈)
+        //
+        // 처음엔 창을 띄우고 AX 트리를 훑어 문구를 찾으려 했다. **문자가 0개** 나왔다.
+        // `--ui-dump` 주석이 이미 답을 말해 준다 —
+        // "**앱 스스로 덤프하면 자기 자신을 원격 AX 로 질의할 수 없다**".
+        //
+        // **0개 = 못 찾은 것**이지 "화면에 없다" 는 뜻이 아니다.
+        // 그걸 그대로 ✗ 로 보고하면 **과소평가**다 — M-26 이 정확히 그 함정에 빠졌다
+        // ("**과소평가는 조용히 못-found 한다**").
+        //
+        // → **화면이 쓰는 그 뷰(`DiscoveryStatusLine`)를** `NSHostingView` 에 넣어 높이를 잰다.
+        print("\n[3] 실제 DiscoveryStatusLine 뷰 — 상태 줄이 실제로 그려지는가")
+        print("  ※ 창 안 AX 조회는 0개 — 앱이 자기 AX 를 못 질의한다.")
+        print("    '안 보임' 과 '못 찾음' 을 구분 않고 ✗ 로 보고하면 과소평가다 (M-26).")
+
+        var 측정: [String: (h: CGFloat, need: CGFloat)] = [:]
+        for (label, st) in [("idle", SettingsDiscovery.State.idle),
+                            ("searching", .searching),
+                            ("found", .found(.gateway)),
+                            ("failed", .failed)] {
+            let addr = st.isFoundCase ? "10.38.120.211:3000" : nil
+            let line = DiscoveryStatusLine(
+                state: st,
+                text: SettingsDiscovery.status(st, address: addr,
+                                               version: st.isFoundCase ? "0.50.0" : nil))
+            // (가) 폭을 준다 — 실제 화면(460)과 같은 조건이어야 접히는 것도 재현된다.
+            let 제한 = NSHostingView(rootView: line.frame(width: 420, alignment: .leading))
+            // (나) 폭을 주지 않는다 — SwiftUI 가 스스로 말하는 필요폭.
+            let 자유 = NSHostingView(rootView: line)
+            제한.layoutSubtreeIfNeeded()
+            자유.layoutSubtreeIfNeeded()
+            측정[label] = (제한.fittingSize.height, 자유.fittingSize.width)
+        }
+
+        print("  상태별 실제 높이 (420pt 폭에 넣었을 때):")
+        var 기준높이: CGFloat = 0
+        for label in ["idle", "searching", "found", "failed"] {
+            let (h, need) = 측정[label] ?? (0, 0)
+            if label == "idle" { 기준높이 = h }
+            let 한줄 = h < 20
+            print("    \(label.padding(toLength: 10, withPad: " ", startingAt: 0)) 높이 \(String(format: "%.1f", h))pt · 필요폭 \(String(format: "%.0f", need))pt · \(한줄 ? "한 줄 ✓" : "★ 두 줄로 접힌다")")
+        }
+        // **높이가 0 이면 그 줄이 자리를 차지하지 않는다** — 화면에 없는 것과 같다.
+        let 모두살아있음 = ["idle", "searching", "found", "failed"]
+            .allSatisfy { (측정[$0]?.h ?? 0) > 0 }
+        print("  → 모든 상태에서 실제로 높이를 차지함: \(모두살아있음 ? "yes ✓" : "NO ✗ — 화면에 그려지지 않는다")")
+        print("    (기준 높이 \(String(format: "%.1f", 기준높이))pt — 10.5pt 한 줄이면 12~14pt 이다)")
+
+        // ── 4. 실패 문구 ──
+        let failLine = SettingsDiscovery.status(.failed, address: nil, version: nil)
+        print("\n[4] 실패 문구")
+        print("  \"\(failLine)\"")
+        print("  → \"실패\" 가 화면에 나오므로 원인을 안다: \(failLine.contains("실패") ? "yes ✓" : "NO ✗")")
+
+        print("\n=== 끝 ===")
+        NSApp.terminate(nil)
     }
 
     /// SSE 생존 확인 — 메뉴바 앱의 실시간 갱신이 실제로 통하는지 본다.

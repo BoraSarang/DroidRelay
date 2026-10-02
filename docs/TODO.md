@@ -614,8 +614,8 @@ T-001~T-008 전부 완료 (커밋 7574486).
 
 | T-번호 | 내용 | 상태 |
 |--------|------|------|
-| T-1088 | **`BootReceiver` 이중 `finish()` 크래시** — `goAsync()` 의 `PendingResult` 는 한 번만 `finish()` 가능하다. 37행 `finally` 과 41행 `job.invokeOnCompletion` **둘 다** 실행되어 `IllegalStateException: Broadcast already finished` → 프로세스 사망. 41행은 "백업"으로 붙었으나 `invokeOnCompletion` 은 `finally` 이후 발화하므로 **백업이 아니라 중복 호출**. 41행 삭제, `finally` 만 유지 | 🔄 |
-| T-1089 | **맥 설정 창 "다시 찾기" 무반응** — 탐색 자체는 **40ms 에 정상 성공**한다. 문제는 두 가지 코드 부재다: ① `SettingsWindow.swift` 에 `connectionLine`/`lastResult`/`phase` 참조 **0건** — 상태 표시가 **팝오버에만** 있고(M-22), 설정 창은 별도 `NSWindow`(M-18)이라 공유하지 않는다 ② 주소 `@State` 가 `onAppear` 에서만 채워져 `connect()` 가 `model.stored` 를 바꿔도 **칸이 갱신되지 않는다**. → `model.connectionLine` **재사용**(복사 금지) + 성공 시 주소 자동 채움 + 탐색 중 버튼 비활성 | 🔄 |
+| T-1088 | **`BootReceiver` 이중 `finish()` 크래시** — `goAsync()` 의 `PendingResult` 는 한 번만 `finish()` 가능하다. 37행 `finally` 과 41행 `job.invokeOnCompletion` **둘 다** 실행되어 `IllegalStateException: Broadcast already finished` → 프로세스 사망. 41행은 "백업"으로 붙었으나 `invokeOnCompletion` 은 `finally` 이후 발화하므로 **백업이 아니라 중복 호출**. `SingleFinish`(신규) 로 종료 1회 보장 · 6건 테스트 (★ 원래 동작으로 되돌리면 6건 중 **5건 실패**) | ✅ |
+| T-1089 | **맥 설정 창 "다시 찾기" 무반응** — 탐색 자체는 **40ms 에 정상 성공**한다. 문제는 두 가지 코드 부재다: ① `SettingsWindow.swift` 에 `connectionLine`/`lastResult`/`phase` 참조 **0건** — 상태 표시가 **팝오버에만** 있고(M-22), 설정 창은 별도 `NSWindow`(M-18)이라 공유하지 않는다 ② 주소 `@State` 가 `onAppear` 에서만 채워져 `connect()` 가 `model.stored` 를 바꿔도 **칸이 갱신되지 않는다**. → `SettingsDiscovery`(신규 Core) + `DiscoveryStatusLine` 뷰 + 성공 시 주소 자동 채움 + 탐색 중 버튼 비활성. 테스트 302→**324**(신규 22) 0 실패 | ✅ |
 | T-1090 | **안드로이드 "나 여기있소" UDP 발견 신호 부재** — announce/broadcast/mDNS 코드 **없음**. 발견은 전적으로 수동 스캔(게이트웨이 40ms / `/24` 0.11초). 핫스팟은 게이트웨이 하나로 끝나지만 **같은 공유기에서는 스캔에 걸린다**. → 서버 기동 중 주기 UDP 브로드캐스트 발신 + 앱 내 수동 "알리기" 버튼 · Mac `ServerDiscovery` **전략 0**(리스너 1개, 중복 등록 금지). **주기 발신이 안 되어도 기존 3단계 탐색은 그대로 동작 — 회귀 위험 0** | 🔄 |
 
 ### T-1088 부근 근거 — 추측이 아니라 실측
@@ -630,6 +630,33 @@ T-001~T-008 전부 완료 (커밋 7574486).
 | 안드로이드 announce | `grep -il "UDP\|Datagram\|Bonjour"` | **없음** |
 
 → **크래시는 09-30 1건이었고 앱은 현재 살아 있다.** 맥 탐색은 성공하는데 **결과를 말하지 않아서** 무반응으로 보인다.
+
+### T-1089 부근 근거 — 진단이 내 진단을 잡았다
+
+**`--discovery-check` 첫 판은 "화면에 없습니다 ✗" 를 말했다. 그 판정은 틀렸다.**
+
+처음엔 설정 창을 띄우고 **AX 트리를 훑어** 문구를 찾으려 했다. 결과는 **문자 0개**.
+그대로 "화면에 없다" 고 보고했다면 **사용자 보고를 재현한 것**이 되고 끝이었다.
+
+그런데 `Tools/DumpAX.swift` 의 주석이 이미 답을 말해 주고 있었다:
+> "**자기 자신을 원격 AX 로 질의하면 항상 0개가 나온다(실측).**
+> AX 는 '다른 프로세스에서 나를 본다'는 전제라 자기 자신에게는 아무것도 안 준다."
+
+→ **0개 = 못 찾은 것**이지 "화면에 없다" 는 뜻이 아니다.
+M-26 교훈 **"과소평가는 조용히 못-found 한다"** 의 정확한 재현이었다.
+
+**수정**: `--ui-settings` 로 창을 **띄워둔 채** `Tools/DumpAX.swift` 를 **외부에서** 실행.
+
+| 실측 (AX 덤프, 외부 프로세스) | 결과 |
+|---|---|
+| 서버 있는 상태 | `AXStaticText "10.38.120.211:3000 · v0.50.0 · 게이트웨이"` + `AXTextField "10.38.120.211:3000"` **← 주소 자동 채움** |
+| 서버 중단 상태 | `AXStaticText "연결 실패 — 같은 공유기의 폰인지, 주소가 맞는지 확인"` + 아이콘 `!` + `다시 찾기` **재활성** |
+| 뷰 높이 실측 (`NSHostingView`) | 4상태 모두 **13.0pt 한 줄** · 필요폭 최대 294pt vs 가용 420pt |
+
+**설계 판단 3가지**
+- **`DiscoveryBadge` 를 복사하지 않았다** — 문구 규칙을 두 벌 쓰면 한쪽만 고쳐지고 **화면과 진단이 다른 말을 한다** (M-27 교훈). 테스트 `test_문구는_팝오버와_동일하다` 가 4 전략 전부 고정한다.
+- **실패하면 사용자 입력을 지우지 않는다** — `addressField(current:found:)` 는 `found == nil` 이면 `current` 를 반환한다. 흔한 구현("탐색이 끝나면 결과로 덮어쓴다")은 실패 시 **사용자가 직접 친 주소**를 지워 "왜 안 되지?" 의 이유를 잃게 한다.
+- **진단이 화면과 같은 뷰를 쓴다** — `DiscoveryStatusLine` 을 별도로 만들어 진단과 화면이 **같은 것**을 재게 했다. 복사본을 재면 **다른 것을 재게 된다** (M-26).
 
 ### `.agent/` git 추적 해제 (rules/workflow.md §2 [HARD])
 

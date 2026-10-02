@@ -533,6 +533,42 @@ final class AppModel {
         }
     }
 
+    // MARK: - 설정 창용 (T-1089)
+
+    /// **설정 창이 말할 수 있는 상태** — `Phase` 를 Core 의 `State` 로 옮긴 것.
+    ///
+    /// ## 왜 Core 로 옮기나
+    ///
+    /// `Phase` 는 앱 안에 있고, 표시 규칙은 Core 에 있다.
+    /// 화면에서 `switch phase { … }` 로 직접 옮기면 **규칙이 두 벌**이 된다.
+    /// M-27 에서 실제로 그렇게 됐었다 — 테스트가 복사본을 돌리면서
+    /// 한쪽만 고쳐지고 **화면과 진단이 다른 말을 했다.**
+    /// → **옮기는 건 Core 의 `State` 가 한다.** 여기는 값만 넘긴다.
+    var discoveryState: SettingsDiscovery.State {
+        switch phase {
+        case .idle: return .idle
+        case .discovering: return .searching
+        case .connected(let s): return .found(s)
+        case .failed: return .failed
+        }
+    }
+
+    /// **설정 창 상태 한 줄** — `DiscoveryBadge` 와 **같은 문구**를 쓴다.
+    var settingsStatusLine: String {
+        SettingsDiscovery.status(discoveryState,
+                                 address: server?.displayAddress,
+                                 version: server?.version)
+    }
+
+    /// **탐색에 성공했을 때만** 주소 칸을 덮어쓸 값.
+    ///
+    /// 실패하면 `nil` 이다 → `SettingsDiscovery.addressField` 가 사용자의 입력을 지킨다.
+    /// (실패했을 때 지우면 **사용자가 왜 안 붙는지 아는 유일한 단서**가 사라진다)
+    var discoveredAddress: String? {
+        if case .connected = phase { return stored }
+        return nil
+    }
+
     /// **팝오버에 보여줄 연결 한 줄** (M-11).
     ///
     /// ## 왜 주소를 다닌 이유
