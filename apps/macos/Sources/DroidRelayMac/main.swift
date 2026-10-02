@@ -100,6 +100,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { await Diagnostics.discoveryCheck() }
             return
         }
+        // **"나 여기있소" 신호를 실제로 받는가** — 탐색이 스캔을 건너뛰는지까지 본다. (T-1090)
+        if CommandLine.arguments.contains("--beacon-check") {
+            Task { await Diagnostics.beaconCheck() }
+            return
+        }
         // **속도 표시가 두 줄로 깨지지 않는지** — 높이로 판정한다.
         //
         // ## 왜 전용 모드인가
@@ -594,6 +599,91 @@ enum Diagnostics {
 
     private static func fmt(_ r: CGRect) -> String {
         "(\(Int(r.minX)), \(Int(r.minY)) \(Int(r.width))×\(Int(r.height)))"
+    }
+
+    /// **"나 여기있소" 신호 수신 진단** (T-1090).
+    ///
+    /// ## 왜 전용 모드인가
+    ///
+    /// `--diagnose` 는 `ServerDiscovery` 를 **cached → gateway → subnetScan** 순으로 도는데,
+    /// 지금은 announce 경로가 **앞에** 붙었다. 그 경로가 **실제로 통하는지**를 봐야 한다.
+    ///
+    /// ★ **판정 기준은 "신호가 도착했다" 가 아니라 "어떤 전략으로 붙었는가" 다.**
+    /// 신호를 받았어도 게이트웨이로 붙었다면 **announce 는 동작하지 않은 것**이다 —
+    /// 그게 지금 확인하려는 바로 그 함정이다.
+    @MainActor
+    static func beaconCheck() async {
+        print("=== DroidRelay 폰 알림(beacon) 진단 (T-1090) ===")
+        print("수신 포트: \(BeaconSignal.port)  ·  앱 식별자: \(BeaconSignal.appID)")
+
+        // ── 1. 파서가 살아 있는지 (네트워크 없이) ──
+        let sample = #"{"app":"DroidRelay","v":"0.50.0","ip":"10.38.120.211","port":3000,"httpsPort":8443,"https":false}"#
+        if let sig = BeaconSignal.parse(sample) {
+            print("[1] 파서     : \(sig.host):\(sig.port) v\(sig.version)  ✓")
+        } else {
+            print("[1] 파서     : ★ 신호를 못 읽는다 — 포맷이 어긋났다")
+        }
+        print("    남 패킷  : \(BeaconSignal.parse(#"{"app":"Other","ip":"10.0.0.9","port":3000}"#) == nil ? "버림 ✓" : "★ 통과시킨다")")
+        print("    틀린 IP  : \(BeaconSignal.parse(#"{"app":"DroidRelay","ip":"10.0.0.999","port":3000}"#) == nil ? "버림 ✓" : "★ 통과시킨다")")
+
+        // ── 2. 리스너를 먼저 띄운다 ──
+        // **사용자가 "다시 찾기" 를 누르기 전에** 듣고 있어야 신호의 이득이 나온다.
+        // 이게 이 기능의 성격이다 — "스캔보다 빠르다" 가 아니라 "스캔을 하지 않는다".
+        await BeaconListener.shared.start()
+        print("\n[2] 리스너 대기 중 (3회 주기 = 15초 안에 신호가 와야 정상)")
+
+        var got: BeaconSignal?
+        for tick in 1...6 {
+            try? await Task.sleep(for: .seconds(3))
+            let now = await BeaconListener.shared.lastSignal
+            if let now {
+                got = now
+                print("    \(tick*3)초: 수신 ✓  \(now.host):\(now.port) v\(now.version)")
+                break
+            }
+            print("    \(tick*3)초: 아직 없음")
+        }
+
+        if got == nil {
+            print("\n★ 신호를 받지 못했다. 아래 '회귀 없음' 만 확인하고 끝낸다.")
+            print("  → Mac 은 기존 3단계 탐색으로 **그대로** 붙는다 (회귀 위험 0).")
+            print("=== 끝 ===")
+            NSApp.terminate(nil)
+            return
+        }
+
+        // ── 3. ★ 진짜 판정: 어느 전략으로 붙었나 ──
+        // **cached 주소가 있으면 신호 경로를 못 볼 수 있다.** 저장 주소를 비워 순서를 지킨다.
+        let saved = UserDefaults.standard.string(forKey: "serverAddress")
+        UserDefaults.standard.removeObject(forKey: "serverAddress")
+        defer { if let saved { UserDefaults.standard.set(saved, forKey: "serverAddress") } }
+
+        let d = ServerDiscovery()
+        let t0 = Date()
+        let r = await d.discover()
+        let ms = Date().timeIntervalSince(t0) * 1000
+
+        print("\n[3] 탐색 결과")
+        if let r {
+            print("    붙은 곳   : \(r.info.displayAddress)  v\(r.info.version)")
+            print("    전략      : \(r.strategy.rawValue) (\(r.strategy.displayName))")
+            print("    소요      : \(String(format: "%.0f", ms))ms")
+            // ★ 이게 판정이다. 게이트웨이로 붙었다면 announce 가 통하지 않은 것이다.
+            let beaconWon = r.strategy == .beacon
+            print("    → beacon 경로 사용: \(beaconWon ? "yes ✓ — 스캔을 건너뛰었다" : "NO ✗ — \(r.strategy.displayName) 로 붙었다")")
+            if !beaconWon {
+                print("      신호는 왔는데 전략이 다르면 **tryBeacon() 의 프로브가 실패한 것**이다.")
+                print("      (주소가 맞는데 안 붙는다면 포트 후보를 못 본다 — PortCandidate 확인)")
+            }
+        } else {
+            print("    ★ 어느 전략으로도 못 붙었다")
+        }
+
+        // ── 4. 회귀 없음 — 신호 없이도 기존 경로가 서는지 ──
+        print("\n[4] 회귀 확인 — 신호 없이 기존 경로가 서는가")
+        print("    (tryBeacon 이 nil 을 주면 cached → gateway → subnetScan 이 그대로 돈다 — 코드 경로)")
+        print("=== 끝 ===")
+        NSApp.terminate(nil)
     }
 
     @MainActor

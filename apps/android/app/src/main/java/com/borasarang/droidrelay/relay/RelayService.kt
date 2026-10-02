@@ -10,6 +10,7 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import androidx.core.app.ServiceCompat
+import com.borasarang.droidrelay.BuildConfig
 import com.borasarang.droidrelay.R
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -43,6 +44,14 @@ class RelayService : Service() {
     private var schedulerManager: SchedulerManager? = null
     private var speedScheduleManager: SpeedScheduleManager? = null
     private var isForeground = false
+
+    /**
+     * **"나 여기있소" 발신기** (T-1090) — Mac 이 이 폰을 즉시 찾도록 알린다.
+     *
+     * **부가 기능이라 서버를 죽일 권한이 없다** — 내부에서 모든 예외를 격리한다.
+     * 발신이 안 되어도 기존 3단계 탐색은 그대로 동작한다(회귀 위험 0).
+     */
+    @Volatile private var announcer: DiscoveryAnnouncer? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -222,6 +231,11 @@ class RelayService : Service() {
                         updateRunningNotification(s.port)
                     }
                 }
+                // ── "나 여기있소" 발신 동기화 (T-1090) ──
+                // **기동·재기동·포트 변경을 모두 한 곳에서 따라간다.**
+                // 서버가 실제로 떴는지(`s.running`)를 보고 결정한다 —
+                // 설정값만 바뀌었다고 발신하면 **없는 서버를 알리는** 셈이 된다.
+                syncAnnouncer(s)
             }
         }
 
@@ -413,6 +427,42 @@ class RelayService : Service() {
         }
     }
 
+    /**
+     * **"나 여기있소" 발신을 서버 상태에 맞춰 켜고 끈다** (T-1090).
+     *
+     * ## 왜 설정 변경마다 부르는가
+     *
+     * 서버는 여러 경로로 켜지고 꺼진다(초기 기동·HTTPS 재기동·watchdog 복구·사용자 끄기).
+     * 각 지점에 발신을 심으면 **빠진 경로가 생긴다** — 그 경로에서만 신호가 안 나간다.
+     * → **설정 흐름의 한 곳**에서 상태를 보고 판단한다.
+     *
+     * ## 진짜 기준은 `server != null` 이다
+     *
+     * 설정값만으로는 알 수 없다. **서버가 실제로 떠야** "나 여기있소" 가 사실이다.
+     * 설정은 켜졌는데 기동에 실패한 경우 **없는 서버를 알리면 안 된다.**
+     *
+     * @param s 현재 설정.
+     */
+    private fun syncAnnouncer(s: AppSettings) {
+        val up = server != null
+        if (!up) {
+            // **서버가 없으면 알릴 이유가 없다** — 그리고 남아 있으면 죽은 주소를 알린다.
+            announcer?.stop()
+            announcer = null
+            return
+        }
+        val a = announcer ?: DiscoveryAnnouncer(scope, BuildConfig.VERSION_NAME).also {
+            announcer = it
+            it.start(s.port, s.httpsPort, s.httpsEnabled)
+            // **시작과 동시에 1회 발신** — 첫 신호를 5초 기다리게 하면
+            // 사용자가 "눌렀는데 반응 없네" 를 한 번 더 겪는다.
+            runCatching { it.announceOnce(s.port, s.httpsPort, s.httpsEnabled) }
+        }
+        // **이미 돌고 있으면 여기서 끝** — 중복 등록 방지(두 루프면 트래픽 2배).
+        if (a.isRunning()) return
+        a.start(s.port, s.httpsPort, s.httpsEnabled)
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         // 재시작/재실행 시 FGS 허용 타이밍이면 알림 복구 (이미 포그라운드면 no-op)
         startInForeground()
@@ -423,8 +473,36 @@ class RelayService : Service() {
                 DeviceGate.resolve(ip, allowed = true)
             }
             ACTION_DENY -> DeviceGate.resolve(ip(intent), allowed = false)
+            // "나 여기있소" 1회 발신 — 그래프가 조용할 때 사용자가 즉시 알린다 (T-1090)
+            ACTION_ANNOUNCE -> announceNow()
         }
         return START_STICKY
+    }
+
+    /**
+     * **"나 여기있소" 를 지금 한 번 알린다** (T-1090).
+     *
+     * ## 왜 주기 발신만으로 부족한가
+     *
+     * 주기 발신은 **5초마다** 하므로 보통은 충분하다.
+     * 그런데 **그래프가 조용할 때**(속도 0) "맥이 지금 폰을 찾는지" 확인하고 싶으면
+     * **5초를 기다려야** 한다. 그 5초가 "아예 반응 없나" 로 느껴진다.
+     *
+     * → **누르면 즉시 1회** 보내게 한다. 기다림을 없앤다.
+     *
+     * ## 발신기가 없을 때 — 왜 조용히 끝나나
+     *
+     * 서버가 꺼져 있으면 "나 여기있소" 라고 말할 이유가 없다.
+     * **오류를 만들지 않는다** — "지금은 없다" 와 "고장" 은 다르다 (M-22 교훈).
+     */
+    private fun announceNow() {
+        val a = announcer
+        if (a == null) {
+            DebugLogger.i(TAG, "[FEATURE] 알리기 — 서버가 꺼져 있어 발신하지 않음")
+            return
+        }
+        val s = SettingsRepository.get(applicationContext).firstBlocking()
+        scope.launch { a.announceOnce(s.port, s.httpsPort, s.httpsEnabled) }
     }
 
     private fun ip(intent: Intent?) = intent?.getStringExtra(EXTRA_IP) ?: ""
@@ -441,6 +519,9 @@ class RelayService : Service() {
         // 무거운 정지·영구 저장 전부 백그라운드로 — onDestroy가 메인스레드에서
         // 시스템 FGS 정지 타임아웃(약 10초)을 넘기면 ForegroundServiceDidNotStopInTimeException 크래시
         val serverToStop = server.also { server = null }
+        // **발신도 함께 멈춘다** — 서버가 없는데 "나 여기있소" 를 broadcasting 하면
+        // Mac 이 **죽은 주소로 붙으려 한다.** 남겨두면 안 된다.
+        val announcerToStop = announcer.also { announcer = null }
         val torrentToStop = torrentEngine.also { torrentEngine = null }
         val networkToUnregister = networkMonitor.also { networkMonitor = null }
         val tunnelToStop = tunnelManager.also { tunnelManager = null }
@@ -455,6 +536,8 @@ class RelayService : Service() {
         kotlin.concurrent.thread(isDaemon = true, name = "RelayService-stop") {
             runCatching { serverToStop?.stop() }
                 .onFailure { DebugLogger.e(TAG, "서버 백그라운드 정지 실패(무시)", it) }
+            runCatching { announcerToStop?.stop() }
+                .onFailure { DebugLogger.e(TAG, "발신 중지 실패(무시)", it) }
             runCatching { torrentToStop?.stop() }
                 .onFailure { DebugLogger.e(TAG, "토렌트 백그라운드 정지 실패(무시)", it) }
             runCatching { networkToUnregister?.unregister() }
@@ -756,6 +839,15 @@ class RelayService : Service() {
         private const val WATCHDOG_FAIL_STREAK = 3
         const val ACTION_ALLOW = "com.borasarang.droidrelay.ALLOW"
         const val ACTION_DENY = "com.borasarang.droidrelay.DENY"
+
+        /**
+         * **"나 여기있소" 1회 발신** (T-1090) — 설정의 "알리기" 버튼이 이긴다.
+         *
+         * **주기 발신과 같은 경로(`announceOnce`)를 쓴다** — 두 벌 만들면
+         * 나중에 하나만 고쳐져 **화면의 "알렸다" 와 실제로 나간 신호가 달라진다.**
+         */
+        const val ACTION_ANNOUNCE = DiscoveryBeacon.ACTION_ANNOUNCE
+
         const val EXTRA_IP = "ip"
 
         fun start(context: Context) {

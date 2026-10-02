@@ -88,6 +88,7 @@ public enum Subnet {
 ///
 /// | 전략 | 실측 | 성립 조건 |
 /// |---|---|---|
+/// | `beacon` | 즉시 | 폰이 **주기적으로 자기를 알린다** (T-1090) |
 /// | `cached` | 0ms | 이전에 찾은 주소 |
 /// | `gateway` | 35ms | **폰이 핫스팟** — 게이트웨이가 곧 폰 |
 /// | `subnetScan` | 0.11초 | 폰과 Mac 이 같은 공유기 아래 |
@@ -95,7 +96,16 @@ public enum Subnet {
 ///
 /// 게이트웨이만 해서는 부족하다. 폰이 공유기를 단 말단으로 쓰면(phone=10.38.120.147,
 /// gateway=10.38.120.1) 게이트웨이 조회에 폰이 없다. 그래서 계층이 필요하다.
+///
+/// ## `beacon` 이 가장 앞에 온 이유 — T-1090
+///
+/// 폰이 **주기적으로 자기를 알린다**면 Mac 은 **아무것도 하지 않고** 주소만 받으면 된다.
+/// **254개를 두드릴 이유가 없어진다.**
+///
+/// ★ **이 전략이 실패해도 나머지가 그대로 돈다** — 안전망이 아니라 **가속 장치**다.
+/// 그래서 **먼저** 시도한다. 가장 빠른 경로를 굳이 뒤로 미룰 이유가 없다.
 public enum DiscoveryStrategy: String, Sendable, CaseIterable {
+    case beacon
     case cached
     case gateway
     case subnetScan
@@ -103,6 +113,7 @@ public enum DiscoveryStrategy: String, Sendable, CaseIterable {
 
     public var displayName: String {
         switch self {
+        case .beacon: return "폰 알림"
         case .cached: return "저장된 주소"
         case .gateway: return "게이트웨이"
         case .subnetScan: return "네트워크 검색"

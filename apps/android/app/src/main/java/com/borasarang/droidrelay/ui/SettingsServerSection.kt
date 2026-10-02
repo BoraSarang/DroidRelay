@@ -44,6 +44,7 @@ import com.borasarang.droidrelay.relay.CronParser
 import com.borasarang.droidrelay.relay.DebugLogger
 import com.borasarang.droidrelay.relay.DebridProvider
 import com.borasarang.droidrelay.relay.RelayApp
+import com.borasarang.droidrelay.relay.RelayService
 import com.borasarang.droidrelay.relay.SettingsConstraints
 import com.borasarang.droidrelay.relay.SettingsRepository
 import com.borasarang.droidrelay.relay.ThemeMode
@@ -188,6 +189,45 @@ internal fun ServerSection(
         // Line 3: 자동 시작 분리 (v0.36)
         SwitchRow("재부팅 시 서버 자동 시작", s.bootAutoStart) { v -> scope.launch { repo.setBootAutoStart(v) } }
         SwitchRow("앱 실행 시 서버 자동 시작", s.launchAutoStart) { v -> scope.launch { repo.setLaunchAutoStart(v) } }
+
+        // Line 3-1: "나 여기있소" — Mac 이 이 폰을 찾도록 알린다 (T-1090)
+        //
+        // ## 왜 주기 발신만으로 버튼을 또 만드나
+        //
+        // 주기 발신은 **5초마다** 하므로 보통은 충분하다.
+        // 그런데 **그래프가 조용할 때**(속도 0) "맥이 지금 폰을 찾는지" 확인하고 싶으면
+        // **5초를 기다려야** 한다. 그 5초가 "아예 반응 없나" 로 느껴진다.
+        //
+        // → **누르면 즉시 1회.** 기다림을 없앤다.
+        //
+        // ## 왜 서버가 꺼졌을 때 버튼을 비활성으로 하나
+        //
+        // 꺼져 있으면 "나 여기있소" 라고 말할 이유가 없다.
+        // **누르게 두고 조용히 아무 일도 안 하는 것보다** "지금 안 된다" 를 말하는 게 낫다.
+        Spacer(Modifier.height(12.dp))
+        OutlinedButton(
+            enabled = serverState.running,
+            onClick = {
+                // **주기 발신과 같은 경로를 쓴다**(`RelayService.ACTION_ANNOUNCE` →
+                // `announceOnce`) — 두 벌 만들면 나중에 하나만 고쳐져
+                // **화면의 "알렸다" 와 실제로 나간 신호가 달라진다.**
+                runCatching {
+                    ctx.startService(
+                        Intent(ctx, RelayService::class.java)
+                            .setAction(RelayService.ACTION_ANNOUNCE),
+                    )
+                }.onFailure { DebugLogger.w("Settings", "알리기 실패(무시): ${it.message}") }
+            },
+        ) { Text("나 여기있소 알리기") }
+        Text(
+            if (serverState.running) {
+                "Mac 이 이 폰을 바로 찾을 수 있도록 주소 알림을 보냅니다. 서버가 켜져 있는 동안 5초마다 자동으로 보냅니다."
+            } else {
+                "서버가 꺼져 있어 지금은 보낼 수 없습니다."
+            },
+            color = if (serverState.running) cs.onSurfaceVariant else cs.error,
+            style = MaterialTheme.typography.labelSmall,
+        )
 
         // Line 4: 배터리 최적화 예외 (백그라운드 안정성)
         val pm = ctx.getSystemService(Context.POWER_SERVICE) as PowerManager
