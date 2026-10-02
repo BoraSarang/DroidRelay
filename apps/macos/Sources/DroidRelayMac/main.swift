@@ -98,6 +98,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { await Diagnostics.settingsMenuCheck() }
             return
         }
+        // **설정 창이 "다시 찾기" 결과를 말하는가** — 실제로 화면에 있는지로 판정한다. (T-1089)
+        //
+        // ## 왜 전용 모드인가
+        //
+        // 사용자 보고: "설정 → 다시 찾기 했을때 찾았을때의 반응이 없네".
+        // `--diagnose` 는 StatusItem 을 안 만들고, `--settings-check` 는 **창 위치만** 본다.
+        // **셋 다 "결과가 화면에 있는지" 를 검증하지 못한다.**
+        //
+        // → **실제 창을 띄우고, 그 안의 AX 트리에서 문구를 찾는다.**
+        // "코드에 `Text` 가 있다" 와 "화면에 보인다" 는 다른 말이다 (M-21 교훈).
+        if CommandLine.arguments.contains("--discovery-check") {
+            Task { await Diagnostics.discoveryCheck() }
+            return
+        }
         // **속도 표시가 두 줄로 깨지지 않는지** — 높이로 판정한다.
         //
         // ## 왜 전용 모드인가
