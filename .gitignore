@@ -27,3 +27,6 @@ tls.properties
 # 스크린샷 — 개발 용도 (저장소 제외)
 docs/screenshots/
 dist/
+
+# 에이전트 세션 로그 — 로컬 전용 (rules/workflow.md §2 [HARD])
+.agent/

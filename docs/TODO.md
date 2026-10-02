@@ -608,6 +608,34 @@ T-001~T-008 전부 완료 (커밋 7574486).
 | T-1086 | **`Serve` 로그가 MB 단위를 GB 나눗셈으로 계산** — `fmt()` 의 MB 분기가 `1_073_741_824`(GB)로 나눔 → 250MB 파일이 `0.2MB`로 찍힘. MB 분기만 `1_048_576`으로 정정 · `private`→`internal`(테스트 가능) · `ServeSizeFormatTest` 6건 신규 — **수정 전 코드로 되돌리면 6건 중 3건이 실패한다** | ✅ |
 | T-1087 | **보관함 웹 다운로드가 초당 10MB도 안 나온다** — 코드 결함이 아니라 **Wi-Fi 링크 설정**이었다. 실측 근거·방법 아래 「T-1087 부근 근거」 참조 | ✅ |
 
+## v0.51 (2026-10-02) — 크래시 수정 · 맥 설정 창 반응 · UDP 발견 신호 (T-1088 ~ T-1090)
+
+**PLAN**: `docs/plans/PLAN_v0.51_crash-discovery-announce.md`
+
+| T-번호 | 내용 | 상태 |
+|--------|------|------|
+| T-1088 | **`BootReceiver` 이중 `finish()` 크래시** — `goAsync()` 의 `PendingResult` 는 한 번만 `finish()` 가능하다. 37행 `finally` 과 41행 `job.invokeOnCompletion` **둘 다** 실행되어 `IllegalStateException: Broadcast already finished` → 프로세스 사망. 41행은 "백업"으로 붙었으나 `invokeOnCompletion` 은 `finally` 이후 발화하므로 **백업이 아니라 중복 호출**. 41행 삭제, `finally` 만 유지 | 🔄 |
+| T-1089 | **맥 설정 창 "다시 찾기" 무반응** — 탐색 자체는 **40ms 에 정상 성공**한다. 문제는 두 가지 코드 부재다: ① `SettingsWindow.swift` 에 `connectionLine`/`lastResult`/`phase` 참조 **0건** — 상태 표시가 **팝오버에만** 있고(M-22), 설정 창은 별도 `NSWindow`(M-18)이라 공유하지 않는다 ② 주소 `@State` 가 `onAppear` 에서만 채워져 `connect()` 가 `model.stored` 를 바꿔도 **칸이 갱신되지 않는다**. → `model.connectionLine` **재사용**(복사 금지) + 성공 시 주소 자동 채움 + 탐색 중 버튼 비활성 | 🔄 |
+| T-1090 | **안드로이드 "나 여기있소" UDP 발견 신호 부재** — announce/broadcast/mDNS 코드 **없음**. 발견은 전적으로 수동 스캔(게이트웨이 40ms / `/24` 0.11초). 핫스팟은 게이트웨이 하나로 끝나지만 **같은 공유기에서는 스캔에 걸린다**. → 서버 기동 중 주기 UDP 브로드캐스트 발신 + 앱 내 수동 "알리기" 버튼 · Mac `ServerDiscovery` **전략 0**(리스너 1개, 중복 등록 금지). **주기 발신이 안 되어도 기존 3단계 탐색은 그대로 동작 — 회귀 위험 0** | 🔄 |
+
+### T-1088 부근 근거 — 추측이 아니라 실측
+
+| 항목 | 방법 | 결과 |
+|---|---|---|
+| 기기 앱 상태 | `adb shell ps -A` | **실행 중** (PID 23824) · `RelayService` 정상 |
+| 서버 응답 | `curl /api/info` | `version 0.50.0` · 정상 |
+| 크래시 이력 | `adb logcat -b crash` | **1건** — 2026-09-30 00:11:33 |
+| 맥 탐색 | `--diagnose` | 게이트웨이 **40ms** · v0.50.0 · **탐색 정상** |
+| 맥 설정 표시 | `grep -c` | **0건** — 결과를 보여줄 코드가 없다 |
+| 안드로이드 announce | `grep -il "UDP\|Datagram\|Bonjour"` | **없음** |
+
+→ **크래시는 09-30 1건이었고 앱은 현재 살아 있다.** 맥 탐색은 성공하는데 **결과를 말하지 않아서** 무반응으로 보인다.
+
+### `.agent/` git 추적 해제 (rules/workflow.md §2 [HARD])
+
+규칙 개정으로 `.agent/` 가 로컬 전용으로 지정됨 → `git rm -r --cached .agent` + `.gitignore` 추가.
+**파일은 디스크에 유지**(커밋만 해제).
+
 ### T-1087 부근 근거 — 진단은 추정이 아니라 실측
 
 사용자 질문: "**보관함 웹에서 다운로드 받는데 초당 10메가도 안나오는 이유**" · "**초당 얼마나 나와야 정상인지**"
