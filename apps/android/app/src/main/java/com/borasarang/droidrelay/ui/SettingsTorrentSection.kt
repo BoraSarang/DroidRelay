@@ -57,6 +57,23 @@ internal fun TorrentSection(
     val cs = MaterialTheme.colorScheme
     // ── Torrent (웹 슬라이더와 동일 단위 — SettingsConstraints 단일 진실, T-935) ──
     SettingSection("Torrent") {
+        SwitchRow("토렌트 기능", s.torrentEnabled) { v ->
+            scope.launch { repo.setTorrentEnabled(v) }
+        }
+        Text(
+            "끄면 libtorrent 세션·포트·폴링 자체를 띄우지 않습니다 (배터리 절약)",
+            color = cs.onSurfaceVariant,
+            style = MaterialTheme.typography.labelSmall,
+        )
+        SwitchRow("완료 후 세션에서 제거 (시딩 안 함)", s.torrentRemoveAfterMove) { v ->
+            scope.launch { repo.setTorrentRemoveAfterMove(v) }
+        }
+        Text(
+            "켜면 보관함 이동이 끝난 토렌트를 세션에서 해제합니다",
+            color = cs.onSurfaceVariant,
+            style = MaterialTheme.typography.labelSmall,
+        )
+        Spacer(Modifier.height(8.dp))
         // 업로드 속도 (0 = 끔)
         Text(
             "기본 업로드 속도: ${SettingsConstraints.uploadLabel(s.torrentUploadLimit)}",

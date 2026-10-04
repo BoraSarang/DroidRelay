@@ -1,5 +1,25 @@
 # Changelog
 
+## [Unreleased] — 토렌트·비디오 부하 개선 (T-1093, T-1094)
+
+> Android 테스트 **353건 중 352 통과** (신규 `LoadImprovementTest` 4건 0 실패 · `CronParserPerfTest` 1건은 사전 존재 실패 — 깨끗한 트리 동일, 날짜 의존)
+> 실기 검증: 토글 OFF→세션 정지·추가 거부, ON→새 세션 재기동, 직접 mp4→http 잡·작업제한·삭제 정상
+
+### Added/Changed [android] — 토렌트 부하 개선 (T-1093)
+
+- 0건 유휴면 상태 폴링 5초→30초 (적응형, 순수 함수 + 테스트)
+- connections 200→100, peerlist 5000→2000
+- 상세 API 피어 상위 50개 + `connectedPeersTotal` (웹 모달 카운트 대응)
+- 마스터 토글 `torrentEnabled` — OFF면 세션·포트·폴링 미기동 (설정·API·앱/웹 UI)
+- 완료 후 세션 제거 `torrentRemoveAfterMove` (기본 끔, 시딩 안 함)
+
+### Added/Changed [android] — 비디오 부하 개선 (T-1094)
+
+- 직접 mp4/webm/mov는 HTTP 엔진 우회 — Range 이어받기·작업별 제한·일시정지 유지 (m3u8 직접주소는 FFmpeg 유지)
+- 스마트 가드 스로틀 시 FFmpeg도 중단 — FAILED `E-AND-VID-0402` (재시도 가능)
+- FFmpeg 동시 실행 상한 2 + 초과분 QUEUED 승격
+- 완료 시 썸네일 선행 생성 (보관함 열람 burst 제거), 진행 폴링 1초→2초
+
 ## [Unreleased] — 유휴 자동 정지 · 토렌트 미사용 절전 (T-1091, T-1092)
 
 > Android 테스트 **349건 중 348 통과** (신규 `IdlePowerSaveTest` 7건 0 실패 · `CronParserPerfTest` 1건은 사전 존재 실패)

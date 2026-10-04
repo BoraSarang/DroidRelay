@@ -72,9 +72,41 @@ class RelayService : Service() {
         }.onFailure { DebugLogger.e(TAG, "스냅샷 저장소 로드 실패(무시하고 계속)", it) }
 
         // TorrentEngine 시작 (네이티브 세션 초기화 — 메인스레드 I/O 차단 방지)
+        // 마스터 토글이 꺼져 있으면 세션·포트·폴링 자체를 띄우지 않는다
         scope.launch(kotlinx.coroutines.Dispatchers.IO) {
-            torrentEng.start()
-            DebugLogger.i(TAG, "TorrentEngine 시작 완료")
+            if (settingsRepo.firstBlocking().torrentEnabled) {
+                torrentEng.start()
+                DebugLogger.i(TAG, "TorrentEngine 시작 완료")
+            } else {
+                DebugLogger.i(TAG, "TorrentEngine 시작 스킵 (토렌트 기능 꺼짐)")
+            }
+        }
+
+        // 토렌트 마스터 토글 감시 — OFF면 정지+파기(재ON 시 새 인스턴스), ON이면 기동
+        scope.launch {
+            settingsRepo.settings
+                .map { it.torrentEnabled }
+                .distinctUntilChanged()
+                .collect { enabled ->
+                    if (!enabled) {
+                        val eng = torrentEngine
+                        if (eng != null) {
+                            runCatching { eng.stop() }
+                            torrentEngine = null
+                            RelayApp.resetTorrent()
+                            DebugLogger.i(TAG, "토렌트 기능 OFF → 세션 정지·파기")
+                        }
+                    } else {
+                        if (torrentEngine == null) {
+                            val eng = RelayApp.getTorrent(applicationContext)
+                            torrentEngine = eng
+                            scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                                eng.start()
+                                DebugLogger.i(TAG, "토렌트 기능 ON → 세션 시작")
+                            }
+                        }
+                    }
+                }
         }
 
         // RSS 피드 매니저 시작
@@ -95,10 +127,16 @@ class RelayService : Service() {
         guard.onThrottleChange = { throttled, reason ->
             DebugLogger.i(TAG, "가드 상태 변경 throttled=$throttled reason=$reason")
             if (throttled) {
-                // 실행 중인 다운로드 일시정지
+                // 실행 중인 다운로드 일시정지 (비디오(FFmpeg) 제외 — 아래에서 가드용 중단 처리)
                 JobsRepository.jobs.value.forEach { j ->
-                    if (j.state == JobState.RUNNING) {
+                    if (j.state == JobState.RUNNING && j.type != "video") {
                         runCatching { engine.pause(j.id) }
+                    }
+                }
+                // 비디오(FFmpeg)는 일시정지 미지원이라 가드용 FAILED로 중단 (재시도 가능)
+                JobsRepository.jobs.value.forEach { j ->
+                    if (j.type == "video" && (j.state == JobState.RUNNING || j.state == JobState.QUEUED)) {
+                        runCatching { RelayApp.getVideo(applicationContext).cancelForGuard(j.id, reason) }
                     }
                 }
                 // 토렌트도 함께 스로틀 (결함 #5)

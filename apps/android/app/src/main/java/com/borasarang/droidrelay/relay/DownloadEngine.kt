@@ -143,7 +143,12 @@ class DownloadEngine(
         // '%' 를 남긴 채 통과시키므로 두 번째 디코딩이 IllegalArgumentException 을 던진다
         // (LAN POST /api/jobs, 안드로이드 공유시트 모두 도달). 방어적으로 감싼다.
         val decoded = runCatching { URLDecoder.decode(name, "UTF-8") }.getOrDefault(name)
-        val job = JobsRepository.add(url, decoded)
+        return enqueueWithName(url, decoded)
+    }
+
+    /** 파일명을 지정한 직접 등록 — 비디오 탭의 직접(mp4/webm/mov) 우회용 (FFmpeg 미경유, Range 이어받기 유지) */
+    fun enqueueWithName(url: String, filename: String): Job {
+        val job = JobsRepository.add(url, filename)
         DebugLogger.i(TAG, "큐 진입 id=${job.id} url=$url")
         enqueuePending(job.id)
         tryStart()

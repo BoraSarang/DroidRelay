@@ -615,6 +615,10 @@ internal object WebDashboardHtml {
           </div>
           <div class="ti">고급</div>
           <div class="ck" style="gap:20px">
+            <div class="ck"><input type="checkbox" id="torrentEnabled" checked><label for="torrentEnabled">토렌트 기능 (끄면 세션·포트·폴링 미기동)</label></div>
+            <div class="ck"><input type="checkbox" id="torrentRemoveAfterMove"><label for="torrentRemoveAfterMove">완료 후 세션에서 제거 (시딩 안 함)</label></div>
+          </div>
+          <div class="ck" style="gap:20px">
             <div class="ck"><input type="checkbox" id="torrentDhtEnabled" checked><label for="torrentDhtEnabled">DHT (분산 해시 테이블)</label></div>
             <div class="ck"><input type="checkbox" id="torrentPexEnabled" checked><label for="torrentPexEnabled">PEX (피어 교환)</label></div>
             <div class="ck"><input type="checkbox" id="torrentSequentialDownload"><label for="torrentSequentialDownload">시퀀셜 다운로드 (스트리밍 프리뷰)</label></div>
@@ -2099,7 +2103,7 @@ function loadTorrentDetail(id){
       h+='<div class="modal-stat">';
       h+='<div class="modal-stat-item"><div class="modal-stat-label">스웜 시드</div><div class="modal-stat-value green">'+(d.numComplete||d.listSeeds||d.seeds||0)+'</div></div>';
       h+='<div class="modal-stat-item"><div class="modal-stat-label">스웜 릭처</div><div class="modal-stat-value red">'+(d.numIncomplete||d.listPeers||d.peers||0)+'</div></div>';
-      h+='<div class="modal-stat-item"><div class="modal-stat-label">연결 피어</div><div class="modal-stat-value">'+(d.connectedPeers||[]).length+'</div></div>';
+      h+='<div class="modal-stat-item"><div class="modal-stat-label">연결 피어</div><div class="modal-stat-value">'+(d.connectedPeersTotal!=null?d.connectedPeersTotal:(d.connectedPeers||[]).length)+'</div></div>';
       h+='</div></div>';
       // 트래커
       if(d.currentTracker){
@@ -2248,6 +2252,8 @@ function loadSettings(){
     document.getElementById('torrentSeedRatio').value=tr.torrentSeedRatio!=null?tr.torrentSeedRatio:2.0;
     document.getElementById('torrentSeedRatioLabel').textContent=(tr.torrentSeedRatio!=null?tr.torrentSeedRatio:2.0).toFixed(1);
     document.getElementById('torrentDhtEnabled').checked=tr.torrentDhtEnabled!==false;
+    document.getElementById('torrentEnabled').checked=tr.torrentEnabled!==false;
+    document.getElementById('torrentRemoveAfterMove').checked=tr.torrentRemoveAfterMove===true;
     document.getElementById('torrentPexEnabled').checked=tr.torrentPexEnabled!==false;
     document.getElementById('torrentSequentialDownload').checked=tr.torrentSequentialDownload===true;
     document.getElementById('torrentTrackerSync').checked=tr.torrentTrackerSync!==false;
@@ -2461,6 +2467,8 @@ function saveTorrentSettings(){
     torrentMaxActive:num(document.getElementById('torrentMaxActive').value,3),
     torrentSeedRatio:num(document.getElementById('torrentSeedRatio').value,2.0),
     torrentDhtEnabled:document.getElementById('torrentDhtEnabled').checked,
+    torrentEnabled:document.getElementById('torrentEnabled').checked,
+    torrentRemoveAfterMove:document.getElementById('torrentRemoveAfterMove').checked,
     torrentPexEnabled:document.getElementById('torrentPexEnabled').checked,
     torrentSequentialDownload:document.getElementById('torrentSequentialDownload').checked,
     torrentTrackerSync:document.getElementById('torrentTrackerSync').checked,
@@ -2678,6 +2686,8 @@ function resetSettings(category){
   document.getElementById('torrentMaxActive')?.addEventListener('change',autoSave('tr',saveTorrentSettings));
   document.getElementById('torrentSeedRatio')?.addEventListener('change',autoSave('tr',saveTorrentSettings));
   document.getElementById('torrentDhtEnabled')?.addEventListener('change',autoSave('tr',saveTorrentSettings));
+  document.getElementById('torrentEnabled')?.addEventListener('change',autoSave('tr',saveTorrentSettings));
+  document.getElementById('torrentRemoveAfterMove')?.addEventListener('change',autoSave('tr',saveTorrentSettings));
   document.getElementById('torrentPexEnabled')?.addEventListener('change',autoSave('tr',saveTorrentSettings));
   document.getElementById('torrentSequentialDownload')?.addEventListener('change',autoSave('tr',saveTorrentSettings));
   document.getElementById('torrentTrackerSync')?.addEventListener('change',autoSave('tr',saveTorrentSettings));
