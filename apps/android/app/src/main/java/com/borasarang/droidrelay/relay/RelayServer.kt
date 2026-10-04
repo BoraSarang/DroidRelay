@@ -96,6 +96,11 @@ object RelayApp {
             ).also { torrentEngine = it }
         }
 
+    /** 토렌트 인스턴스 파기 — 마스터 토글 OFF 시 stop() 후 호출 (scope가 취소되므로 재사용 불가) */
+    fun resetTorrent() {
+        synchronized(this) { torrentEngine = null }
+    }
+
     /** 비디오(범용 스트림) 다운로드 매니저 — 최초 생성 시 FFmpeg 스모크 + 스테일 잡 정리 */
     fun getVideo(ctx: Context): VideoDownloadManager =
         video ?: synchronized(this) {

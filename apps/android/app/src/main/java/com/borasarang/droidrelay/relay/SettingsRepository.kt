@@ -60,6 +60,10 @@ data class AppSettings(
     val torrentListenPort: Int = 6881,
     val torrentSequentialDownload: Boolean = false,
     val torrentTrackerSync: Boolean = true,
+    // 토렌트 마스터 토글 (기본 켜짐 — 끄면 세션·포트·폴링 자체를 띄우지 않음)
+    val torrentEnabled: Boolean = true,
+    // 완료 후 세션에서 제거 (기본 끔 — 켜면 시딩 없이 보관함 이동 후 핸들 해제)
+    val torrentRemoveAfterMove: Boolean = false,
     // Debrid (Phase 1.3)
     val debridEnabled: Boolean = false,
     val debridProvider: String = "",
@@ -154,6 +158,8 @@ class SettingsRepository(private val context: Context) {
         val TORRENT_LISTEN_PORT = intPreferencesKey("torrent_listen_port")
         val TORRENT_SEQUENTIAL = booleanPreferencesKey("torrent_sequential")
         val TORRENT_TRACKER_SYNC = booleanPreferencesKey("torrent_tracker_sync")
+        val TORRENT_ENABLED = booleanPreferencesKey("torrent_enabled")
+        val TORRENT_REMOVE_AFTER_MOVE = booleanPreferencesKey("torrent_remove_after_move")
         // Debrid
         val DEBRID_ENABLED = booleanPreferencesKey("debrid_enabled")
         val DEBRID_PROVIDER = stringPreferencesKey("debrid_provider")
@@ -235,6 +241,8 @@ class SettingsRepository(private val context: Context) {
             torrentListenPort = (p[Keys.TORRENT_LISTEN_PORT] ?: 6881).coerceIn(1024, 65535),
             torrentSequentialDownload = p[Keys.TORRENT_SEQUENTIAL] ?: false,
             torrentTrackerSync = p[Keys.TORRENT_TRACKER_SYNC] ?: true,
+            torrentEnabled = p[Keys.TORRENT_ENABLED] ?: true,
+            torrentRemoveAfterMove = p[Keys.TORRENT_REMOVE_AFTER_MOVE] ?: false,
             debridEnabled = p[Keys.DEBRID_ENABLED] ?: false,
             debridProvider = p[Keys.DEBRID_PROVIDER] ?: "",
             debridApiKey = p[Keys.DEBRID_API_KEY] ?: "",
@@ -480,6 +488,12 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun setTorrentTrackerSync(enabled: Boolean) =
         context.settingsDataStore.edit { it[Keys.TORRENT_TRACKER_SYNC] = enabled }
+
+    suspend fun setTorrentEnabled(enabled: Boolean) =
+        context.settingsDataStore.edit { it[Keys.TORRENT_ENABLED] = enabled }
+
+    suspend fun setTorrentRemoveAfterMove(enabled: Boolean) =
+        context.settingsDataStore.edit { it[Keys.TORRENT_REMOVE_AFTER_MOVE] = enabled }
 
     // Debrid setters
     suspend fun setDebridEnabled(enabled: Boolean) =

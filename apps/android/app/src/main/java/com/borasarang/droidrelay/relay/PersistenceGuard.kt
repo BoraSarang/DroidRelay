@@ -43,6 +43,8 @@ object PersistenceGuard {
         "webPassword" to "***",
         "accessScope" to s.accessScope.name,
         "torrentMaxActive" to s.torrentMaxActive,
+        "torrentEnabled" to s.torrentEnabled,
+        "torrentRemoveAfterMove" to s.torrentRemoveAfterMove,
         "torrentDhtEnabled" to s.torrentDhtEnabled,
         "torrentTrackerSync" to s.torrentTrackerSync,
         "torrentStallEnabled" to s.torrentStallEnabled,

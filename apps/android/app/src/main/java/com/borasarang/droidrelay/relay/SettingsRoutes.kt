@@ -258,6 +258,8 @@ internal fun Route.settingsRoutes(context: Context, serverRef: RelayServer) {
                 put("torrentStallEnabled", s.torrentStallEnabled)
                 put("torrentStallThresholdKbps", s.torrentStallThresholdKbps)
                 put("torrentStallTimeoutSec", s.torrentStallTimeoutSec)
+                put("torrentEnabled", s.torrentEnabled)
+                put("torrentRemoveAfterMove", s.torrentRemoveAfterMove)
                 put("speedPresets", org.json.JSONArray(SpeedLimits.KBPS))
             }.toString(),
             ContentType.Application.Json
@@ -280,6 +282,8 @@ internal fun Route.settingsRoutes(context: Context, serverRef: RelayServer) {
         json?.optInt("torrentMinSeedWaitSec", -1)?.let { if (it >= 0) repo.setTorrentMinSeedWaitSec(it) }
         if (json?.has("torrentTrackerSync") == true) json?.optBoolean("torrentTrackerSync")?.let { repo.setTorrentTrackerSync(it) }
         if (json?.has("torrentStallEnabled") == true) json?.optBoolean("torrentStallEnabled")?.let { repo.setTorrentStallEnabled(it) }
+        if (json?.has("torrentEnabled") == true) json?.optBoolean("torrentEnabled")?.let { repo.setTorrentEnabled(it) }
+        if (json?.has("torrentRemoveAfterMove") == true) json?.optBoolean("torrentRemoveAfterMove")?.let { repo.setTorrentRemoveAfterMove(it) }
         json?.optInt("torrentStallThresholdKbps", -1)?.let { if (it >= 0) repo.setTorrentStallThresholdKbps(it) }
         json?.optInt("torrentStallTimeoutSec", -1)?.let { if (it >= 1) repo.setTorrentStallTimeoutSec(it) }
         // 엔진에 즉시 반영

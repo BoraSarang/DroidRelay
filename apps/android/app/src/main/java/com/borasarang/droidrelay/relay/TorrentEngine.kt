@@ -97,6 +97,12 @@ internal fun storageDirOf(storagePath: String): java.io.File =
 
 /** 보관함 이동 실패 시 재시도 상한 (5초 폴링 × N회 = 무한 로그 방지) */
 internal const val MAX_STORAGE_MOVE_ATTEMPTS = 3
+/** 토렌트 상세 응답에 담는 피어 상한 — 전체 정렬 후 상위 N개만 (5000개 JNI 객체 직렬화 방지) */
+internal const val PEER_DETAIL_CAP = 50
+
+/** 상태 폴링 주기 — 핸들·목록 모두 비면 30초, 그 외 5초 (순수 함수, 테스트 대상) */
+internal fun torrentPollIntervalMs(hasHandles: Boolean, hasJobs: Boolean): Long =
+    if (!hasHandles && !hasJobs) 30_000L else 5_000L
 
 /**
  * **실제로 파일에 기록되는 필드만**으로 만든 영속화 서명.
@@ -374,6 +380,7 @@ class TorrentEngine(
     /** 보관함 이동 실패 재시도 횟수 — 영구 실패로 5초마다 로그를 찍지 않기 위한 상한 */
     private val storageMoveAttempts = ConcurrentHashMap<String, Int>()
     @Volatile private var latestStallEnabled: Boolean = SettingsConstraints.DEFAULT_TORRENT_STALL_ENABLED
+    @Volatile private var latestRemoveAfterMove: Boolean = false
     @Volatile private var latestStallThresholdKbps: Int = SettingsConstraints.DEFAULT_TORRENT_STALL_THRESHOLD_KBPS
     @Volatile private var latestStallTimeoutSec: Int = SettingsConstraints.DEFAULT_TORRENT_STALL_TIMEOUT_SEC
     @Volatile private var latestMaxActive: Int = SettingsConstraints.DEFAULT_TORRENT_MAX_ACTIVE
@@ -431,6 +438,7 @@ class TorrentEngine(
                 latestTrackerSync = s.torrentTrackerSync
                 latestSavePath = s.torrentSavePath.ifBlank { StorageGuard.dlRoot.path }
                 latestStallEnabled = s.torrentStallEnabled
+                latestRemoveAfterMove = s.torrentRemoveAfterMove
                 latestStallThresholdKbps = s.torrentStallThresholdKbps
                 latestStallTimeoutSec = s.torrentStallTimeoutSec
                 latestMaxActive = s.torrentMaxActive
@@ -593,8 +601,8 @@ class TorrentEngine(
                     val sp = settings()
                         .listenInterfaces("0.0.0.0:${settings.firstBlocking().torrentListenPort}")
                         .activeDownloads(3)
-                        .connectionsLimit(200)
-                        .maxPeerlistSize(5000)
+                        .connectionsLimit(100)
+                        .maxPeerlistSize(2000)
                         .uploadRateLimit(1024)  // 기본 업로드 1KB/s (0=사용안함 → 1KB/s로 완화)
                         .downloadRateLimit(0) // 기본 다운로드 무제한
                     applySettings(sp)
@@ -657,6 +665,9 @@ class TorrentEngine(
     }
 
     fun addMagnet(magnet: String): TorrentJob {
+        if (!settings.firstBlocking().torrentEnabled) {
+            throw IllegalStateException("토렌트 기능이 꺼져 있습니다 — 설정에서 켜세요")
+        }
         val hash = magnetInfoHash(magnet)
         // 중복 가드: 같은 infohash가 이미 활성/완료 상태면 새 job을 만들지 않고 기존을 반환
         // (libtorrent는 동일 infohash download를 조용히 무시 → 새 job이 FETCHING_METADATA에 갇힘)
@@ -728,6 +739,9 @@ class TorrentEngine(
     }
 
     fun addTorrentFile(bytes: ByteArray, filename: String): TorrentJob {
+        if (!settings.firstBlocking().torrentEnabled) {
+            throw IllegalStateException("토렌트 기능이 꺼져 있습니다 — 설정에서 켜세요")
+        }
         // .torrent 중복 가드 (결함 #9) — job 추가 전 infohash 검사. 손상 파일은 파싱 실패 → 기존 FAILED 흐름 진행
         runCatching { TorrentInfo(bytes) }.getOrNull()?.let { ti ->
             val h = ti.infoHash().toString()
@@ -1048,8 +1062,8 @@ val th = withGate { session?.find(Sha1Hash.parseHex(expectedHash)) }
             val session = session ?: return@withGate
             val sp = session.settings()
                 .activeDownloads(s.torrentMaxActive)
-                .connectionsLimit(200)
-                .maxPeerlistSize(5000)
+                .connectionsLimit(100)
+                .maxPeerlistSize(2000)
             session.applySettings(sp)
             DebugLogger.i(TAG, "토렌트 활성 한도 적용 maxActive=${s.torrentMaxActive}")
 
@@ -1191,7 +1205,9 @@ val th = withGate { session?.find(Sha1Hash.parseHex(expectedHash)) }
     private fun startStatusPolling() {
         statusPollingJob = scope.launch {
             while (true) {
-                delay(5_000L)
+                // 적응형 주기 — 핸들·목록 모두 비면 30초, 그 외 5초.
+                // 0건 유휴에도 5초 JNI sweep을 돌 필요가 없다.
+                delay(torrentPollIntervalMs(handleMap.isNotEmpty(), TorrentRepository.all().isNotEmpty()))
                 try {
                     // handle 미매핑 torrent 자동 매핑 시도
                     val unmapped = TorrentRepository.all().filter { it.infoHash.isNotEmpty() && !handleMap.containsKey(it.id) }
@@ -1232,6 +1248,12 @@ val th = withGate { session?.find(Sha1Hash.parseHex(expectedHash)) }
                             if (moveToStorage(id, job.name)) {
                                 storageMoved.add(id)
                                 DebugLogger.i(TAG, "torrent 완료 → 시딩 중단 + 보관함 이동 id=$id")
+                                // 완료 후 제거 옵션 — 보관함 이동이 끝난 핸들을 세션에서 해제 (시딩 안 함)
+                                if (latestRemoveAfterMove) {
+                                    withGate { handleMap[id]?.let { session?.remove(it) } }
+                                    unregisterMapping(id)
+                                    DebugLogger.i(TAG, "완료 후 세션에서 제거(시딩 안 함) id=$id")
+                                }
                             } else {
                                 val n = (storageMoveAttempts[id] ?: 0) + 1
                                 storageMoveAttempts[id] = n
@@ -1491,7 +1513,8 @@ val th = withGate { session?.find(Sha1Hash.parseHex(expectedHash)) }
             }.getOrElse { job.files.map { f ->
                 mapOf("index" to f.index, "path" to f.path, "size" to f.size, "progress" to f.progress, "selected" to f.selected)
             }},
-            "connectedPeers" to peers.sortedWith(compareByDescending<Map<String, Any?>> { (it["progress"] as? Number)?.toDouble() ?: 0.0 }.thenByDescending { (it["downSpeed"] as? Number)?.toLong() ?: 0L }),
+            "connectedPeers" to peers.sortedWith(compareByDescending<Map<String, Any?>> { (it["progress"] as? Number)?.toDouble() ?: 0.0 }.thenByDescending { (it["downSpeed"] as? Number)?.toLong() ?: 0L }).take(PEER_DETAIL_CAP),
+            "connectedPeersTotal" to peers.size,
             "connectedSeeders" to seeders,
             "connectedLeechers" to leechers,
             "currentTracker" to (status?.currentTracker() ?: ""),

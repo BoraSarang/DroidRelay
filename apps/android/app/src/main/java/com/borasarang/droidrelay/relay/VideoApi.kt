@@ -37,7 +37,9 @@ object VideoApi {
         }
     }
 
-    /** 비디오 잡 생성 + 즉시 FFmpeg 시작. 실패 시 VideoException. */
+    /** 비디오 잡 생성 + 즉시 FFmpeg 시작. 실패 시 VideoException.
+     *  직접(mp4/webm/mov) URL은 FFmpeg을 거치지 않고 HTTP 엔진으로 우회한다 —
+     *  Range 이어받기·작업별 제한·일시정지가 그대로 유지되고 CPU도 쓰지 않는다. */
     suspend fun create(
         context: Context,
         url: String,
@@ -48,6 +50,14 @@ object VideoApi {
         val vm = RelayApp.getVideo(context)
         val found = StreamDetector.analyze(url, extra)
         val stream = streamUrl?.ifBlank { found.url } ?: found.url
+        if (found.isDirect && found.kind == "mp4") {
+            val ext = stream.substringBefore('?').substringAfterLast('.', "").lowercase()
+                .takeIf { it in setOf("mp4", "webm", "mov", "m4v") } ?: "mp4"
+            val outName = VideoDownloadManager.safeFilename(filename, ext)
+            val job = RelayApp.get(context).enqueueWithName(stream, outName)
+            DebugLogger.i(TAG, "[FEATURE] 직접 영상 우회(HTTP) id=${job.id} '${job.filename}'")
+            return@withContext job
+        }
         // 분석 대상과 다운로드 대상이 같으면 재fetch 없이 계측값 재사용(403 사이트는 분석 단계에서 이미 즉시 실패)
         val m = if (stream == found.url) {
             StreamDetector.ManifestResult(emptyList(), found.segmentsTotal, found.durationMs)

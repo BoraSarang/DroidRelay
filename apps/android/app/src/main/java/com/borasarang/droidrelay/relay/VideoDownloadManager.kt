@@ -36,6 +36,10 @@ class VideoDownloadManager(
     private val progressFiles = ConcurrentHashMap<String, File>()
     private val pollJobs = ConcurrentHashMap<String, kotlinx.coroutines.Job>()
     private val cancelRequested = ConcurrentHashMap.newKeySet<String>()
+    /** 가드 스로틀로 중단된 잡 — 완료 콜백에서 사용자 취소가 아닌 FAILED(재시도 가능)로 확정 */
+    private val guardCanceled = ConcurrentHashMap.newKeySet<String>()
+    /** 동시 상한으로 대기 중인 잡의 argv (메모리 전용 — 재시작 시 QUEUED는 FAILED 처리됨) */
+    private val pendingArgv = ConcurrentHashMap<String, List<String>>()
     @Volatile private var inited = false
     @Volatile private var scope: CoroutineScope? = null
 
@@ -102,6 +106,16 @@ class VideoDownloadManager(
     }
 
     fun start(jobId: String, argv: List<String>) {
+        // 동시 실행 상한 — 초과분은 QUEUED로 대기 (발열/코어 점유 방지, 썸네일 게이트와 동일 2)
+        if (sessions.size >= MAX_CONCURRENT_VIDEO && !sessions.containsKey(jobId)) {
+            pendingArgv[jobId] = argv
+            JobsRepository.update(jobId) {
+                if (it.state == JobState.RUNNING || it.state == JobState.QUEUED) it.copy(state = JobState.QUEUED)
+                else it
+            }
+            DebugLogger.i(TAG, "[FEATURE] FFmpeg 동시 상한($MAX_CONCURRENT_VIDEO) → 대기 id=$jobId")
+            return
+        }
         val job = JobsRepository.get(jobId) ?: return
         val out = File(workDir, job.filename)
         if (out.exists()) out.delete()
@@ -151,7 +165,7 @@ class VideoDownloadManager(
         pollProgress(jobId, session, out)
     }
 
-    /** 출력 파일 크기 1초 폴링 + HLS 진행률 — 우선순위: -progress 재생시간 → 세그먼트 로그 → 파일 크기 */
+    /** 출력 파일 크기 2초 폴링 + HLS 진행률 — 우선순위: -progress 재생시간 → 세그먼트 로그 → 파일 크기 */
     private fun pollProgress(jobId: String, session: FFmpegSession, out: File) {
         val job = ensureScope().launch {
             var lastSize = 0L
@@ -174,7 +188,7 @@ class VideoDownloadManager(
                     j.copy(downloadedBytes = len, speedBps = speed, segmentsDone = segProgress, progress = prog)
                 }
                 if (speed > 0) TrafficLedger.recordSpeed(speed, 0L)
-                delay(1_000L)
+                delay(2_000L)
             }
         }
         pollJobs[jobId] = job
@@ -218,6 +232,8 @@ class VideoDownloadManager(
 
     companion object {
         private const val LOG_CAP = 512 * 1024
+        /** FFmpeg 동시 실행 상한 — 초과분은 QUEUED 대기 후 슬롯이 나면 승격 */
+        const val MAX_CONCURRENT_VIDEO = 2
         // HLS 세그먼트 오픈 로그: [hls @ 0x..] Opening '0000.ts' for reading (버전/경로에 따라 Text/정규화 URI)
         private val SEG_OPEN_RE = Regex("""Opening\s+['"]([^'"]+\.ts)['"]\s+for\s+reading""", RegexOption.IGNORE_CASE)
 
@@ -272,6 +288,7 @@ class VideoDownloadManager(
         segKeys.remove(jobId)
         pollJobs.remove(jobId)?.cancel()
         progressFiles.remove(jobId)?.delete()
+        pendingArgv.remove(jobId)
         val logTail: String = logBuffers.remove(jobId)?.let { buf ->
             synchronized(buf) {
                 val s = buf.toString()
@@ -284,13 +301,25 @@ class VideoDownloadManager(
         when {
             canceled -> {
                 out.delete()
-                JobsRepository.update(jobId) {
-                    it.copy(
-                        state = JobState.CANCELED, errorCode = null,
-                        errorMessage = "사용자가 취소했습니다 (E-AND-VID-0400)", speedBps = 0L, finishedAt = now,
-                    )
+                if (guardCanceled.remove(jobId)) {
+                    JobsRepository.update(jobId) {
+                        it.copy(
+                            state = JobState.FAILED, errorCode = "E-AND-VID-0402",
+                            errorMessage = "발열/배터리 보호로 중단됨 — 식은 뒤 재시도해 주세요 (E-AND-VID-0402)",
+                            speedBps = 0L, finishedAt = now,
+                        )
+                    }
+                    TrafficLedger.addFail()
+                    DebugLogger.w(TAG, "가드 스로틀 중단 확정 id=$jobId")
+                } else {
+                    JobsRepository.update(jobId) {
+                        it.copy(
+                            state = JobState.CANCELED, errorCode = null,
+                            errorMessage = "사용자가 취소했습니다 (E-AND-VID-0400)", speedBps = 0L, finishedAt = now,
+                        )
+                    }
+                    DebugLogger.w(TAG, "취소됨 id=$jobId")
                 }
-                DebugLogger.w(TAG, "취소됨 id=$jobId")
             }
             ReturnCode.isSuccess(session.returnCode) && size > 0 -> {
                 val engine = RelayApp.get(context)
@@ -313,6 +342,10 @@ class VideoDownloadManager(
                 TrafficLedger.addDoneVideo()
                 // 보관함 자동 운영 (분류·쿼터, v0.19)
                 runCatching { StorageJanitor.onCompleted(context, java.io.File(StorageGuard.dlRoot, out.name)) }
+                // 썸네일 선행 생성 — 보관함 열람 시 lazy burst 방지 (백그라운드, 실패 무시)
+                ensureScope().launch(Dispatchers.IO) {
+                    runCatching { ThumbManager.thumbFor(context, java.io.File(StorageGuard.dlRoot, out.name)) }
+                }
             }
             else -> {
                 // 전량 allLogsAsString 복사 제거 — 링버퍼 꼬리(20KB)로 판정
@@ -338,11 +371,51 @@ class VideoDownloadManager(
                 DebugLogger.e(TAG, "비디오 실패 id=$jobId ($code) tail=$tail", null)
             }
         }
+        promoteNext()
+    }
+
+    /** 빈 슬롯에 대기 중인 다음 비디오 잡 승격 (동시 상한) */
+    private fun promoteNext() {
+        if (sessions.size >= MAX_CONCURRENT_VIDEO) return
+        val next = JobsRepository.all()
+            .filter { it.type == "video" && it.state == JobState.QUEUED }
+            .firstOrNull { pendingArgv.containsKey(it.id) } ?: return
+        val argv = pendingArgv.remove(next.id) ?: return
+        DebugLogger.i(TAG, "[FEATURE] FFmpeg 슬롯 승격 id=${next.id} '${next.filename}'")
+        start(next.id, argv)
+    }
+
+    /** 스마트 가드 스로틀용 중단 — FAILED + 재시도 안내로 남겨 사용자가 다시 시작할 수 있다 */
+    fun cancelForGuard(jobId: String, reason: String) {
+        cancelRequested += jobId
+        guardCanceled += jobId
+        pollJobs.remove(jobId)?.cancel()
+        pendingArgv.remove(jobId)
+        val s = sessions[jobId]
+        if (s != null) {
+            DebugLogger.w(TAG, "가드 스로틀 중단 id=$jobId reason=$reason")
+            s.cancel()
+            // 최종 상태는 완료 콜백의 guardCanceled 분기가 FAILED로 확정한다.
+        } else {
+            guardCanceled.remove(jobId)
+            JobsRepository.update(jobId) {
+                if (it.type == "video" && (it.state == JobState.RUNNING || it.state == JobState.QUEUED)) {
+                    it.copy(
+                        state = JobState.FAILED, errorCode = "E-AND-VID-0402",
+                        errorMessage = "발열/배터리 보호로 중단됨 — 식은 뒤 재시도해 주세요 (E-AND-VID-0402)",
+                        speedBps = 0L, finishedAt = System.currentTimeMillis(),
+                    )
+                } else {
+                    it
+                }
+            }
+        }
     }
 
     fun cancel(jobId: String) {
         cancelRequested += jobId
         pollJobs.remove(jobId)?.cancel()
+        pendingArgv.remove(jobId)
         val s = sessions[jobId]
         if (s != null) {
             DebugLogger.w(TAG, "취소 요청 id=$jobId")
