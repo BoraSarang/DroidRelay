@@ -85,6 +85,7 @@ internal fun Route.settingsRoutes(context: Context, serverRef: RelayServer) {
                 put("storageQuotaGb", s.storageQuotaGb)
                 put("autoClassify", s.autoClassify)
                 put("completionAction", s.completionAction)
+                put("idleTimeoutMin", s.idleTimeoutMin)
             }.toString(),
             ContentType.Application.Json
         )
@@ -103,6 +104,10 @@ internal fun Route.settingsRoutes(context: Context, serverRef: RelayServer) {
             if (it == SettingsConstraints.COMPLETION_ACTION_STOP_SERVER || it == SettingsConstraints.COMPLETION_ACTION_NONE) {
                 repo.setCompletionAction(it)
             }
+        }
+        if (json?.has("idleTimeoutMin") == true) {
+            val m = json?.optInt("idleTimeoutMin", -1) ?: -1
+            if (m in SettingsConstraints.IDLE_TIMEOUT_MIN..SettingsConstraints.IDLE_TIMEOUT_MAX) repo.setIdleTimeoutMin(m)
         }
         // 엔진에 즉시 반영
         RelayApp.get(context).applySettings(repo.firstBlocking())
