@@ -55,6 +55,15 @@ object SettingsConstraints {
     // 완료 후 동작 (v0.24)
     const val COMPLETION_ACTION_NONE = "none"
     const val COMPLETION_ACTION_STOP_SERVER = "stop_server"
+    /** 신규 설치 기본값 — 전체 완료 시 서버 정지 (유휴 전력 절감) */
+    const val DEFAULT_COMPLETION_ACTION = COMPLETION_ACTION_STOP_SERVER
+    /** 가드 데몬 신규 설치 기본값 — 열·배터리·스토리지 보호 켜짐 */
+    const val DEFAULT_GUARD_ENABLED = true
+
+    // 유휴 자동 정지 (분, 0=끔) — 작업·전송·토렌트 활동이 없으면 서비스 자정지
+    const val IDLE_TIMEOUT_MIN = 0
+    const val IDLE_TIMEOUT_MAX = 480
+    const val DEFAULT_IDLE_TIMEOUT_MIN = 30
 
     /**
      * 속도 상한 (B/s, 0=무제한/끔).

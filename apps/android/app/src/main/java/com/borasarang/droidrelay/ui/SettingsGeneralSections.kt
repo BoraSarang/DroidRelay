@@ -173,6 +173,35 @@ internal fun DownloadSection(
                 label = { Text("전체 완료 시 서버 정지") },
             )
         }
+        Text(
+            "작업·전송·토렌트 활동이 없으면 전원을 아끼기 위해 서버를 정지합니다 (시딩 중 제외)",
+            color = cs.onSurfaceVariant,
+            style = MaterialTheme.typography.labelSmall,
+        )
+
+        Spacer(Modifier.height(12.dp))
+        Text("유휴 자동 정지", color = cs.onSurfaceVariant, style = MaterialTheme.typography.labelMedium)
+        var idle by remember(s.idleTimeoutMin) { mutableStateOf(s.idleTimeoutMin.toString()) }
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+            OutlinedTextField(
+                value = idle,
+                onValueChange = { idle = it.filter { c -> c.isDigit() } },
+                label = { Text("유휴 시간 (분, 0=끔)") },
+                singleLine = true,
+                shape = MaterialTheme.shapes.small,
+                modifier = Modifier.weight(1f),
+            )
+            Spacer(Modifier.width(8.dp))
+            Button(onClick = {
+                val min = idle.toIntOrNull()
+                if (min == null || min !in SettingsConstraints.IDLE_TIMEOUT_MIN..SettingsConstraints.IDLE_TIMEOUT_MAX) {
+                    DebugLogger.w("Settings", "유휴 자동 정지 무효 값: $idle")
+                } else {
+                    DebugLogger.i("Settings", "유휴 자동 정지 → $min 분")
+                    scope.launch { repo.setIdleTimeoutMin(min) }
+                }
+            }) { Text("적용") }
+        }
 
         Spacer(Modifier.height(12.dp))
         SpeedScheduleSection(s.speedSchedule)

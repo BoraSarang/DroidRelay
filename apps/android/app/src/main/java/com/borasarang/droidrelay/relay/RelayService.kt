@@ -292,6 +292,40 @@ class RelayService : Service() {
             }
         }
 
+        // ②-2 유휴 자동 정지 — 작업·전송·토렌트 활동이 N분 없으면 서비스 자정지 (절전).
+        // completionAction(stop_server)이 "활성→유휴 전이" 시점에 1회 끊는다면, 이것은 시간 기반이다.
+        // 시딩 중에는 절대 정지하지 않는다 (isIdleForAutoStop) — 의도한 공유가 조용히 깨지면 안 된다.
+        scope.launch {
+            var idleSince: Long? = null
+            while (true) {
+                delay(IDLE_CHECK_MS)
+                val s = runCatching { settingsRepo.firstBlocking() }.getOrNull() ?: continue
+                val timeoutMin = s.idleTimeoutMin
+                if (timeoutMin <= 0) {
+                    idleSince = null
+                    continue
+                }
+                // 예약 다운로드가 걸려 있으면 정지하지 않는다 —
+                // 반복 재등록(scheduleNext)은 이 서비스의 SchedulerManager가 담당하므로,
+                // 정지하면 cron 1회 발화 뒤 예약이 끊긴다. 발화 자체는 JobScheduler가 살리지만 반복이 안 된다.
+                if (s.scheduleEnabled && CronParser.isValid(s.scheduleCron)) {
+                    idleSince = null
+                    continue
+                }
+                if (isIdleNow()) {
+                    val now = System.currentTimeMillis()
+                    if (idleSince == null) idleSince = now
+                    if (now - idleSince >= timeoutMin * 60_000L) {
+                        DebugLogger.i(TAG, "유휴 ${timeoutMin}분 경과 → 서비스 자동 정지")
+                        stop(applicationContext)
+                        break
+                    }
+                } else {
+                    idleSince = null
+                }
+            }
+        }
+
         // ② 작업 상태 → 완료/실패 알림 + 진행바 갱신 (T-105)
         scope.launch {
             var lastNotifUpdate = 0L
@@ -412,6 +446,16 @@ class RelayService : Service() {
             }
         }
     }
+
+    /**
+     * 유휴 여부 — HTTP/비디오 작업·토렌트 활동·진행 중 전송이 모두 없으면 true.
+     * 판정식은 순수 함수 [isIdleForAutoStop] 에 있어 단위 테스트된다.
+     */
+    private fun isIdleNow(): Boolean = isIdleForAutoStop(
+        jobStates = JobsRepository.all().map { it.state },
+        torrentStates = TorrentRepository.all().map { it.state },
+        activeTransfers = TransferTracker.count,
+    )
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         // 재시작/재실행 시 FGS 허용 타이밍이면 알림 복구 (이미 포그라운드면 no-op)
@@ -754,6 +798,8 @@ class RelayService : Service() {
         private const val SAVE_DEBOUNCE_MS = 10_000L
         private const val NOTIF_THROTTLE_MS = 2_000L
         private const val WATCHDOG_FAIL_STREAK = 3
+        /** 유휴 모니터 틱 — 60초마다 판정 (배터리 영향 무시 수준) */
+        private const val IDLE_CHECK_MS = 60_000L
         const val ACTION_ALLOW = "com.borasarang.droidrelay.ALLOW"
         const val ACTION_DENY = "com.borasarang.droidrelay.DENY"
         const val EXTRA_IP = "ip"

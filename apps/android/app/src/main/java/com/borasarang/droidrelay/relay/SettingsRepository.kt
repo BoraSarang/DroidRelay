@@ -64,8 +64,8 @@ data class AppSettings(
     val debridEnabled: Boolean = false,
     val debridProvider: String = "",
     val debridApiKey: String = "",
-    // Guard (Phase 2.4)
-    val guardEnabled: Boolean = false,
+    // Guard (Phase 2.4) — 기본 켜짐 (신규 설치 절전)
+    val guardEnabled: Boolean = SettingsConstraints.DEFAULT_GUARD_ENABLED,
     val guardThermalLimit: Int = 50,
     val guardBatteryLimit: Int = 20,
     val guardStorageLimit: Int = 90,
@@ -104,8 +104,10 @@ data class AppSettings(
     val guestPassword: String = "",
     // 속도 스케줄 (v0.24) — 요일+시간 창 기반 전역 제한
     val speedSchedule: List<SpeedWindow> = emptyList(),
-    // 완료 후 동작 (v0.24) — none | stop_server
-    val completionAction: String = SettingsConstraints.COMPLETION_ACTION_NONE,
+    // 완료 후 동작 (v0.24) — none | stop_server (기본 stop_server, 유휴 절전)
+    val completionAction: String = SettingsConstraints.DEFAULT_COMPLETION_ACTION,
+    // 유휴 자동 정지 (분, 0=끔) — 작업·전송·토렌트 활동이 없으면 서비스 자정지
+    val idleTimeoutMin: Int = SettingsConstraints.DEFAULT_IDLE_TIMEOUT_MIN,
 )
 
 private val Context.settingsDataStore by preferencesDataStore("droidrelay_settings")
@@ -196,6 +198,8 @@ class SettingsRepository(private val context: Context) {
         // 속도 스케줄 + 완료 후 동작 (v0.24)
         val SPEED_SCHEDULE = stringPreferencesKey("speed_schedule")
         val COMPLETION_ACTION = stringPreferencesKey("completion_action")
+        // 유휴 자동 정지 (분, 0=끔)
+        val IDLE_TIMEOUT_MIN = intPreferencesKey("idle_timeout_min")
     }
 
     val settings: Flow<AppSettings> = context.settingsDataStore.data.map { p ->
@@ -234,7 +238,7 @@ class SettingsRepository(private val context: Context) {
             debridEnabled = p[Keys.DEBRID_ENABLED] ?: false,
             debridProvider = p[Keys.DEBRID_PROVIDER] ?: "",
             debridApiKey = p[Keys.DEBRID_API_KEY] ?: "",
-            guardEnabled = p[Keys.GUARD_ENABLED] ?: false,
+            guardEnabled = p[Keys.GUARD_ENABLED] ?: SettingsConstraints.DEFAULT_GUARD_ENABLED,
             guardThermalLimit = SettingsMigration.clampThermal(p[Keys.GUARD_THERMAL]),
             guardBatteryLimit = (p[Keys.GUARD_BATTERY] ?: 20).coerceIn(5, 50),
             guardStorageLimit = (p[Keys.GUARD_STORAGE] ?: 90).coerceIn(50, 99),
@@ -267,9 +271,11 @@ class SettingsRepository(private val context: Context) {
             guestEnabled = p[Keys.GUEST_ENABLED] ?: false,
             guestPassword = p[Keys.GUEST_PASSWORD] ?: "",
             speedSchedule = SpeedSchedule.decode(p[Keys.SPEED_SCHEDULE]),
-            completionAction = (p[Keys.COMPLETION_ACTION] ?: SettingsConstraints.COMPLETION_ACTION_NONE)
+            completionAction = (p[Keys.COMPLETION_ACTION] ?: SettingsConstraints.DEFAULT_COMPLETION_ACTION)
                 .takeIf { it == SettingsConstraints.COMPLETION_ACTION_STOP_SERVER }
                 ?: SettingsConstraints.COMPLETION_ACTION_NONE,
+            idleTimeoutMin = (p[Keys.IDLE_TIMEOUT_MIN] ?: SettingsConstraints.DEFAULT_IDLE_TIMEOUT_MIN)
+                .coerceIn(SettingsConstraints.IDLE_TIMEOUT_MIN, SettingsConstraints.IDLE_TIMEOUT_MAX),
         )
     }
 
@@ -402,6 +408,12 @@ class SettingsRepository(private val context: Context) {
             } else {
                 SettingsConstraints.COMPLETION_ACTION_NONE
             }
+        }
+
+    // 유휴 자동 정지 setters (분, 0=끔)
+    suspend fun setIdleTimeoutMin(min: Int) =
+        context.settingsDataStore.edit {
+            it[Keys.IDLE_TIMEOUT_MIN] = min.coerceIn(SettingsConstraints.IDLE_TIMEOUT_MIN, SettingsConstraints.IDLE_TIMEOUT_MAX)
         }
 
     suspend fun addAllowedIp(ip: String) =

@@ -539,11 +539,16 @@ internal object WebDashboardHtml {
           <div class="ti">완료 후 동작</div>
           <div class="sv">
             <select id="completionAction">
-              <option value="none">없음 (기본)</option>
+              <option value="none">없음</option>
               <option value="stop_server">전체 완료 시 서버 정지</option>
             </select>
           </div>
           <div class="sb" style="margin-top:4px">모든 다운로드·토렌트가 끝나면 서버를 정지합니다 (시딩 중 제외)</div>
+          <div class="ti">유휴 자동 정지 (분)</div>
+          <div class="sv">
+            <input type="number" id="idleTimeoutMin" min="0" max="480" value="30" style="max-width:100px">
+          </div>
+          <div class="sb" style="margin-top:4px">0 = 끔 · 작업·전송·토렌트 활동이 없으면 서버 정지 (시딩 중 제외)</div>
           <div class="ti">속도 스케줄 (요일+시간)</div>
           <div id="speedSchedList" class="sb"></div>
           <div class="fp" style="margin-top:6px;flex-wrap:wrap">
@@ -2227,7 +2232,8 @@ function loadSettings(){
     document.getElementById('storageQuotaGb').value=dl.storageQuotaGb!=null?dl.storageQuotaGb:0;
     document.getElementById('storageQuotaLabel').textContent=dl.storageQuotaGb>0?dl.storageQuotaGb+'GB':'끔';
     document.getElementById('autoClassify').checked=dl.autoClassify===true;
-    document.getElementById('completionAction').value=dl.completionAction||'none';
+    document.getElementById('completionAction').value=dl.completionAction||'stop_server';
+    document.getElementById('idleTimeoutMin').value=dl.idleTimeoutMin!=null?dl.idleTimeoutMin:30;
     loadSpeedSchedule();
     // 토렌트 설정
     document.getElementById('torrentUploadLimit').value=tr.torrentUploadLimit!=null?tr.torrentUploadLimit:512;
@@ -2377,7 +2383,8 @@ function saveDownloadSettings(){
     notifications:document.getElementById('notifications').checked,
     storageQuotaGb:num(document.getElementById('storageQuotaGb').value,0),
     autoClassify:document.getElementById('autoClassify').checked,
-    completionAction:document.getElementById('completionAction').value||'none'
+    completionAction:document.getElementById('completionAction').value||'none',
+    idleTimeoutMin:num(document.getElementById('idleTimeoutMin').value,30)
   };
   document.getElementById('concurrencyLabel').textContent=body.concurrency;
   document.getElementById('speedLimitLabel').textContent=kblabel(body.speedLimitKbps,0,'무제한');
@@ -2665,6 +2672,7 @@ function resetSettings(category){
   document.getElementById('storageQuotaGb')?.addEventListener('change',autoSave('dl',saveDownloadSettings));
   document.getElementById('autoClassify')?.addEventListener('change',autoSave('dl',saveDownloadSettings));
   document.getElementById('completionAction')?.addEventListener('change',autoSave('dl',saveDownloadSettings));
+  document.getElementById('idleTimeoutMin')?.addEventListener('change',autoSave('dl',saveDownloadSettings));
   document.getElementById('torrentUploadLimit')?.addEventListener('change',autoSave('tr',saveTorrentSettings));
   document.getElementById('torrentDownloadLimit')?.addEventListener('change',autoSave('tr',saveTorrentSettings));
   document.getElementById('torrentMaxActive')?.addEventListener('change',autoSave('tr',saveTorrentSettings));

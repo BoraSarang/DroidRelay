@@ -36,7 +36,8 @@ object SettingsResetter {
         repo.setStorageQuotaGb(0)
         repo.setAutoClassify(false)
         repo.setSpeedSchedule(emptyList())
-        repo.setCompletionAction(SettingsConstraints.COMPLETION_ACTION_NONE)
+        repo.setCompletionAction(SettingsConstraints.DEFAULT_COMPLETION_ACTION)
+        repo.setIdleTimeoutMin(SettingsConstraints.DEFAULT_IDLE_TIMEOUT_MIN)
     }
 
     private suspend fun torrentDefaults(repo: SettingsRepository) {

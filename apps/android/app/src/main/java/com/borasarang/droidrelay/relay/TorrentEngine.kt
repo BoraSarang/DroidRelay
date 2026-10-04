@@ -209,7 +209,8 @@ class TorrentEngine(
             // registerMapping → handleAlert → withGateAlert 경로에서
             // sessionGate 를 쥔 채 alert 스레드가 블로킹되어
             // 5초 폴러·모든 /api/torrents 라우트·UI 스레드가 그 동안 전부 대기한다.
-            if (!latestTrackerSync) return
+            // 토렌트 0건 절전 중이면 주입도 건너뛴다 (복원 시 applyPowerSave가 일괄 주입).
+            if (!effectiveTrackerSync()) return
             val extra = TrackerListProvider.getCached(context)
             if (extra.isEmpty()) return
             val th = handleMap[id] ?: return
@@ -343,6 +344,13 @@ class TorrentEngine(
     @Volatile private var latestPexEnabled: Boolean = true
     /** 트래커 동기 여부 — 게이트를 쥔 채 디스크를 읽지 않기 위해 스냅샷으로 유지 */
     @Volatile private var latestTrackerSync: Boolean = true
+    /**
+     * 토렌트 보유 여부 (절전 판정용).
+     * 복원 전에는 true 로 시작한다 — 복원 전 `all()` 은 항상 비어 있어
+     * false 로 시작하면 저장된 토렌트가 있는 사용자도 기동 직후 DHT가 꺼졌다
+     * 복원 완료 시점에 다시 켜지는 요동을 겪는다. 복원 완료 후 실제값으로 확정한다.
+     */
+    @Volatile private var hasTorrents = true
     @Volatile private var latestSavePath: String = StorageGuard.dlRoot.path
     /** id → 시더 부재 대기 시작 시각(ms). 0이면 미측정 */
     private val seedWaitSince = ConcurrentHashMap<String, Long>()
@@ -432,13 +440,53 @@ class TorrentEngine(
                 DebugLogger.d(TAG, "설정 반영 업로드=${s.torrentUploadLimit}KB/s 다운로드=${s.torrentDownloadLimit}KB/s 시퀀셜=${s.torrentSequentialDownload} 비율=${s.torrentSeedRatio} DHT=${s.torrentDhtEnabled} PEX=${s.torrentPexEnabled} 정체=${s.torrentStallEnabled}(${s.torrentStallThresholdKbps}KB/s·${s.torrentStallTimeoutSec}초)")
                 applyRateLimits()
                 applySequentialToAll(s.torrentSequentialDownload)
-                applyDhtEnabled(s.torrentDhtEnabled)
-                applyPexEnabled(s.torrentPexEnabled)
+                applyDhtEnabled(effectiveDht())
+                applyPexEnabled(effectivePex())
                 applyStallSessionSettings(s)
                 // maxActive(torrentMaxActive) 반영 — 이것도 이전엔 applySettings 안에서만
                 // 갱신되어 앱 화면 변경분이 세션에 전달되지 않았다.
                 applySettings(s)
             }
+        }
+        // 토렌트 목록 감시 — 0건 ↔ 1건+ 전이 시 DHT/PEX/트래커동기 절전·복원
+        scope.launch {
+            TorrentRepository.torrents.collect { list ->
+                if (!restored) return@collect
+                if (list.isNotEmpty() == hasTorrents) return@collect
+                applyPowerSave()
+            }
+        }
+    }
+
+    /** 절전 유효값 — 사용자 설정 AND 보유 여부 (설정값 자체는 건드리지 않는다) */
+    private fun effectiveDht(): Boolean = powerSaveEffective(latestDhtEnabled, hasTorrents)
+    private fun effectivePex(): Boolean = powerSaveEffective(latestPexEnabled, hasTorrents)
+    private fun effectiveTrackerSync(): Boolean = powerSaveEffective(latestTrackerSync, hasTorrents)
+
+    /**
+     * 토렌트 보유 상태에 맞춰 DHT/PEX/트래커동기를 절전·복원한다.
+     *
+     * 0건이 되면 세션 레벨에서만 끄고 설정값은 유지 → 추가 시 즉시 복원된다.
+     * 복원 전에는 호출해도 no-op 이어야 한다 — 빈 저장소를 보고 끄면
+     * 복원 직후 다시 켜는 요동 + 트래커 재동기 2회가 발생한다.
+     */
+    private fun applyPowerSave() {
+        if (!restored) return
+        hasTorrents = TorrentRepository.all().isNotEmpty()
+        applyDhtEnabled(effectiveDht())
+        applyPexEnabled(effectivePex())
+        if (hasTorrents) {
+            if (latestTrackerSync) {
+                // 새로 매핑된 핸들에 동기 트래커 주입 (collector 경유 추가분은 registerMapping에서 처리)
+                handleMap.keys.forEach { applyExtraTrackers(it) }
+                scope.launch {
+                    TrackerListProvider.refresh(context)
+                    probeTrackers()
+                }
+            }
+            DebugLogger.i(TAG, "토렌트 보유 → DHT/PEX/트래커동기 복원")
+        } else {
+            DebugLogger.i(TAG, "토렌트 0건 → DHT/PEX/트래커동기 절전 (설정값 유지, 추가 시 복원)")
         }
     }
 
@@ -574,8 +622,12 @@ class TorrentEngine(
                 startStatusPolling()
                 restoreTorrentsAsync()
                 // 트래커 목록 백그라운드 동기 (T-971, 실패해도 번들 목록 사용)
+                // 기동 시점엔 복원 전이라 목록이 비어 있다 — 0건 절전 중이면 동기하지 않고
+                // 복원 후 토렌트가 있으면 applyPowerSave의 collector 경로에서 동기한다.
                 scope.launch {
-                    if (runCatching { settings.firstBlocking().torrentTrackerSync }.getOrDefault(true)) {
+                    if (runCatching { settings.firstBlocking().torrentTrackerSync }.getOrDefault(true) &&
+                        TorrentRepository.all().isNotEmpty()
+                    ) {
                         TrackerListProvider.refresh(context)
                         probeTrackers()
                     }
@@ -1517,6 +1569,8 @@ val th = withGate { session?.find(Sha1Hash.parseHex(expectedHash)) }
             } finally {
                 // 복원이 끝났음을 표시 — 이 전에는 어떤 저장도 금지된다 (persistNow 가 가드)
                 restored = true
+                // 복원 결과에 맞춰 DHT/PEX/트래커동기 절전·복원 확정
+                runCatching { applyPowerSave() }
                 DebugLogger.d(TAG, "복원 완료 플래그 설정")
             }
         }
