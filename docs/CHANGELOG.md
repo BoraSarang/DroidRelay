@@ -17,6 +17,11 @@
 - **실측 함정**: `-a`만 쓴 암시적 브로드캐스트는 Android 8+ 제한으로 manifest 수신기에 미도달.
   `-n <package>/.plugin.PluginActionReceiver` 명시 필수 → SDK §4.1 수정 요망
 
+### Added [android] — 메타 Provider 아이콘 제공 (T-1097)
+
+- `iconBase64` 빈값 → 런처 적응형 아이콘을 96px PNG base64 한 줄로 렌더해 제공 (RelayConsole 요청).
+  실기기 `content query` 1행 실측 (PNG 매직·96x96 확인, base64 4356자). 실패 시 빈값 폴백 유지.
+
 ## [Unreleased] — adb 플러그인 계약 제공자 (T-1095)
 
 > Android 테스트 **360건 중 359 통과** (신규 `PluginContractTest` 7건 0 실패 · `CronParserPerfTest` 1건은 사전 존재 실패)
