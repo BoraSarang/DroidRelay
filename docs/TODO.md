@@ -691,6 +691,14 @@ T-001~T-008 전부 완료 (커밋 7574486).
 **기존 실패 1건 무시 지시 (사용자)**: `CronParserPerfTest > 정상 표현식은 유효`.
 `git stash`로 이번 변경을 전부 뺀 clean tree에서도 동일 실패 → **사전 존재 버그, 이번 범위 외**. 별도 처리 대기.
 
+## v0.52 (2026-10-08) — adb 플러그인 계약 제공자 (T-1095)
+
+**PLAN**: `docs/plans/PLAN_v0.52_plugin-contract_android.md` · **계약**: `docs/PLUGIN_CONTRACT.md` v1 (RelayConsole 전달용)
+
+| T-번호 | 내용 | 상태 |
+|--------|------|------|
+| T-1095 | **플러그인 계약 제공자** — `PluginProbeReceiver`(프로브 응답) + MainActivity 액션 4종(`server_status/server_control/download_add/torrent_add`) + `[REMOTE]/[EVENT]` 로그 + `연동 허용` 토글(기본 ON) + `E-AND-PLG-0001~0003`. 계약 로그는 `android.util.Log` 직접 출력(릴리즈 가시성). 검증: unit 360중 359(신규 7 GREEN, Cron 사전실패 1) + ktlint + assembleDebug + 실기기 프로브/액션 2종 실측 | ✅ |
+
 ## Unreleased — 유휴 자동 정지 · 토렌트 미사용 절전 (T-1091, T-1092)
 
 | T-번호 | 내용 | 상태 |

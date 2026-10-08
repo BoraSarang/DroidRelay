@@ -11,6 +11,8 @@ import android.content.pm.ServiceInfo
 import android.os.Build
 import androidx.core.app.ServiceCompat
 import com.borasarang.droidrelay.R
+import com.borasarang.droidrelay.plugin.PluginContract
+import com.borasarang.droidrelay.plugin.PluginLog
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -384,6 +386,11 @@ class RelayService : Service() {
                         if (last[j.id] == JobState.RUNNING && j.state == JobState.DONE) {
                             DebugLogger.i(TAG, "완료 알림 '${j.filename}'")
                             notify(j.id.hashCode(), getString(R.string.notif_done_title), j.filename, done = true)
+                            // T-1095 플러그인 이벤트 (연동 허용 시, 알림 전이와 같은 지점)
+                            scope.launch {
+                                val allowed = runCatching { settingsRepo.settings.first().pluginAllowed }.getOrDefault(true)
+                                if (allowed) PluginLog.event(PluginContract.eventDownloadComplete(j.id, j.filename, j.downloadedBytes))
+                            }
                             // 웹훅 콜백 전송 (Phase 2.2)
                             scope.launch {
                                 val s = try { settingsRepo.settings.first() } catch (_: Exception) { return@launch }
@@ -401,6 +408,11 @@ class RelayService : Service() {
                                 lastFailReason[j.id] = reason
                                 DebugLogger.i(TAG, "실패 알림 '${j.filename}' (${j.errorCode})")
                                 notify(j.id.hashCode(), getString(R.string.notif_fail_title), j.filename + (j.errorMessage?.let { " — $it" } ?: ""), done = false)
+                                // T-1095 플러그인 이벤트 (동일 원인 1회만 — 알림 dedup과 같은 지점)
+                                scope.launch {
+                                    val allowed = runCatching { settingsRepo.settings.first().pluginAllowed }.getOrDefault(true)
+                                    if (allowed) PluginLog.event(PluginContract.eventDownloadFailed(j.id, j.filename, j.errorCode ?: "-"))
+                                }
                                 // 웹훅 콜백 전송 (Phase 2.2)
                                 scope.launch {
                                     val s = try { settingsRepo.settings.first() } catch (_: Exception) { return@launch }
@@ -459,6 +471,11 @@ class RelayService : Service() {
                         if (prev == TorrentState.DOWNLOADING && t.state == TorrentState.DONE) {
                             DebugLogger.i(TAG, "torrent 완료 알림 '${t.name}'")
                             notifyTorrent(t.id.hashCode(), "Torrent 완료", t.name)
+                            // T-1095 플러그인 이벤트 (연동 허용 시)
+                            scope.launch {
+                                val allowed = runCatching { settingsRepo.settings.first().pluginAllowed }.getOrDefault(true)
+                                if (allowed) PluginLog.event(PluginContract.eventTorrentComplete(t.id, t.name))
+                            }
                             // 웹훅 콜백 전송 (Phase 2.2)
                             scope.launch {
                                 val s = try { settingsRepo.settings.first() } catch (_: Exception) { return@launch }
@@ -471,6 +488,11 @@ class RelayService : Service() {
                         if (prev != null && prev != TorrentState.FAILED && t.state == TorrentState.FAILED) {
                             DebugLogger.i(TAG, "torrent 실패 알림 '${t.name}'")
                             notifyTorrent(t.id.hashCode() + 10000, "Torrent 실패", t.name + (t.errorMessage?.let { " — $it" } ?: ""))
+                            // T-1095 플러그인 이벤트 (연동 허용 시)
+                            scope.launch {
+                                val allowed = runCatching { settingsRepo.settings.first().pluginAllowed }.getOrDefault(true)
+                                if (allowed) PluginLog.event(PluginContract.eventTorrentFailed(t.id, t.name, t.errorMessage ?: "-"))
+                            }
                         }
                     }
                 }

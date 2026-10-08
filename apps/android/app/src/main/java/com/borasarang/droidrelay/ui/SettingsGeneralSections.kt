@@ -250,6 +250,18 @@ internal fun SecuritySection(
         )
         Spacer(Modifier.height(12.dp))
 
+        // T-1095 adb 플러그인 연동 허용 (OFF면 액션 무시+거부 로그, 이벤트 미발행)
+        SwitchRow("외부 연동 허용 (adb 플러그인)", s.pluginAllowed) { v ->
+            DebugLogger.i("Settings", "외부 연동 허용 → $v")
+            scope.launch { repo.setPluginAllowed(v) }
+        }
+        Text(
+            "RelayConsole 등 외부 도구가 adb로 상태 조회·다운로드 등록을 요청할 수 있습니다. 끄면 요청을 무시합니다",
+            color = cs.onSurfaceVariant,
+            style = MaterialTheme.typography.labelSmall,
+        )
+        Spacer(Modifier.height(12.dp))
+
         var authEnabled by remember(s.webAuthEnabled) { mutableStateOf(s.webAuthEnabled) }
         var user by remember(s.webUser) { mutableStateOf(s.webUser) }
         var pass by remember(s.webPassword) { mutableStateOf("") }
