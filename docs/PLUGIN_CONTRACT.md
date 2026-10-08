@@ -14,7 +14,7 @@
 | SDK | 구현 |
 |---|---|
 | §2 프로브 | `.receiver.PluginProbeReceiver` (명시적 브로드캐스트, 앱 미실행 응답, UI 없음) + manifest meta-data 3키(`version=2`) |
-| §3 Provider | `.plugin.PluginInfoProvider` (`content://com.borasarang.droidrelay.plugin/info`, 1행 7컬럼, `actionsJson` 4종). `iconBase64`는 빈값 → 소비자 폴백 |
+| §3 Provider | `.plugin.PluginInfoProvider` (`content://com.borasarang.droidrelay.plugin/info`, 1행 7컬럼, `actionsJson` 4종). `iconBase64`는 런처 벡터 96px PNG 렌더 제공 (T-1097) |
 | §4 액션 | `.plugin.PluginActionReceiver` (`PLUGIN_ACTION`, `--es cmd`/`--es arg`). MainActivity 전면 경로는 v2에서 제거 |
 | §5 REMOTE | `PluginContract` 빌더 + `PluginLog` 직접 `Log` 출력. `action=`·`ok=` 전부, 실패 `errorCode=` + 꼬리 `note=` |
 | §6 EVENT | 완료 분기 옆 1회 emit. 완료 `level=info`·실패 `level=warning`. 파일명은 공백 sanitize (`token()`, §5.2 값 규칙) |

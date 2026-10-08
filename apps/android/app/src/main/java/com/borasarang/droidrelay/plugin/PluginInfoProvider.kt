@@ -4,8 +4,13 @@ import android.content.ContentProvider
 import android.content.ContentValues
 import android.database.Cursor
 import android.database.MatrixCursor
+import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.net.Uri
+import android.util.Base64
+import com.borasarang.droidrelay.R
 import com.borasarang.droidrelay.relay.SettingsRepository
+import java.io.ByteArrayOutputStream
 
 /**
  * T-1096 — 메타데이터 Provider (SDK §3 L2).
@@ -44,12 +49,33 @@ class PluginInfoProvider : ContentProvider() {
                     PluginContract.PLUGIN_VERSION.toString(),
                     appVersion,
                     allowed.toString(),
-                    "", // iconBase64 — 비어 있으면 소비자 폴백 아이콘
+                    iconBase64(appCtx),
                     PluginContract.actionsJson(),
                 ),
             )
         }
     }
+
+    /**
+     * 런처 적응형 아이콘을 96px PNG base64 한 줄로 렌더한다 (SDK §3 iconBase64).
+     * 벡터 리소스라 런타임에 그린다. 실패하면 빈값 → 소비자 폴백 아이콘.
+     */
+    private fun iconBase64(appCtx: android.content.Context): String = runCatching {
+        val sizePx = 96
+        val bg = appCtx.getDrawable(R.drawable.ic_launcher_background) ?: return ""
+        val fg = appCtx.getDrawable(R.drawable.ic_launcher_foreground) ?: return ""
+        val bmp = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bmp)
+        bg.setBounds(0, 0, sizePx, sizePx)
+        bg.draw(canvas)
+        // 적응형 안전영역 72/108dp를 중앙에 — 바깥 링이 잘리지 않게
+        val inset = (sizePx * (1 - 72.0 / 108.0) / 2).toInt()
+        fg.setBounds(inset, inset, sizePx - inset, sizePx - inset)
+        fg.draw(canvas)
+        val out = ByteArrayOutputStream()
+        bmp.compress(Bitmap.CompressFormat.PNG, 100, out)
+        Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)
+    }.getOrDefault("")
 
     override fun getType(uri: Uri): String? = "vnd.android.cursor.item/plugin-info"
 
