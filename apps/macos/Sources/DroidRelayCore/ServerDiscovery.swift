@@ -20,8 +20,8 @@ public actor ServerDiscovery {
     // MARK: - 탐색
 
     public func discover() async -> Result? {
-        if let c = cached, await RelayClient.probe(c.baseURL) != nil {
-            return Result(info: c, strategy: .cached, elapsed: 0)
+        if let c = cached, let fresh = await RelayClient.probe(c.baseURL) {
+            return Result(info: fresh, strategy: .cached, elapsed: 0)
         }
         let ctx = Self.currentContext()
         if let r = await tryGateway(ctx) { return r }
@@ -67,19 +67,43 @@ public actor ServerDiscovery {
         return nil
     }
 
-    /// 병렬 스캔. 측정 기준 병렬 128 — 254호스트가 0.11초였다.
-    private func scan(_ hosts: [String], ports: [Int], limit: Int = 128) async -> ServerInfo? {
-        await withTaskGroup(of: ServerInfo?.self) { group in
-            var it = hosts.makeIterator()
-            var running = 0
-            while running < limit, let h = it.next() {
+    /// 병렬 스캔. 측정 기준 동시 128 — 254호스트가 0.11초였다.
+    ///
+    /// ## 왜 파이프라이닝인가 (2026-10-08 실제 버그)
+    ///
+    /// 이전 코드는 처음 128개만 태스크로 올리고 `for await` 로 기다렸다.
+    /// 128개가 전부 실패하면 그대로 `nil` — 나머지 129~254는 **한 번도 안 두드렸다.**
+    /// `.211` 같은 흔한 폰 주소가 뒤쪽이라 집 공유기에서 자동 탐색이 영영 실패했다.
+    /// → 끝난 자리마다 다음 호스트를 채워 **전부를** 훑는다. 동시성은 유지된다.
+    /// `probe` 를 주입받는 이유 — 테스트에서 네트워크 없이 "전부를 훑는가" 를 본다.
+    func scan(
+        _ hosts: [String],
+        ports: [Int],
+        limit: Int = 128,
+        probe: @Sendable @escaping (URL) async -> ServerInfo? = RelayClient.probe
+    ) async -> ServerInfo? {
+        guard !hosts.isEmpty, !ports.isEmpty else { return nil }
+        return await withTaskGroup(of: ServerInfo?.self) { group in
+            var idx = 0
+            var inFlight = 0
+            func enqueueHost() -> Bool {
+                guard idx < hosts.count else { return false }
+                let h = hosts[idx]; idx += 1
                 for p in ports {
-                    group.addTask { await RelayClient.probe(URL(string: "http://\(h):\(p)")!) }
+                    let host = h
+                    let port = p
+                    group.addTask { await probe(URL(string: "http://\(host):\(port)")!) }
+                    inFlight += 1
                 }
-                running += 1
+                return true
             }
-            for await r in group {
+            // 처음 `limit` 개 태스크까지 채운다 (포트가 여러 개면 호스트 수는 그만큼 적다).
+            while inFlight < limit, enqueueHost() {}
+            while let r = await group.next() {
+                inFlight -= 1
                 if let r { group.cancelAll(); return r }
+                while inFlight < limit, enqueueHost() {}
+                if inFlight == 0 { break }
             }
             return nil
         }

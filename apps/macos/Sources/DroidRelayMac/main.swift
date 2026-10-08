@@ -112,7 +112,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // diagnose 는 StatusItem 을 만들지 않으므로. `statusItem.view` 로 전환하면서
         // `statusItem.button` 이 nil 이 된 걸 놓친 것이 딱 이 경고 사례다.
         if CommandLine.arguments.contains("--popover-check") {
-            let m = AppModel(storedAddress: UserDefaults.standard.string(forKey: "serverAddress"))
+            let m = AppModel(storedAddress: UserDefaults.standard.string(forKey: AppModel.serverAddressKey))
             let c = StatusItemController(model: m)
             model = m; controller = c
             c.install()
@@ -140,7 +140,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // **팝오버를 열고 대기** — 밖에서 `Tools/DumpAX.swift` 로 화면 내용을 읽는다.
         // 앱 스스로 덤프하면 자기 자신을 원격 AX 로 질의할 수 없어(창 0개) 무의미하다.
         if CommandLine.arguments.contains("--ui-hold") {
-            let m = AppModel(storedAddress: UserDefaults.standard.string(forKey: "serverAddress"))
+            let m = AppModel(storedAddress: UserDefaults.standard.string(forKey: AppModel.serverAddressKey))
             let c = StatusItemController(model: m)
             model = m; controller = c
             c.install()
@@ -160,7 +160,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // 그 경로는 **사람 손이 두 번 필요**하고 **AX 로는 메뉴바를 못 건드린다.**
             // 플래그가 없으면 이 창은 눈으로만 검증된다 — 그러면 "뜨나 안 뜨나" 를
             // 추측으로만 말하게 되고, 실제로 그렇게 실패했다.
-            let m = AppModel(storedAddress: UserDefaults.standard.string(forKey: "serverAddress"))
+            let m = AppModel(storedAddress: UserDefaults.standard.string(forKey: AppModel.serverAddressKey))
             let c = StatusItemController(model: m)
             model = m; controller = c
             c.install()
@@ -173,7 +173,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         if CommandLine.arguments.contains("--ui-dump") {
-            let m = AppModel(storedAddress: UserDefaults.standard.string(forKey: "serverAddress"))
+            let m = AppModel(storedAddress: UserDefaults.standard.string(forKey: AppModel.serverAddressKey))
             let c = StatusItemController(model: m)
             model = m; controller = c
             c.install()
@@ -195,7 +195,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         if CommandLine.arguments.contains("--watch") {
-            let m = AppModel(storedAddress: UserDefaults.standard.string(forKey: "serverAddress"))
+            let m = AppModel(storedAddress: UserDefaults.standard.string(forKey: AppModel.serverAddressKey))
             let c = StatusItemController(model: m)
             model = m; controller = c
             c.install()
@@ -229,7 +229,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         // Dock 아이콘 숨김은 `Boot.start()` 에서 이미 했다.
 
-        let m = AppModel(storedAddress: UserDefaults.standard.string(forKey: "serverAddress"))
+        let m = AppModel(storedAddress: UserDefaults.standard.string(forKey: AppModel.serverAddressKey))
         model = m
         let c = StatusItemController(model: m)
         controller = c
@@ -478,7 +478,7 @@ enum Diagnostics {
     /// `AppModel` 과 `StatusItemController` 가 둘 다 MainActor 격리라 본문을 통째로 격리한다.
     @MainActor
     static func titleCheck() async {
-        let m = AppModel(storedAddress: UserDefaults.standard.string(forKey: "serverAddress"))
+        let m = AppModel(storedAddress: UserDefaults.standard.string(forKey: AppModel.serverAddressKey))
         if let s = await m.server { _ = s }
         // 값이 0 이면 "속도가 안 뜬다" 와 "서버에 값이 없다" 를 구분할 수 없다.
         // 그래서 **값이 있는 것처럼 채워서** 문자열이 어떻게 조립되는지 본다.

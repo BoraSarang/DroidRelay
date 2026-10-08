@@ -501,6 +501,7 @@ final class AppModel {
         }
         server = r.info
         stored = r.info.displayAddress
+        persistStored()
         phase = .connected(r.strategy)
         await refresh()
         subscribe()
@@ -516,12 +517,29 @@ final class AppModel {
         guard let info = await RelayClient.probe(u) else { phase = .failed; return }
         server = info
         stored = info.displayAddress
+        persistStored()
         phase = .connected(.manual)
         await refresh()
         subscribe()
     }
 
     var storedAddress: String? { stored }
+
+    /// **찾은 주소를 디스크에 남긴다 — 다음 실행의 `cached` 가 이것을 읽는다.**
+    ///
+    /// ## 왜 이게 없으면 자동 탐색이 "안 된다" 로 보이는가 (2026-10-08)
+    ///
+    /// `main.swift` 는 매 실행 `UserDefaults("serverAddress")` 로 `AppModel` 을 만든다.
+    /// 그런데 `connect()` 가 성공해도 **여기에 저장하지 않았다** — 메모리에만 뒀다.
+    /// → 매번 `cached=nil` 로 시작해 게이트웨이·서브넷을 처음부터 다시 훑는다.
+    /// 서브넷 스캔이 앞쪽 128개만 보던 버그와 겹쳐 `.211` 같은 폰은 매번 놓쳤다.
+    private func persistStored() {
+        if let s = stored {
+            UserDefaults.standard.set(s, forKey: Self.serverAddressKey)
+        }
+    }
+
+    static let serverAddressKey = "serverAddress"
 
     /// 진단 출력용 — 지금 어느 전략으로 붙어 있는지
     var phaseLabel: String {
