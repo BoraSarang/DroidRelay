@@ -112,6 +112,8 @@ data class AppSettings(
     val completionAction: String = SettingsConstraints.DEFAULT_COMPLETION_ACTION,
     // 유휴 자동 정지 (분, 0=끔) — 작업·전송·토렌트 활동이 없으면 서비스 자정지
     val idleTimeoutMin: Int = SettingsConstraints.DEFAULT_IDLE_TIMEOUT_MIN,
+    // adb 플러그인 연동 허용 (T-1095, 기본 ON — OFF면 액션 무시+거부 로그, 이벤트 미발행)
+    val pluginAllowed: Boolean = true,
 )
 
 private val Context.settingsDataStore by preferencesDataStore("droidrelay_settings")
@@ -206,6 +208,8 @@ class SettingsRepository(private val context: Context) {
         val COMPLETION_ACTION = stringPreferencesKey("completion_action")
         // 유휴 자동 정지 (분, 0=끔)
         val IDLE_TIMEOUT_MIN = intPreferencesKey("idle_timeout_min")
+        // adb 플러그인 연동 허용 (T-1095)
+        val PLUGIN_ALLOWED = booleanPreferencesKey("plugin_allowed")
     }
 
     val settings: Flow<AppSettings> = context.settingsDataStore.data.map { p ->
@@ -284,6 +288,7 @@ class SettingsRepository(private val context: Context) {
                 ?: SettingsConstraints.COMPLETION_ACTION_NONE,
             idleTimeoutMin = (p[Keys.IDLE_TIMEOUT_MIN] ?: SettingsConstraints.DEFAULT_IDLE_TIMEOUT_MIN)
                 .coerceIn(SettingsConstraints.IDLE_TIMEOUT_MIN, SettingsConstraints.IDLE_TIMEOUT_MAX),
+            pluginAllowed = p[Keys.PLUGIN_ALLOWED] ?: true,
         )
     }
 
@@ -423,6 +428,10 @@ class SettingsRepository(private val context: Context) {
         context.settingsDataStore.edit {
             it[Keys.IDLE_TIMEOUT_MIN] = min.coerceIn(SettingsConstraints.IDLE_TIMEOUT_MIN, SettingsConstraints.IDLE_TIMEOUT_MAX)
         }
+
+    // adb 플러그인 연동 허용 (T-1095)
+    suspend fun setPluginAllowed(allowed: Boolean) =
+        context.settingsDataStore.edit { it[Keys.PLUGIN_ALLOWED] = allowed }
 
     suspend fun addAllowedIp(ip: String) =
         context.settingsDataStore.edit { it[Keys.ALLOWED_IPS] = (it[Keys.ALLOWED_IPS] ?: emptySet()) + ip }

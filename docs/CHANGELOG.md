@@ -1,5 +1,37 @@
 # Changelog
 
+## [Unreleased] — Plugin SDK v2 승격 (T-1096)
+
+> Android 테스트 **362건 중 361 통과** (신규 `PluginContractTest` 9건 0 실패 · `CronParserPerfTest` 1건은 사전 존재 실패)
+> 실기 검증 (10.112.134.138:5555): 프로브 v2 (`version=2 … appVersion=0.50.0`) · Provider 1행 7컬럼 ·
+> 브로드캐스트 `server_status` → `running=false` (전면 전환 없음, launcher resumed 유지) · 무효 cmd → `E-AND-PLG-0002`
+> 규칙 원천: RelayConsole `docs/PLUGIN_SDK.md` v2
+
+### Changed [android] — 제공자 SDK v2 (L2)
+
+- 프로브 수신기 `.plugin` → `.receiver` + `version=2`·`appVersion` 필수 + manifest meta-data `version=2`
+- 메타 Provider 신규 (`content://com.borasarang.droidrelay.plugin/info`, actionsJson 4종). `iconBase64` 빈값 → 소비자 폴백
+- 액션 호출 브로드캐스트 전환 (`PLUGIN_ACTION` cmd/arg), MainActivity 전면 경로 제거
+- EVENT `level=` 필수 (완료 info·실패 warning) + 파일명 공백 sanitize (§5.2 값 규칙)
+- 단일 emit — `DebugLogger` 미러 제거 (SDK §8 이중로그 지적)
+- **실측 함정**: `-a`만 쓴 암시적 브로드캐스트는 Android 8+ 제한으로 manifest 수신기에 미도달.
+  `-n <package>/.plugin.PluginActionReceiver` 명시 필수 → SDK §4.1 수정 요망
+
+## [Unreleased] — adb 플러그인 계약 제공자 (T-1095)
+
+> Android 테스트 **360건 중 359 통과** (신규 `PluginContractTest` 7건 0 실패 · `CronParserPerfTest` 1건은 사전 존재 실패)
+> 실기 검증 (10.112.134.138:5555, 무선 adb): 프로브 `[PLUGIN] ... allowed=true` · `server_status` → `running=false ip=10.112.134.138 port=3000 version=0.50.0` · 무효 URL → `E-AND-PLG-0002`
+> 계약: `docs/PLUGIN_CONTRACT.md` v1 (RelayConsole 전달용)
+
+### Added [android] — 외부 도구 연동 계약 (RelayConsole 등)
+
+- 프로브: `PluginProbeReceiver` (명시적 브로드캐스트, 앱 꺼져 있어도 응답) + manifest meta-data 3키. `연동 허용` OFF여도 `allowed=false`로 응답.
+- 액션 4종 (`MainActivity` singleTop 경유, fire-and-forget): `server_status`·`server_control(start/stop)`·`download_add`·`torrent_add` — 기존 `RelayService`·`DownloadEngine`·`TorrentEngine` 재사용, 중복 등록은 안내(`duplicate=true`).
+- 이벤트 4종 (`[EVENT]`): 다운로드/토렌트 완료·실패를 기존 알림 전이 지점에서 발행. 보장 배송 아님 (logcat 링버퍼, 소비자는 `id` 중복 제거).
+- 설정 `외부 연동 허용` (기본 ON, 보안 섹션). OFF면 액션 무시 + 거부 로그, 이벤트 미발행.
+- 계약 로그는 `android.util.Log` 직접 출력 — `DebugLogger`만 쓰면 릴리즈에서 사라진다 (SpotShift 동일 함정). 디버그 패널용 미러 병행.
+- 에러코드 `E-AND-PLG-0001~0003` 등록. `announce`는 T-1090 머지 후 v1.1로 연기.
+
 ## [Unreleased] — macOS 실행 시 자동 탐색 실패 수정
 
 > macOS 테스트 **304건 통과** (신규 `ScanRegressionTests` 2건 0 실패)
