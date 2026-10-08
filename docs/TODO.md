@@ -691,6 +691,14 @@ T-001~T-008 전부 완료 (커밋 7574486).
 **기존 실패 1건 무시 지시 (사용자)**: `CronParserPerfTest > 정상 표현식은 유효`.
 `git stash`로 이번 변경을 전부 뺀 clean tree에서도 동일 실패 → **사전 존재 버그, 이번 범위 외**. 별도 처리 대기.
 
+## v0.53 (2026-10-08) — Plugin SDK v2 승격 (T-1096)
+
+**PLAN**: `docs/plans/PLAN_v0.53_plugin-sdk-v2_android.md` · **규칙 원천**: RelayConsole `docs/PLUGIN_SDK.md` v2
+
+| T-번호 | 내용 | 상태 |
+|--------|------|------|
+| T-1096 | **SDK v2 승격 (L2)** — 프로브 수신기 `.receiver` 이동 + `version=2`·`appVersion` + 메타 Provider(`content://…plugin/info`, actionsJson 4종) + 액션 브로드캐스트 전환(`PLUGIN_ACTION` cmd/arg, MainActivity 전면 제거) + EVENT `level=` + 단일 emit(DebugLogger 미러 제거) + 파일명 공백 sanitize. 검증: unit 362중 361(신규 9 GREEN, Cron 사전실패 1) + ktlint + assembleDebug + 실기기 5종(프로브 v2/Provider/액션/무효cmd/전면없음). **실측 함정: 암시적 브로드캐스트 미도달 → `-n` 명시 필수 (SDK §4.1 수정 요망)** | ✅ |
+
 ## v0.52 (2026-10-08) — adb 플러그인 계약 제공자 (T-1095)
 
 **PLAN**: `docs/plans/PLAN_v0.52_plugin-contract_android.md` · **계약**: `docs/PLUGIN_CONTRACT.md` v1 (RelayConsole 전달용)

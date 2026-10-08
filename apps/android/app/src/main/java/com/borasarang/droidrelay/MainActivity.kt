@@ -50,8 +50,6 @@ import androidx.lifecycle.lifecycleScope
 import com.borasarang.droidrelay.relay.DebugLogger
 import com.borasarang.droidrelay.relay.RelayService
 import com.borasarang.droidrelay.relay.SettingsRepository
-import com.borasarang.droidrelay.plugin.PluginContract
-import com.borasarang.droidrelay.plugin.PluginLog
 import com.borasarang.droidrelay.ui.DebugPanelContent
 import com.borasarang.droidrelay.ui.DownloadsScreen
 import com.borasarang.droidrelay.ui.FilesScreen
@@ -72,7 +70,6 @@ class MainActivity : ComponentActivity() {
         DebugLogger.i("UI", "앱 실행 onCreate")
         handleSharedIntent(intent)
         handleOpenTab(intent)
-        handlePluginIntent(intent)
 
         val settingsRepo = SettingsRepository.get(this)
         // 블로킹 I/O 제거 — DataStore 첫 로드는 코루틴에서 비동기 처리
@@ -104,7 +101,6 @@ class MainActivity : ComponentActivity() {
         setIntent(intent)
         handleSharedIntent(intent)
         handleOpenTab(intent)
-        handlePluginIntent(intent)
     }
 
     /** 공유 받기: ACTION_SEND 텍스트에서 URL/magnet 추출 (T-941) */
@@ -122,92 +118,6 @@ class MainActivity : ComponentActivity() {
             pendingSharedUrl = match
         }
         signalPending()
-    }
-
-    /** T-1095 — adb 플러그인 액션 (fire-and-forget, 결과는 [REMOTE] 로그로만 보고) */
-    private fun handlePluginIntent(intent: android.content.Intent?) {
-        if (intent == null) return
-        val serverOp = intent.getStringExtra(PluginContract.EXTRA_SERVER)
-        val dlUrl = intent.getStringExtra(PluginContract.EXTRA_DOWNLOAD_ADD)
-        val magnet = intent.getStringExtra(PluginContract.EXTRA_TORRENT_ADD)
-        if (serverOp == null && dlUrl == null && magnet == null) return
-        lifecycleScope.launch {
-            val repo = SettingsRepository.get(this@MainActivity)
-            val allowed = runCatching { repo.settings.first().pluginAllowed }.getOrDefault(true)
-            if (!allowed) {
-                PluginLog.refused()
-                return@launch
-            }
-            if (serverOp != null) handlePluginServer(serverOp)
-            if (dlUrl != null) handlePluginDownloadAdd(dlUrl)
-            if (magnet != null) handlePluginTorrentAdd(magnet)
-        }
-    }
-
-    private suspend fun handlePluginServer(op: String) {
-        val repo = SettingsRepository.get(this)
-        val settings = runCatching { repo.settings.first() }.getOrNull()
-        val port = settings?.port ?: 3000
-        when (op) {
-            PluginContract.SERVER_OP_START -> {
-                RelayService.start(this)
-                PluginLog.remote(PluginContract.remoteServerControl(op, true))
-            }
-            PluginContract.SERVER_OP_STOP -> {
-                RelayService.stop(this)
-                PluginLog.remote(PluginContract.remoteServerControl(op, false))
-            }
-            PluginContract.SERVER_OP_STATUS -> {
-                val running = repo.serverState.value.running
-                val ip = runCatching { com.borasarang.droidrelay.relay.lanAddress() }.getOrNull()
-                val version = runCatching {
-                    packageManager.getPackageInfo(packageName, 0).versionName
-                }.getOrNull() ?: "-"
-                PluginLog.remote(PluginContract.remoteServerStatus(running, ip, port, version))
-            }
-            else -> PluginLog.remote(
-                PluginContract.remoteFailure("server_control", PluginContract.ERR_INVALID_INPUT, "unknown op=$op"),
-            )
-        }
-    }
-
-    private fun handlePluginDownloadAdd(url: String) {
-        if (url.isBlank() || (!url.startsWith("http://") && !url.startsWith("https://"))) {
-            PluginLog.remote(
-                PluginContract.remoteFailure("download_add", PluginContract.ERR_INVALID_INPUT, "invalid url"),
-            )
-            return
-        }
-        val existing = com.borasarang.droidrelay.relay.JobsRepository.findDuplicateUrl(url)
-        if (existing != null) {
-            PluginLog.remote(PluginContract.remoteDownloadAdd(existing.id, true))
-            return
-        }
-        runCatching { com.borasarang.droidrelay.relay.RelayApp.get(this).enqueue(url) }
-            .onSuccess { PluginLog.remote(PluginContract.remoteDownloadAdd(it.id, false)) }
-            .onFailure {
-                PluginLog.remote(
-                    PluginContract.remoteFailure("download_add", PluginContract.ERR_EXEC_FAILED, it.message ?: "-"),
-                )
-            }
-    }
-
-    private fun handlePluginTorrentAdd(magnet: String) {
-        if (magnet.isBlank() || !magnet.startsWith("magnet:")) {
-            PluginLog.remote(
-                PluginContract.remoteFailure("torrent_add", PluginContract.ERR_INVALID_INPUT, "invalid magnet"),
-            )
-            return
-        }
-        val engine = com.borasarang.droidrelay.relay.RelayApp.getTorrent(this)
-        val dup = engine.isDuplicateMagnet(magnet)
-        runCatching { engine.addMagnet(magnet) }
-            .onSuccess { PluginLog.remote(PluginContract.remoteTorrentAdd(it.id, dup)) }
-            .onFailure {
-                PluginLog.remote(
-                    PluginContract.remoteFailure("torrent_add", PluginContract.ERR_EXEC_FAILED, it.message ?: "-"),
-                )
-            }
     }
 
     @Deprecated("Deprecated in Java")

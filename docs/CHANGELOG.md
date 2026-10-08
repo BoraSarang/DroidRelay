@@ -1,5 +1,22 @@
 # Changelog
 
+## [Unreleased] — Plugin SDK v2 승격 (T-1096)
+
+> Android 테스트 **362건 중 361 통과** (신규 `PluginContractTest` 9건 0 실패 · `CronParserPerfTest` 1건은 사전 존재 실패)
+> 실기 검증 (10.112.134.138:5555): 프로브 v2 (`version=2 … appVersion=0.50.0`) · Provider 1행 7컬럼 ·
+> 브로드캐스트 `server_status` → `running=false` (전면 전환 없음, launcher resumed 유지) · 무효 cmd → `E-AND-PLG-0002`
+> 규칙 원천: RelayConsole `docs/PLUGIN_SDK.md` v2
+
+### Changed [android] — 제공자 SDK v2 (L2)
+
+- 프로브 수신기 `.plugin` → `.receiver` + `version=2`·`appVersion` 필수 + manifest meta-data `version=2`
+- 메타 Provider 신규 (`content://com.borasarang.droidrelay.plugin/info`, actionsJson 4종). `iconBase64` 빈값 → 소비자 폴백
+- 액션 호출 브로드캐스트 전환 (`PLUGIN_ACTION` cmd/arg), MainActivity 전면 경로 제거
+- EVENT `level=` 필수 (완료 info·실패 warning) + 파일명 공백 sanitize (§5.2 값 규칙)
+- 단일 emit — `DebugLogger` 미러 제거 (SDK §8 이중로그 지적)
+- **실측 함정**: `-a`만 쓴 암시적 브로드캐스트는 Android 8+ 제한으로 manifest 수신기에 미도달.
+  `-n <package>/.plugin.PluginActionReceiver` 명시 필수 → SDK §4.1 수정 요망
+
 ## [Unreleased] — adb 플러그인 계약 제공자 (T-1095)
 
 > Android 테스트 **360건 중 359 통과** (신규 `PluginContractTest` 7건 0 실패 · `CronParserPerfTest` 1건은 사전 존재 실패)

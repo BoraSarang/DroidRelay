@@ -68,10 +68,10 @@
                 android:value="On-device debug log overlay for LAN relay diagnostics" />
         </service>
 
-        <!-- adb 플러그인 계약 v1 (T-1095) — 정적 명찰 + discovery 프로브 -->
+        <!-- adb 플러그인 계약 v2 (T-1096) — 정적 명찰 + discovery 프로브 + 액션 + 메타 Provider -->
         <meta-data
             android:name="droidrelay.plugin.version"
-            android:value="1" />
+            android:value="2" />
         <meta-data
             android:name="droidrelay.plugin.actions"
             android:value="server_status,server_control,download_add,torrent_add" />
@@ -80,12 +80,25 @@
             android:value="DroidRelay" />
 
         <receiver
-            android:name=".plugin.PluginProbeReceiver"
+            android:name=".receiver.PluginProbeReceiver"
             android:exported="true">
             <intent-filter>
                 <action android:name="com.borasarang.droidrelay.PLUGIN_PROBE" />
             </intent-filter>
         </receiver>
+
+        <receiver
+            android:name=".plugin.PluginActionReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.borasarang.droidrelay.PLUGIN_ACTION" />
+            </intent-filter>
+        </receiver>
+
+        <provider
+            android:name=".plugin.PluginInfoProvider"
+            android:authorities="com.borasarang.droidrelay.plugin"
+            android:exported="true" />
 
         <receiver
             android:name=".relay.BootReceiver"
