@@ -114,6 +114,10 @@ data class AppSettings(
     val idleTimeoutMin: Int = SettingsConstraints.DEFAULT_IDLE_TIMEOUT_MIN,
     // adb 플러그인 연동 허용 (T-1095, 기본 ON — OFF면 액션 무시+거부 로그, 이벤트 미발행)
     val pluginAllowed: Boolean = true,
+    // 저전력 모드 (S22 서버폰용 — 동시성 1 강제 + 워커 little 고정 best-effort, 기본 OFF)
+    val lowPowerMode: Boolean = false,
+    // 웹 UI 서버 사용 (기본 ON — OFF면 RelayService는 유지되고 Ktor 웹서버만 미기동)
+    val webServerEnabled: Boolean = true,
 )
 
 private val Context.settingsDataStore by preferencesDataStore("droidrelay_settings")
@@ -210,6 +214,9 @@ class SettingsRepository(private val context: Context) {
         val IDLE_TIMEOUT_MIN = intPreferencesKey("idle_timeout_min")
         // adb 플러그인 연동 허용 (T-1095)
         val PLUGIN_ALLOWED = booleanPreferencesKey("plugin_allowed")
+        // 저전력 모드 + 웹 UI 서버 분리 (S22 서버폰)
+        val LOW_POWER_MODE = booleanPreferencesKey("low_power_mode")
+        val WEB_SERVER_ENABLED = booleanPreferencesKey("web_server_enabled")
     }
 
     val settings: Flow<AppSettings> = context.settingsDataStore.data.map { p ->
@@ -289,6 +296,8 @@ class SettingsRepository(private val context: Context) {
             idleTimeoutMin = (p[Keys.IDLE_TIMEOUT_MIN] ?: SettingsConstraints.DEFAULT_IDLE_TIMEOUT_MIN)
                 .coerceIn(SettingsConstraints.IDLE_TIMEOUT_MIN, SettingsConstraints.IDLE_TIMEOUT_MAX),
             pluginAllowed = p[Keys.PLUGIN_ALLOWED] ?: true,
+            lowPowerMode = p[Keys.LOW_POWER_MODE] ?: false,
+            webServerEnabled = p[Keys.WEB_SERVER_ENABLED] ?: true,
         )
     }
 
@@ -432,6 +441,14 @@ class SettingsRepository(private val context: Context) {
     // adb 플러그인 연동 허용 (T-1095)
     suspend fun setPluginAllowed(allowed: Boolean) =
         context.settingsDataStore.edit { it[Keys.PLUGIN_ALLOWED] = allowed }
+
+    // 저전력 모드 (S22 서버폰)
+    suspend fun setLowPowerMode(enabled: Boolean) =
+        context.settingsDataStore.edit { it[Keys.LOW_POWER_MODE] = enabled }
+
+    // 웹 UI 서버 사용 (OFF면 다운로드 엔진은 유지, Ktor만 미기동)
+    suspend fun setWebServerEnabled(enabled: Boolean) =
+        context.settingsDataStore.edit { it[Keys.WEB_SERVER_ENABLED] = enabled }
 
     suspend fun addAllowedIp(ip: String) =
         context.settingsDataStore.edit { it[Keys.ALLOWED_IPS] = (it[Keys.ALLOWED_IPS] ?: emptySet()) + ip }

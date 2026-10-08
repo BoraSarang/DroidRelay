@@ -61,6 +61,7 @@ class DownloadEngine(
     }
 
     @Volatile private var concurrencyTarget = 1
+    @Volatile private var lowPower = false
     @Volatile private var limitKbps = 0
 
     // workDir 매 접근 mkdirs() 제거 — lazy 1회 생성 (syscall 절감)
@@ -77,11 +78,15 @@ class DownloadEngine(
         DebugLogger.i(TAG, "엔진 초기화 workDir=${workDir.absolutePath}")
         scope.launch {
             settings.settings.collect { s ->
-                concurrencyTarget = s.concurrency
+                lowPower = s.lowPowerMode
+                concurrencyTarget = PowerTune.effectiveConcurrency(s.concurrency, s.lowPowerMode)
+                // 저전력 시 OkHttp 풀도 축소 — 동시 접속 폭증이 X2 기상의 주범
+                client.dispatcher.maxRequests = if (s.lowPowerMode) 4 else 32
+                client.dispatcher.maxRequestsPerHost = if (s.lowPowerMode) 2 else 16
                 limitKbps = s.speedLimitKbps
                 maxDownloadBps.set(s.maxDownloadBps)
                 maxUploadBps.set(s.maxUploadBps)
-                DebugLogger.d(TAG, "설정 반영 동시성=${s.concurrency} 스로틀=${s.speedLimitKbps}KB/s 전역DL=${s.maxDownloadBps}B/s 전역UL=${s.maxUploadBps}B/s")
+                DebugLogger.d(TAG, "설정 반영 동시성=${s.concurrency}→유효$concurrencyTarget 저전력=${s.lowPowerMode} 스로틀=${s.speedLimitKbps}KB/s 전역DL=${s.maxDownloadBps}B/s 전역UL=${s.maxUploadBps}B/s")
                 tryStart()
             }
         }
@@ -101,11 +106,14 @@ class DownloadEngine(
 
     /** 전체 설정 동적 적용 (재시작 불필요) */
     fun applySettings(s: AppSettings) {
-        concurrencyTarget = s.concurrency
+        lowPower = s.lowPowerMode
+        concurrencyTarget = PowerTune.effectiveConcurrency(s.concurrency, s.lowPowerMode)
+        client.dispatcher.maxRequests = if (s.lowPowerMode) 4 else 32
+        client.dispatcher.maxRequestsPerHost = if (s.lowPowerMode) 2 else 16
         limitKbps = s.speedLimitKbps
         maxDownloadBps.set(s.maxDownloadBps)
         maxUploadBps.set(s.maxUploadBps)
-        DebugLogger.i(TAG, "다운로드 설정 적용 동시성=${s.concurrency} 스로틀=${s.speedLimitKbps}KB/s 전역DL=${s.maxDownloadBps}B/s 전역UL=${s.maxUploadBps}B/s")
+        DebugLogger.i(TAG, "다운로드 설정 적용 동시성=${s.concurrency}→유효$concurrencyTarget 저전력=${s.lowPowerMode} 스로틀=${s.speedLimitKbps}KB/s 전역DL=${s.maxDownloadBps}B/s 전역UL=${s.maxUploadBps}B/s")
         tryStart()
     }
 
@@ -232,6 +240,8 @@ class DownloadEngine(
                 DebugLogger.d(TAG, "작업 기동 id=$id (활성 ${active.get()}/$concurrencyTarget)")
                 scope.launch {
                     try {
+                        // 저전력 모드: 워커를 백그라운드 우선순위 + little 클러스터로 (best-effort)
+                        PowerTune.applyToCurrentThread(lowPower)
                         runWithRetry(id)
                     } finally {
                         active.decrementAndGet()
@@ -281,6 +291,8 @@ class DownloadEngine(
     private enum class Outcome { COMPLETED, CANCELED, PAUSED, RETRY }
 
     private suspend fun runOnce(id: String): Outcome = withContext(Dispatchers.IO) {
+        // withContext 전환 후 스레드가 달라질 수 있어 여기서도 1회 적용 (마스크 캐시됨)
+        PowerTune.applyToCurrentThread(lowPower)
         val t0 = System.currentTimeMillis()
         var job = JobsRepository.get(id) ?: return@withContext Outcome.COMPLETED
         var partial = partialFile(job)

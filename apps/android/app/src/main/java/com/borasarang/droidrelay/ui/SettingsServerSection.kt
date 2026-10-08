@@ -165,6 +165,7 @@ internal fun ServerSection(
             Text(
                 when {
                     serverState.error != null -> "에러: ${serverState.error}"
+                    !s.webServerEnabled -> "웹 UI 끔 · 다운로드는 계속 (앱에서 제어)"
                     serverState.running && serverState.httpsEnabled -> "${serverState.port}(HTTP) · ${serverState.httpsPort}(HTTPS) 실행 중"
                     serverState.running -> "${serverState.port}(HTTP) 실행 중 · HTTPS 끔"
                     serverState.httpsEnabled -> "${serverState.port}(HTTP) · ${serverState.httpsPort}(HTTPS) 대기 중"
@@ -185,9 +186,15 @@ internal fun ServerSection(
             }
         }
 
-        // Line 3: 자동 시작 분리 (v0.36)
-        SwitchRow("재부팅 시 서버 자동 시작", s.bootAutoStart) { v -> scope.launch { repo.setBootAutoStart(v) } }
-        SwitchRow("앱 실행 시 서버 자동 시작", s.launchAutoStart) { v -> scope.launch { repo.setLaunchAutoStart(v) } }
+        // Line 3: 웹 UI 분리 + 자동 시작 분리 (v0.36)
+        SwitchRow("웹 UI 서버 사용 (끄면 다운로드만 계속)", s.webServerEnabled) { v ->
+            scope.launch {
+                repo.setWebServerEnabled(v)
+                DebugLogger.i("Settings", if (v) "웹 UI 서버 사용 설정" else "웹 UI 끔 설정 — 다운로드는 계속")
+            }
+        }
+        SwitchRow("재부팅 시 자동 시작", s.bootAutoStart) { v -> scope.launch { repo.setBootAutoStart(v) } }
+        SwitchRow("앱 실행 시 자동 시작", s.launchAutoStart) { v -> scope.launch { repo.setLaunchAutoStart(v) } }
 
         // Line 4: 배터리 최적화 예외 (백그라운드 안정성)
         val pm = ctx.getSystemService(Context.POWER_SERVICE) as PowerManager

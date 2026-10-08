@@ -217,6 +217,12 @@ class RelayService : Service() {
                 currentHttpsPort = s.httpsPort
                 currentHttpsEnabled = s.httpsEnabled
                 if (server == null) {
+                    // 웹 UI 끔 모드: 서비스(다운로드 엔진·토렌트·스케줄러)는 유지, Ktor만 미기동
+                    if (!s.webServerEnabled) {
+                        settingsRepo.updateServerState(ServerState(running = false, port = s.port, httpsPort = s.httpsPort, httpsEnabled = s.httpsEnabled, url = null))
+                        lastPorts = Triple(s.port, s.httpsPort, s.httpsEnabled)
+                        return@collectLatest
+                    }
                     synchronized(serverLock) {
                         if (server == null) {
                             try {
@@ -237,6 +243,18 @@ class RelayService : Service() {
                     }
                     lastPorts = Triple(s.port, s.httpsPort, s.httpsEnabled)
                 } else {
+                    // 웹 UI를 끄면 기동 중인 Ktor를 내리고 상태만 갱신 (다운로드 엔진은 유지)
+                    if (!s.webServerEnabled) {
+                        DebugLogger.i(TAG, "웹 UI 끔 설정 — Ktor 정지, 다운로드 서비스 유지")
+                        synchronized(serverLock) {
+                            server?.stop()
+                            server = null
+                            settingsRepo.updateServerState(ServerState(running = false, port = s.port, httpsPort = s.httpsPort, httpsEnabled = s.httpsEnabled, url = null))
+                        }
+                        lastPorts = Triple(s.port, s.httpsPort, s.httpsEnabled)
+                        updateRunningNotification(s.port)
+                        return@collectLatest
+                    }
                     server?.updateSettings(s)
                     if (s.port != lastPorts.first || s.httpsPort != lastPorts.second || s.httpsEnabled != lastPorts.third) {
                         DebugLogger.i(TAG, "[FEATURE] HTTPS 설정 변경 감지 ${lastPorts.first}/${lastPorts.second}/${lastPorts.third} → ${s.port}/${s.httpsPort}/${s.httpsEnabled} — 서버 재시작")
@@ -280,6 +298,8 @@ class RelayService : Service() {
                     }
                     val current = server
                     if (current == null) {
+                        // 웹 UI 끔 모드면 watchdog도 기동하지 않음 (다운로드 서비스는 정상 상태)
+                        if (!settingsRepo.firstBlocking().webServerEnabled) continue
                         // 서버가 아예 없으면 새로 기동
                         DebugLogger.w(TAG, "watchdog: 서버가 없음 → 기동 시도")
                         healthyCount = 0
@@ -287,14 +307,18 @@ class RelayService : Service() {
                             synchronized(serverLock) {
                                 if (server == null) {
                                     val s2 = settingsRepo.firstBlocking()
-                                    val rs = RelayServer(applicationContext, s2.port, s2.httpsPort)
-                                    rs.updateSettings(s2)
-                                    if (rs.start()) {
-                                        server = rs
-                                        val url = lanAddress()?.let { "http://$it:${s2.port}" }
-                                        settingsRepo.updateServerState(ServerState(running = true, port = s2.port, httpsPort = s2.httpsPort, httpsEnabled = s2.httpsEnabled, url = url))
+                                    if (!s2.webServerEnabled) {
+                                        settingsRepo.updateServerState(ServerState(running = false, port = s2.port, httpsPort = s2.httpsPort, httpsEnabled = s2.httpsEnabled, url = null))
                                     } else {
-                                        settingsRepo.updateServerState(ServerState(running = false, port = s2.port, httpsPort = s2.httpsPort, httpsEnabled = s2.httpsEnabled, error = "서버 기동 실패"))
+                                        val rs = RelayServer(applicationContext, s2.port, s2.httpsPort)
+                                        rs.updateSettings(s2)
+                                        if (rs.start()) {
+                                            server = rs
+                                            val url = lanAddress()?.let { "http://$it:${s2.port}" }
+                                            settingsRepo.updateServerState(ServerState(running = true, port = s2.port, httpsPort = s2.httpsPort, httpsEnabled = s2.httpsEnabled, url = url))
+                                        } else {
+                                            settingsRepo.updateServerState(ServerState(running = false, port = s2.port, httpsPort = s2.httpsPort, httpsEnabled = s2.httpsEnabled, error = "서버 기동 실패"))
+                                        }
                                     }
                                 }
                             }

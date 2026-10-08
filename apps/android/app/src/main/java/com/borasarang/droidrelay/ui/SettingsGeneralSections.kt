@@ -104,6 +104,12 @@ internal fun DownloadSection(
             valueRange = 1f..4f,
             steps = 2,
         )
+        SwitchRow("저전력 모드 (동시 1개 + little 클러스터 우선)", s.lowPowerMode) { v ->
+            scope.launch {
+                repo.setLowPowerMode(v)
+                DebugLogger.i("Settings", if (v) "저전력 모드 설정 — 동시성 1 강제" else "저전력 모드 해제")
+            }
+        }
         SpeedSelectRow(
             label = "속도 제한 (파일 다운로드·업로드 공통)",
             value = s.speedLimitKbps,

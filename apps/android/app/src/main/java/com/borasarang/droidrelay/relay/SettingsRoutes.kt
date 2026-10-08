@@ -86,6 +86,7 @@ internal fun Route.settingsRoutes(context: Context, serverRef: RelayServer) {
                 put("autoClassify", s.autoClassify)
                 put("completionAction", s.completionAction)
                 put("idleTimeoutMin", s.idleTimeoutMin)
+                put("lowPowerMode", s.lowPowerMode)
             }.toString(),
             ContentType.Application.Json
         )
@@ -109,6 +110,9 @@ internal fun Route.settingsRoutes(context: Context, serverRef: RelayServer) {
             val m = json?.optInt("idleTimeoutMin", -1) ?: -1
             if (m in SettingsConstraints.IDLE_TIMEOUT_MIN..SettingsConstraints.IDLE_TIMEOUT_MAX) repo.setIdleTimeoutMin(m)
         }
+        if (json?.has("lowPowerMode") == true) {
+            repo.setLowPowerMode(json?.optBoolean("lowPowerMode") ?: false)
+        }
         // 엔진에 즉시 반영
         RelayApp.get(context).applySettings(repo.firstBlocking())
         serverRef.settings = repo.firstBlocking()
@@ -126,6 +130,7 @@ internal fun Route.settingsRoutes(context: Context, serverRef: RelayServer) {
                 put("bootAutoStart", s.bootAutoStart)
                 put("launchAutoStart", s.launchAutoStart)
                 put("forceHttpsRedirect", s.forceHttpsRedirect)
+                put("webServerEnabled", s.webServerEnabled)
             }.toString(),
             ContentType.Application.Json
         )
@@ -174,6 +179,9 @@ internal fun Route.settingsRoutes(context: Context, serverRef: RelayServer) {
         if (json.has("forceHttpsRedirect")) {
             val v = json.optBoolean("forceHttpsRedirect", false)
             repo.setForceHttpsRedirect(v && repo.firstBlocking().httpsEnabled)
+        }
+        if (json.has("webServerEnabled")) {
+            repo.setWebServerEnabled(json.optBoolean("webServerEnabled", true))
         }
         serverRef.settings = repo.firstBlocking()
         call.respondText("""{"ok":true}""", ContentType.Application.Json)

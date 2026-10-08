@@ -72,5 +72,7 @@ object PersistenceGuard {
         "debridProvider" to s.debridProvider,
         "debridApiKey" to "***",
         "guestEnabled" to s.guestEnabled,
+        "lowPowerMode" to s.lowPowerMode,
+        "webServerEnabled" to s.webServerEnabled,
     )
 }
