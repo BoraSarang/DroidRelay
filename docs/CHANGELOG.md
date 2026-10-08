@@ -1,5 +1,17 @@
 # Changelog
 
+## [Unreleased] — macOS 실행 시 자동 탐색 실패 수정
+
+> macOS 테스트 **304건 통과** (신규 `ScanRegressionTests` 2건 0 실패)
+> 실기 검증: `./build_and_run.sh diagnose macos` → `10.112.134.138:3000 v0.50.0` 게이트웨이 73ms 탐색 성공, `serverAddress` 저장 확인
+
+### Fixed [macos] — 자동 탐색이 폰을 못 찾던 버그 3건
+
+- 서브넷 스캔이 앞 128개 호스트만 훑고 나머지 129~254를 절대 안 두드림 → 끝난 자리마다 다음 호스트를 채우는 파이프라이닝으로 전부 스캔 (동시 128 유지). `.211` 같은 뒤쪽 폰 주소가 집 공유기에서 영영 안 잡히던 원인
+- 찾은 주소를 `UserDefaults(serverAddress)`에 저장하지 않아 매 실행 `cached=nil`로 전체 스캔 반복 → `connect()`·`useManualAddress()` 성공 시 저장, 다음 실행은 저장된 주소로 즉시 접속
+- `cached` 적중 시 버전이 빈 옛 `ServerInfo`를 돌려주던 문제 → probe 최신 정보 반환
+- 진단 키 하드코딩 7곳을 `AppModel.serverAddressKey`로 통일
+
 ## [Unreleased] — 토렌트·비디오 부하 개선 (T-1093, T-1094)
 
 > Android 테스트 **353건 중 352 통과** (신규 `LoadImprovementTest` 4건 0 실패 · `CronParserPerfTest` 1건은 사전 존재 실패 — 깨끗한 트리 동일, 날짜 의존)
