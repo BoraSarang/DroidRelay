@@ -717,6 +717,19 @@ T-001~T-008 전부 완료 (커밋 7574486).
 | T-1093 | **토렌트 부하 개선** — 0건이면 폴링 5초→30초(적응형, `torrentPollIntervalMs` 순수함수) · connections 200→100·peerlist 5000→2000 · 상세 피어 상위 50개+`connectedPeersTotal` · 마스터 토글 `torrentEnabled`(OFF면 세션·포트·폴링 미기동, ON이면 새 인스턴스 재기동) · 완료 후 제거 `torrentRemoveAfterMove`(기본 끔). 설정·API·앱/웹 UI. 실기 검증: OFF→정지·추가거부, ON→재기동 | ✅ |
 | T-1094 | **비디오 부하 개선** — 직접 mp4는 HTTP 엔진 우회(이어받기·작업제한·일시정지 부활, m3u8 직접주소는 FFmpeg 유지) · 가드 스로틀 시 FFmpeg도 중단(E-AND-VID-0402 FAILED, 재시도 가능) · 동시 상한 2+QUEUED 승격 · 완료 시 썸네일 선행생성 · 진행 폴링 2초. 실기 검증: 직접mp4→http 잡·제한·삭제 정상. HLS 실스트림은 미실측(사용 빈도 낮음) | ✅ |
 
+## Unreleased — 시골 LTE 대응 (RelayConsole 관측: signalDrop 70회/3일·MTTR 1,061초)
+
+> 근거: RSRP -108 / SINR 3(KT LTE) · Status 4 스로틀링 7회/47분 · 업 979KB/s · AP 42.3도 · 최고 63.4도.
+> 악순환: 신호나쁨 → 재시도/DHT 폭증 → 모뎀 발열 → 커널 스로틀(600MHz) → 속도↓ → 재시도. 시골에선 덜 하는 게 더 잘 됨.
+
+| T-번호 | 내용 | 상태 |
+|--------|------|------|
+| T-1101 | **토렌트 가드 억제** — 스로틀 발동 시 업로드 최소(1KB/s floor)·DHT/PEX 세션 레벨 일시 off(설정값 유지), 해제 시 복원 + staggered resume(3초 간격, thundering herd 방지). `guardEffective()` 순수함수 + `GuardSuppressionTest` 2건 ✅ · ktlint ✅ | ✅ |
+| T-1102 | **신호 게이트** — `SignalMonitor`(RSRP/RSRQ/SINR 스냅샷, 권한 없으면 null fail-open) + `SignalGate` 히스테리시스(정지 RSRP≤-110/SINR≤0 → 해제 RSRP≥-100/SINR≥3, 30초 캐시). `SchedulerManager.checkConstraints` + `DownloadEngine.tryStart` + `ScheduleJobService` 경유. `signalGateEnabled`(기본 끔) 설정·API·앱/웹 UI + `/api/signal/status`. `SignalGateTest` 7건 ✅ · ktlint ✅ | ✅ |
+| T-1103 | **(기록, 보류)** 재시도 백오프 연장(30s→300s) — T-1102 게이트가 있으면 재시도까지 가는 일이 급감하므로 불필요. 게이트 없이 장시간 운용 시에만 재검토 | 📝 |
+| T-1104 | **(기록, 보류)** 유휴정지+예약 공존 — cron 미사용 시 `RelayService` 스킵 조건을 안 밟으므로 불필요. 새벽 예약 본격 운용 시 `idleTimeout` 스킵 조건 완화 + JobScheduler 발화 후 신호 나쁘면 재정지 | 📝 |
+| T-1105 | **(기록, 운용)** 관측 오버헤드 분리 — 코드 변경 없음. 미러링 끄기 + 동시성 1 + 저전력 ON + 업로드 128 이하 + DHT 끔 + LTE 고정. `com.android.shell ↑49KB/s`는 adb 폴링·미러링 비용 | 📝 |
+
 ## macOS 메뉴바 클라이언트 (2026-09-28 착수) — `apps/macos/`
 
 > 착수 조건(`T-1079`) 해소: Phase 0~1 · PR #14 · #15 · 안정화 작업 전부 완료.

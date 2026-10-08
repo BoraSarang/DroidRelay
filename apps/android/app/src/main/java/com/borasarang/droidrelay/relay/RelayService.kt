@@ -141,7 +141,9 @@ class RelayService : Service() {
                         runCatching { RelayApp.getVideo(applicationContext).cancelForGuard(j.id, reason) }
                     }
                 }
-                // 토렌트도 함께 스로틀 (결함 #5)
+                // 토렌트도 함께 스로틀 (결함 #5) + 가드 억제 진입 (T-1101):
+                // 업로드 최소·DHT/PEX 정지로 모뎀 TX를 내려 발열 사이클을 끊는다
+                runCatching { torrentEng.setGuardSuppressed(true) }
                 TorrentRepository.all().forEach { t ->
                     if (t.state == TorrentState.DOWNLOADING || t.state == TorrentState.SEEDING) {
                         runCatching { torrentEng.pause(t.id) }
@@ -155,10 +157,17 @@ class RelayService : Service() {
                         runCatching { engine.resume(j.id) }
                     }
                 }
-                TorrentRepository.all().forEach { t ->
-                    if (t.state == TorrentState.PAUSED) {
-                        runCatching { torrentEng.resume(t.id) }
-                    }
+                // 가드 억제 해제 + staggered resume (T-1101):
+                // 일괄 재개하면 DHT·트래커·피어 재접속이 동시에 터져 모뎀에 즉시 과부하가 걸린다.
+                // 3초 간격으로 깨워 thundering herd를 방지한다.
+                runCatching { torrentEng.setGuardSuppressed(false) }
+                scope.launch {
+                    TorrentRepository.all()
+                        .filter { it.state == TorrentState.PAUSED }
+                        .forEachIndexed { i, t ->
+                            if (i > 0) delay(GUARD_RESUME_STAGGER_MS)
+                            runCatching { torrentEng.resume(t.id) }
+                        }
                 }
             }
         }
@@ -884,6 +893,8 @@ class RelayService : Service() {
         private const val WATCHDOG_FAIL_STREAK = 3
         /** 유휴 모니터 틱 — 60초마다 판정 (배터리 영향 무시 수준) */
         private const val IDLE_CHECK_MS = 60_000L
+        /** 가드 해제 후 토렌트 staggered resume 간격 (T-1101) */
+        private const val GUARD_RESUME_STAGGER_MS = 3_000L
         const val ACTION_ALLOW = "com.borasarang.droidrelay.ALLOW"
         const val ACTION_DENY = "com.borasarang.droidrelay.DENY"
         const val EXTRA_IP = "ip"

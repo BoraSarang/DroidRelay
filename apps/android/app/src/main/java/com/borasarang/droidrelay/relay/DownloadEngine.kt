@@ -63,6 +63,8 @@ class DownloadEngine(
     @Volatile private var concurrencyTarget = 1
     @Volatile private var lowPower = false
     @Volatile private var limitKbps = 0
+    /** 신호 게이트 켜짐 여부 캐시 (T-1102) — 설정 Flow에서 갱신, tryStart 진입 차단용 */
+    @Volatile private var signalGateEnabled = false
 
     // workDir 매 접근 mkdirs() 제거 — lazy 1회 생성 (syscall 절감)
     private val cachedWorkDir: File by lazy {
@@ -86,11 +88,23 @@ class DownloadEngine(
                 limitKbps = s.speedLimitKbps
                 maxDownloadBps.set(s.maxDownloadBps)
                 maxUploadBps.set(s.maxUploadBps)
+                signalGateEnabled = s.signalGateEnabled
                 DebugLogger.d(TAG, "설정 반영 동시성=${s.concurrency}→유효$concurrencyTarget 저전력=${s.lowPowerMode} 스로틀=${s.speedLimitKbps}KB/s 전역DL=${s.maxDownloadBps}B/s 전역UL=${s.maxUploadBps}B/s")
                 tryStart()
             }
         }
         restore()
+        // 신호 게이트 해제 감시 (T-1102) — 홀드 중 enqueue된 큐는 이벤트가 없으면 영영 안 깬다.
+        // 60초 틱으로 보류 큐가 있을 때만 tryStart()를 두드린다. 게이트 꺼짐·큐 비어있음이면 no-op.
+        // 스냅샷은 30초 캐시라 binder 왕복은 분당 최대 1회다.
+        scope.launch {
+            while (true) {
+                delay(GATE_WAKE_MS)
+                if (!signalGateEnabled) continue
+                val hasPending = synchronized(pendingLock) { pending.isNotEmpty() }
+                if (hasPending) tryStart()
+            }
+        }
     }
 
     /** 복원 완료 여부 — `onDestroy`·`onTaskRemoved` 의 즉시 저장이 이를 확인한다 */
@@ -113,6 +127,7 @@ class DownloadEngine(
         limitKbps = s.speedLimitKbps
         maxDownloadBps.set(s.maxDownloadBps)
         maxUploadBps.set(s.maxUploadBps)
+        signalGateEnabled = s.signalGateEnabled
         DebugLogger.i(TAG, "다운로드 설정 적용 동시성=${s.concurrency}→유효$concurrencyTarget 저전력=${s.lowPowerMode} 스로틀=${s.speedLimitKbps}KB/s 전역DL=${s.maxDownloadBps}B/s 전역UL=${s.maxUploadBps}B/s")
         tryStart()
     }
@@ -232,6 +247,15 @@ class DownloadEngine(
 
     private fun tryStart() {
         synchronized(startLock) {
+            // 신호 게이트 (T-1102) — 나쁠 때 신규 시작만 보류, 진행 중은 유지.
+            // 여기서 막지 않으면 단절 구간에 enqueue→즉시실패→재시도가 모뎀을 계속 깨운다.
+            if (signalGateEnabled) {
+                val held = runCatching { SignalGateCache.shouldHold(context) }.getOrDefault(false)
+                if (held) {
+                    DebugLogger.d(TAG, "신호 게이트 홀드 — 신규 시작 보류 (${SignalGateCache.lastInfo?.display()})")
+                    return
+                }
+            }
             while (active.get() < concurrencyTarget) {
                 val id = dequeuePending() ?: break
                 val j = JobsRepository.get(id) ?: continue
@@ -555,6 +579,8 @@ class DownloadEngine(
         private const val PUBLISH_BUFFER_SIZE = 512 * 1024
         private const val TICK_MS = 1_000L
         private const val MAX_RETRY = 5
+        /** 신호 게이트 해제 감시 틱 (T-1102) — SpeedScheduleManager 60초 틱과 동일 예산 */
+        private const val GATE_WAKE_MS = 60_000L
     }
 }
 

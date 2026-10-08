@@ -104,7 +104,9 @@ class SchedulerManager(private val context: Context) {
     }
 
     /**
-     * 조건 체크 — Wi-Fi, 충전, 배터리.
+     * 조건 체크 — Wi-Fi, 충전, 배터리, 신호(T-1102).
+     * 신호 게이트가 켜져 있고 RSRP/SINR이 홀드 구간이면 false (큐 신규 시작·스케줄 발화 보류).
+     * 진행 중 전송은 건드리지 않는다 — 일시적 난조에 돌아가던 것을 끊으면 이어받기 폭증만 난다.
      */
     fun checkConstraints(settings: AppSettings): Boolean {
         val wifiOk = if (settings.scheduleWifiOnly) isWifiConnected() else true
@@ -123,6 +125,14 @@ class SchedulerManager(private val context: Context) {
         if (!batteryOk) {
             DebugLogger.d(TAG, "배터리 부족 (${batteryLevel}%) — 스케줄 건너뜀")
             return false
+        }
+        if (settings.signalGateEnabled) {
+            val held = runCatching { SignalGateCache.shouldHold(context) }.getOrDefault(false)
+            DebugLogger.d(TAG, "신호 게이트 held=$held (${SignalGateCache.lastInfo?.display() ?: "측정 불가"})")
+            if (held) {
+                DebugLogger.i(TAG, "신호 나쁨 — 스케줄 건너뜀 (${SignalGateCache.lastInfo?.display()})")
+                return false
+            }
         }
         return true
     }

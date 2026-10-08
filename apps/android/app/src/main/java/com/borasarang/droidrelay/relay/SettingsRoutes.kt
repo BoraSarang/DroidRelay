@@ -708,6 +708,7 @@ internal fun Route.settingsRoutes(context: Context, serverRef: RelayServer) {
                 put("scheduleWifiOnly", s.scheduleWifiOnly)
                 put("scheduleChargingOnly", s.scheduleChargingOnly)
                 put("scheduleBatteryMin", s.scheduleBatteryMin)
+                put("signalGateEnabled", s.signalGateEnabled)
                 put("cronValid", CronParser.isValid(s.scheduleCron))
             }.toString(),
             ContentType.Application.Json
@@ -723,7 +724,35 @@ internal fun Route.settingsRoutes(context: Context, serverRef: RelayServer) {
         if (json?.has("scheduleWifiOnly") == true) json?.optBoolean("scheduleWifiOnly")?.let { repo.setScheduleWifiOnly(it) }
         if (json?.has("scheduleChargingOnly") == true) json?.optBoolean("scheduleChargingOnly")?.let { repo.setScheduleChargingOnly(it) }
         if (json?.has("scheduleBatteryMin") == true) json?.optInt("scheduleBatteryMin")?.let { repo.setScheduleBatteryMin(it) }
+        if (json?.has("signalGateEnabled") == true) json?.optBoolean("signalGateEnabled")?.let { repo.setSignalGateEnabled(it) }
         serverRef.settings = repo.firstBlocking()
         call.respondText("""{"ok":true}""", ContentType.Application.Json)
+    }
+
+    // ── 신호 상태 (T-1102, 시골 LTE) — 게이트 판정 근거 노출 (임계 포함)
+    get("/api/signal/status") {
+        val s = serverRef.settings
+        val info = runCatching { SignalMonitor(context).snapshot() }.getOrDefault(SignalInfo())
+        val held = if (s.signalGateEnabled) {
+            runCatching { SignalGateCache.shouldHold(context) }.getOrDefault(false)
+        } else {
+            SignalGate.decide(info.rsrpDbm, info.sinrDb, SignalGateCache.isHeld())
+        }
+        call.respondText(
+            JSONObject().apply {
+                put("carrier", info.carrier ?: JSONObject.NULL)
+                put("rat", info.rat ?: JSONObject.NULL)
+                put("rsrpDbm", info.rsrpDbm ?: JSONObject.NULL)
+                put("rsrqDb", info.rsrqDb ?: JSONObject.NULL)
+                put("sinrDb", info.sinrDb ?: JSONObject.NULL)
+                put("held", held)
+                put("gateEnabled", s.signalGateEnabled)
+                put("holdRsrpDbm", SignalGate.HOLD_RSRP_DBM)
+                put("holdSinrDb", SignalGate.HOLD_SINR_DB)
+                put("releaseRsrpDbm", SignalGate.RELEASE_RSRP_DBM)
+                put("releaseSinrDb", SignalGate.RELEASE_SINR_DB)
+            }.toString(),
+            ContentType.Application.Json
+        )
     }
 }

@@ -1,5 +1,23 @@
 # Changelog
 
+## [Unreleased] — 시골 LTE 대응: 토렌트 가드 억제·신호 게이트 (T-1101, T-1102)
+
+> Android 테스트 **380건 중 379 통과** (신규 `SignalGateTest` 7건·`GuardSuppressionTest` 2건 0 실패 · `CronParserPerfTest` 1건은 사전 존재 실패, 원본 트리 확인) · ktlint 통과
+> 근거: RelayConsole 관측 signalDrop 70회/3일·MTTR 1,061초 · RSRP -108 / SINR 3 · Status 4 7회/47분 · AP 42.3도
+
+### Added [android] — 토렌트 가드 억제 (T-1101)
+
+- 스로틀 발동 시 업로드 최소(1KB/s floor)·DHT/PEX 세션 레벨 일시 off — 설정값은 유지, 해제 시 복원 (0건 절전과 동일 계약, `guardEffective()`)
+- 해제 시 staggered resume(3초 간격) — DHT·트래커·피어 재접속 동시 폭증(thundering herd) 방지
+- 기록(보류): 재시도 백오프 연장(T-1103)·유휴정지+예약 공존(T-1104)은 게이트·수동 운용이면 불필요, 운용 항목(T-1105)은 미러링 끄기·동시성 1·저전력 ON 등 코드 변경 없음
+
+### Added [android] — 신호 게이트 (T-1102)
+
+- `SignalMonitor` 신규(RSRP/RSRQ/SINR 스냅샷, 권한 없으면 null fail-open — 큐가 영영 서지 않음)
+- `SignalGate` 히스테리시스: 정지 RSRP≤-110/SINR≤0 → 해제 RSRP≥-100/SINR≥3, 30초 공유 캐시
+- 적용점: `SchedulerManager.checkConstraints` + `DownloadEngine.tryStart`(신규 시작만 보류, 진행 중 유지) + 경유 `ScheduleJobService`. 홀드 중 쌓인 큐는 60초 티커가 해제 후 깨움
+- 설정 `signalGateEnabled`(기본 끔): 앱 스케줄 섹션 + 웹 스케줄 설정 + `/api/settings/schedule` + 상태 확인용 `GET /api/signal/status`(현재값·임계·held)
+
 ## [Unreleased] — 저전력 모드 + 웹 UI 분리 (S22 서버폰)
 
 > Android 테스트 **371건 중 370 통과** (신규 `PowerTuneTest` 9건 0 실패 · `CronParserPerfTest` 1건은 사전 존재 실패, 원본 트리 확인)
