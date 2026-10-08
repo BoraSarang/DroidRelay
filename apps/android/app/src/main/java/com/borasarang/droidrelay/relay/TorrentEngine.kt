@@ -441,7 +441,7 @@ class TorrentEngine(
                 latestRemoveAfterMove = s.torrentRemoveAfterMove
                 latestStallThresholdKbps = s.torrentStallThresholdKbps
                 latestStallTimeoutSec = s.torrentStallTimeoutSec
-                latestMaxActive = s.torrentMaxActive
+                latestMaxActive = PowerTune.effectiveTorrentMaxActive(s.torrentMaxActive, s.lowPowerMode)
                 // 누락됐던 필드: 시드 미확보 시 대기 시간. 이전엔 applySettings 안에서만 갱신돼
                 // 앱 설정 화면에서 바꿔도 반영되지 않았다.
                 torrentMinSeedWaitSec = s.torrentMinSeedWaitSec
@@ -1060,12 +1060,13 @@ val th = withGate { session?.find(Sha1Hash.parseHex(expectedHash)) }
         withGate {
             // stop()과 레이스 방지 — 게이트 안에서 null 체크 (T-934 S4)
             val session = session ?: return@withGate
+            val effectiveMaxActive = PowerTune.effectiveTorrentMaxActive(s.torrentMaxActive, s.lowPowerMode)
             val sp = session.settings()
-                .activeDownloads(s.torrentMaxActive)
+                .activeDownloads(effectiveMaxActive)
                 .connectionsLimit(100)
                 .maxPeerlistSize(2000)
             session.applySettings(sp)
-            DebugLogger.i(TAG, "토렌트 활성 한도 적용 maxActive=${s.torrentMaxActive}")
+            DebugLogger.i(TAG, "토렌트 활성 한도 적용 maxActive=${s.torrentMaxActive}→유효$effectiveMaxActive 저전력=${s.lowPowerMode}")
 
             // 리슨 포트 변경은 재시작 필요 — 로그만 남김
             if (s.torrentListenPort != 6881) {

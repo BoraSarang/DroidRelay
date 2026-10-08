@@ -536,6 +536,10 @@ internal object WebDashboardHtml {
             <input type="checkbox" id="autoClassify">
             <label for="autoClassify">완료 파일 자동 분류 (영상/음악/문서 폴더)</label>
           </div>
+          <div class="ck" style="margin-top:12px">
+            <input type="checkbox" id="lowPowerMode">
+            <label for="lowPowerMode">저전력 모드 (동시 1개 + little 클러스터 우선 — S22 서버폰용)</label>
+          </div>
           <div class="ti">완료 후 동작</div>
           <div class="sv">
             <select id="completionAction">
@@ -804,11 +808,15 @@ internal object WebDashboardHtml {
           </div>
           <div class="ck">
             <input type="checkbox" id="bootAutoStart" checked>
-            <label for="bootAutoStart">재부팅 시 서버 자동 시작</label>
+            <label for="bootAutoStart">재부팅 시 자동 시작</label>
           </div>
           <div class="ck">
             <input type="checkbox" id="launchAutoStart" checked>
-            <label for="launchAutoStart">앱 실행 시 서버 자동 시작</label>
+            <label for="launchAutoStart">앱 실행 시 자동 시작</label>
+          </div>
+          <div class="ck">
+            <input type="checkbox" id="webServerEnabled" checked>
+            <label for="webServerEnabled">웹 UI 서버 사용 (끄면 다운로드만 계속)</label>
           </div>
           <div class="sb">포트 변경은 앱 설정 화면에서 (충돌 시 E-AND-SRV-0111). 서버 시작/정지는 홈 ServerCard·위젯·퀵타일에서.</div>
           <div class="rb" style="margin-top:8px">
@@ -2236,6 +2244,7 @@ function loadSettings(){
     document.getElementById('storageQuotaGb').value=dl.storageQuotaGb!=null?dl.storageQuotaGb:0;
     document.getElementById('storageQuotaLabel').textContent=dl.storageQuotaGb>0?dl.storageQuotaGb+'GB':'끔';
     document.getElementById('autoClassify').checked=dl.autoClassify===true;
+    document.getElementById('lowPowerMode').checked=dl.lowPowerMode===true;
     document.getElementById('completionAction').value=dl.completionAction||'stop_server';
     document.getElementById('idleTimeoutMin').value=dl.idleTimeoutMin!=null?dl.idleTimeoutMin:30;
     loadSpeedSchedule();
@@ -2283,6 +2292,7 @@ function loadSettings(){
     document.getElementById('httpsEnabled').checked=sv.httpsEnabled!==false;
     document.getElementById('bootAutoStart').checked=sv.bootAutoStart!==false;
     document.getElementById('launchAutoStart').checked=sv.launchAutoStart!==false;
+    document.getElementById('webServerEnabled').checked=sv.webServerEnabled!==false;
     // MCP 설정
     document.getElementById('mcpPrivacyMode').checked=mc.mcpPrivacyMode===true;
     var disabled=mc.mcpToolsDisabled||[];
@@ -2390,7 +2400,8 @@ function saveDownloadSettings(){
     storageQuotaGb:num(document.getElementById('storageQuotaGb').value,0),
     autoClassify:document.getElementById('autoClassify').checked,
     completionAction:document.getElementById('completionAction').value||'none',
-    idleTimeoutMin:num(document.getElementById('idleTimeoutMin').value,30)
+    idleTimeoutMin:num(document.getElementById('idleTimeoutMin').value,30),
+    lowPowerMode:document.getElementById('lowPowerMode').checked
   };
   document.getElementById('concurrencyLabel').textContent=body.concurrency;
   document.getElementById('speedLimitLabel').textContent=kblabel(body.speedLimitKbps,0,'무제한');
@@ -2679,6 +2690,7 @@ function resetSettings(category){
   document.getElementById('notifications')?.addEventListener('change',autoSave('dl',saveDownloadSettings));
   document.getElementById('storageQuotaGb')?.addEventListener('change',autoSave('dl',saveDownloadSettings));
   document.getElementById('autoClassify')?.addEventListener('change',autoSave('dl',saveDownloadSettings));
+  document.getElementById('lowPowerMode')?.addEventListener('change',autoSave('dl',saveDownloadSettings));
   document.getElementById('completionAction')?.addEventListener('change',autoSave('dl',saveDownloadSettings));
   document.getElementById('idleTimeoutMin')?.addEventListener('change',autoSave('dl',saveDownloadSettings));
   document.getElementById('torrentUploadLimit')?.addEventListener('change',autoSave('tr',saveTorrentSettings));
@@ -2781,7 +2793,8 @@ function saveServerSettings(){
   var body={
     httpsEnabled:document.getElementById('httpsEnabled').checked,
     bootAutoStart:document.getElementById('bootAutoStart').checked,
-    launchAutoStart:document.getElementById('launchAutoStart').checked
+    launchAutoStart:document.getElementById('launchAutoStart').checked,
+    webServerEnabled:document.getElementById('webServerEnabled').checked
   };
   apiPost('/api/settings/server',body)
     .then(function(d){if(d.ok)showDlToast('서버 설정 저장됨');else alert('저장 실패: '+(d.error||''));})

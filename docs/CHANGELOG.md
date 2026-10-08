@@ -1,5 +1,27 @@
 # Changelog
 
+## [Unreleased] — 저전력 모드 + 웹 UI 분리 (S22 서버폰)
+
+> Android 테스트 **371건 중 370 통과** (신규 `PowerTuneTest` 9건 0 실패 · `CronParserPerfTest` 1건은 사전 존재 실패, 원본 트리 확인)
+> 실기 설치 (10.112.134.138:5555): debug v0.50.0 빌드·설치 성공
+
+### Added [android] — 저전력 모드
+
+- 설정 `lowPowerMode` (기본 OFF): ON이면 HTTP 동시성 1 강제·OkHttp 풀 축소(32/16→4/2)·토렌트 활성 1로. 설정값 자체는 유지, 적용 시점에만 강제
+- `PowerTune` 신규: 워커 스레드 백그라운드 우선순위 + little 클러스터 affinity(best-effort, 리플렉션·실패해도 계속).
+  little 마스크는 sysfs 최대클럭 하위 4코어로 판정, 실패 시 S22 폴백 `0x0F`
+- 앱 설정 다운로드 섹션 + 웹 대시보드 다운로드 설정에 토글 추가 (`/api/settings/download` `lowPowerMode`)
+
+### Added [android] — 웹 UI 서버 분리
+
+- 설정 `webServerEnabled` (기본 ON): OFF면 `RelayService`는 유지되고 Ktor만 미기동·watchdog도 기동 안 함 (다운로드 계속)
+- 앱 설정 서버 섹션 + 웹 대시보드 서버 제어에 토글 추가 (`/api/settings/server` `webServerEnabled`)
+
+### Changed [android] — 자동시작 문구
+
+- `재부팅 시 서버 자동 시작` → `재부팅 시 자동 시작`, `앱 실행 시 서버 자동 시작` → `앱 실행 시 자동 시작`
+  (기동 대상이 웹서버가 아니라 서비스 전체라 오해 소지 제거). 앱·웹 동일 적용
+
 ## [Unreleased] — Plugin SDK v2 승격 (T-1096)
 
 > Android 테스트 **362건 중 361 통과** (신규 `PluginContractTest` 9건 0 실패 · `CronParserPerfTest` 1건은 사전 존재 실패)
