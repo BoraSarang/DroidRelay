@@ -82,6 +82,11 @@ internal fun magnetInfoHash(magnet: String): String? {
 /** 동일 infohash의 .torrent 중복 추가 방지 (결함 #9) */
 class DuplicateTorrentException(val infoHash: String) : IllegalStateException("이미 다운로드 중인 토렌트입니다")
 
+/** 가드 억제 유효값 — 사용자 설정 AND 보유 여부 AND 비억제 (T-1101, 순수 함수, 테스트 대상).
+ *  억제 중에는 DHT/PEX/트래커동기를 세션 레벨에서만 끄고 설정값은 유지한다 (0건 절전과 동일 계약). */
+internal fun guardEffective(userEnabled: Boolean, hasTorrents: Boolean, suppressed: Boolean): Boolean =
+    userEnabled && hasTorrents && !suppressed
+
 /** magnet 추가 직후, 메타데이터 수신 전까지 쓰는 이름 — 실제 파일명도 아니므로 보관함 이동을 건너뛴다 */
 internal const val METADATA_PLACEHOLDER = "추출 중..."
 
@@ -357,6 +362,12 @@ class TorrentEngine(
      * 복원 완료 시점에 다시 켜지는 요동을 겪는다. 복원 완료 후 실제값으로 확정한다.
      */
     @Volatile private var hasTorrents = true
+    /**
+     * 가드 스로틀 억제 중 (T-1101, 시골 LTE).
+     * true면 업로드 최소 + DHT/PEX/트래커동기를 세션 레벨에서만 끈다.
+     * 사용자 설정값은 유지 → 해제 시 즉시 복원된다 (0건 절전과 동일 계약).
+     */
+    @Volatile private var guardSuppressed = false
     @Volatile private var latestSavePath: String = StorageGuard.dlRoot.path
     /** id → 시더 부재 대기 시작 시각(ms). 0이면 미측정 */
     private val seedWaitSince = ConcurrentHashMap<String, Long>()
@@ -466,10 +477,26 @@ class TorrentEngine(
         }
     }
 
-    /** 절전 유효값 — 사용자 설정 AND 보유 여부 (설정값 자체는 건드리지 않는다) */
-    private fun effectiveDht(): Boolean = powerSaveEffective(latestDhtEnabled, hasTorrents)
-    private fun effectivePex(): Boolean = powerSaveEffective(latestPexEnabled, hasTorrents)
-    private fun effectiveTrackerSync(): Boolean = powerSaveEffective(latestTrackerSync, hasTorrents)
+    /** 절전 유효값 — 사용자 설정 AND 보유 여부 AND 비억제 (설정값 자체는 건드리지 않는다) */
+    private fun effectiveDht(): Boolean = guardEffective(latestDhtEnabled, hasTorrents, guardSuppressed)
+    private fun effectivePex(): Boolean = guardEffective(latestPexEnabled, hasTorrents, guardSuppressed)
+    private fun effectiveTrackerSync(): Boolean = guardEffective(latestTrackerSync, hasTorrents, guardSuppressed)
+
+    /**
+     * 가드 스로틀 억제 on/off (T-1101, RelayService 가드 콜백에서 호출).
+     * 억제 중: 업로드 최소(1KB/s floor)·DHT/PEX 정지 — 모뎀 TX를 내려 발열 사이클을 끊는다.
+     * 해제: 설정값 기준 복원. 멱등 — 같은 값이면 세션을 건드리지 않는다.
+     */
+    fun setGuardSuppressed(suppressed: Boolean) {
+        if (guardSuppressed == suppressed) return
+        guardSuppressed = suppressed
+        applyDhtEnabled(effectiveDht())
+        applyPexEnabled(effectivePex())
+        applyRateLimits()
+        DebugLogger.i(TAG, "가드 억제 ${if (suppressed) "진입 — 업로드 최소·DHT/PEX 정지" else "해제 — 설정값 복원"}")
+    }
+
+    fun isGuardSuppressed(): Boolean = guardSuppressed
 
     /**
      * 토렌트 보유 상태에 맞춰 DHT/PEX/트래커동기를 절전·복원한다.
@@ -952,7 +979,9 @@ val th = withGate { session?.find(Sha1Hash.parseHex(expectedHash)) }
      * - 다운로드 0 KB/s = 무제한 (libtorrent 기본 0 = 제한 없음)
      */
     private fun applyRateLimits() {
-        val upBps = if (latestUploadKbps <= 0) 1024 else (latestUploadKbps * 1024).coerceIn(1, Int.MAX_VALUE.toLong()).toInt()
+        // 가드 억제 중에는 사용자 상한 대신 최소 — 0 KB/s는 1KB/s floor("끔")로 매핑된다
+        val upKbps = if (guardSuppressed) 0 else latestUploadKbps
+        val upBps = if (upKbps <= 0) 1024 else (upKbps * 1024).coerceIn(1, Int.MAX_VALUE.toLong()).toInt()
         val downBps = if (latestDownloadKbps <= 0) 0 else (latestDownloadKbps * 1024).coerceIn(0, Int.MAX_VALUE.toLong()).toInt()
         try {
             withGate {
@@ -961,7 +990,7 @@ val th = withGate { session?.find(Sha1Hash.parseHex(expectedHash)) }
                 session.uploadRateLimit(upBps)
                 session.downloadRateLimit(downBps)
             }
-            val upLabel = if (latestUploadKbps <= 0) "끔" else "${latestUploadKbps}KB/s"
+            val upLabel = if (upKbps <= 0) "끔" else "${upKbps}KB/s"
             val downLabel = if (latestDownloadKbps <= 0) "무제한" else "${latestDownloadKbps}KB/s"
             DebugLogger.i(TAG, "속도 제한 적용 업로드=$upLabel 다운로드=$downLabel")
         } catch (e: Exception) {

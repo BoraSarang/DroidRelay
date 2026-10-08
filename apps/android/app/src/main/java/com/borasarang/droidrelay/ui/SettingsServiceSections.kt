@@ -181,6 +181,9 @@ internal fun ScheduleSection(
         SwitchRow("충전 중에만", s.scheduleChargingOnly) { v ->
             scope.launch { repo.setScheduleChargingOnly(v) }
         }
+        SwitchRow("신호 좋을 때만 실행 (시골 LTE)", s.signalGateEnabled) { v ->
+            scope.launch { repo.setSignalGateEnabled(v) }
+        }
         Text("최소 배터리: ${s.scheduleBatteryMin}%", color = cs.onSurface)
         Slider(
             value = s.scheduleBatteryMin.toFloat(),

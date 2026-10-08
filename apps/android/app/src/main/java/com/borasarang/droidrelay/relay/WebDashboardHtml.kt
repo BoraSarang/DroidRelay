@@ -889,6 +889,11 @@ internal object WebDashboardHtml {
               <div class="sv"><input type="checkbox" id="scheduleChargingOnly"></div>
             </div>
             <div class="si">
+              <div class="sl">신호 좋을 때만 실행 (시골 LTE)</div>
+              <div class="sv"><input type="checkbox" id="signalGateEnabled"></div>
+              <div class="sb">RSRP ≤ -110 또는 SINR ≤ 0이면 신규 시작·스케줄 보류 (해제: RSRP ≥ -100 그리고 SINR ≥ 3). 진행 중은 유지.</div>
+            </div>
+            <div class="si">
               <div class="sl">최소 배터리 (%)</div>
               <div class="sv">
                 <input type="range" id="scheduleBatteryMin" min="5" max="100" value="30" step="5">
@@ -2304,6 +2309,7 @@ function loadSettings(){
     document.getElementById('scheduleCron').value=sch.scheduleCron||'';
     document.getElementById('scheduleWifiOnly').checked=sch.scheduleWifiOnly!==false;
     document.getElementById('scheduleChargingOnly').checked=sch.scheduleChargingOnly===true;
+    document.getElementById('signalGateEnabled').checked=sch.signalGateEnabled===true;
     document.getElementById('scheduleBatteryMin').value=sch.scheduleBatteryMin!=null?sch.scheduleBatteryMin:30;
     document.getElementById('scheduleBatteryLabel').textContent=(sch.scheduleBatteryMin!=null?sch.scheduleBatteryMin:30)+'%';
     if(sch.scheduleCron){
@@ -2961,6 +2967,7 @@ function saveScheduleSettings(){
     scheduleCron:document.getElementById('scheduleCron').value.trim(),
     scheduleWifiOnly:document.getElementById('scheduleWifiOnly').checked,
     scheduleChargingOnly:document.getElementById('scheduleChargingOnly').checked,
+    signalGateEnabled:document.getElementById('signalGateEnabled').checked,
     scheduleBatteryMin:num(document.getElementById('scheduleBatteryMin').value,30)
   };
   apiPost('/api/settings/schedule',body)
