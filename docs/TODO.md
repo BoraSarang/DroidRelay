@@ -698,7 +698,7 @@ T-001~T-008 전부 완료 (커밋 7574486).
 | T-번호 | 내용 | 상태 |
 |--------|------|------|
 | T-1096 | **SDK v2 승격 (L2)** — 프로브 수신기 `.receiver` 이동 + `version=2`·`appVersion` + 메타 Provider(`content://…plugin/info`, actionsJson 4종) + 액션 브로드캐스트 전환(`PLUGIN_ACTION` cmd/arg, MainActivity 전면 제거) + EVENT `level=` + 단일 emit(DebugLogger 미러 제거) + 파일명 공백 sanitize. 검증: unit 362중 361(신규 9 GREEN, Cron 사전실패 1) + ktlint + assembleDebug + 실기기 5종(프로브 v2/Provider/액션/무효cmd/전면없음). **실측 함정: 암시적 브로드캐스트 미도달 → `-n` 명시 필수 (SDK §4.1 수정 요망)** | ✅ |
-| T-1097 | **아이콘 제공** — 메타 Provider `iconBase64` 빈값 → 런처 벡터를 96px PNG 렌더+base64로 제공 (RelayConsole 요청). 검증: 실기기 `content query` 1행 + PNG 매직·96x96 실측 | ✅ |
+| T-1097 | **아이콘 제공** — 메타 Provider `iconBase64` 빈값 → 런처 벡터를 96px PNG 렌더+base64로 제공 (RelayConsole 요청). 검증: 실기기 `content query` 1행 + PNG 매직·96x96 실측. **RelayConsole 통과 확인 (2026-10-08)** | ✅ |
 
 ## v0.52 (2026-10-08) — adb 플러그인 계약 제공자 (T-1095)
 
