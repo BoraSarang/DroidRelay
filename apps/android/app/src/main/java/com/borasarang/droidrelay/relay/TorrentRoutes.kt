@@ -62,23 +62,34 @@ internal fun Route.torrentRoutes(context: Context, serverRef: RelayServer) {
 
             when {
                 magnet.startsWith("magnet:") -> {
-                    // 중복 가드: 이미 동일 infohash가 있으면 409 (이슈 2 — 같은 토렌트로 표시 문제)
-                    val eng = RelayApp.getTorrent(context)
-                    if (eng.isDuplicateMagnet(magnet)) {
-                        DebugLogger.w("Http", "torrent 중복 magnet 추가 시도 → 거부")
+                    // 형식 불량(xt=urn:btih: 없음 등)은 job을 만들지 않고 400 — 독성 영속·복원 크래시 루프 방지
+                    val valid = runCatching { validateMagnet(magnet) }.getOrNull()
+                    if (valid == null) {
+                        DebugLogger.w("Http", "torrent 형식 불량 magnet 거부 (${magnet.take(60)})")
                         call.respondText(
-                            JSONObject().put("error", "이미 다운로드 중인 토렌트입니다").toString(),
+                            JSONObject().put("error", "주소가 올바르지 않거나 지원하지 않는 파일입니다. URL을 확인해 주세요.").toString(),
                             ContentType.Application.Json,
-                            HttpStatusCode.Conflict,
+                            HttpStatusCode.BadRequest,
                         )
                     } else {
-                        val job = eng.addMagnet(magnet)
-                        DebugLogger.i("Http", "torrent magnet 추가 id=${job.id}")
-                        call.respondText(
-                            JSONObject().put("id", job.id).toString(),
-                            ContentType.Application.Json,
-                            HttpStatusCode.Created,
-                        )
+                        // 중복 가드: 이미 동일 infohash가 있으면 409 (이슈 2 — 같은 토렌트로 표시 문제)
+                        val eng = RelayApp.getTorrent(context)
+                        if (eng.isDuplicateMagnet(valid)) {
+                            DebugLogger.w("Http", "torrent 중복 magnet 추가 시도 → 거부")
+                            call.respondText(
+                                JSONObject().put("error", "이미 다운로드 중인 토렌트입니다").toString(),
+                                ContentType.Application.Json,
+                                HttpStatusCode.Conflict,
+                            )
+                        } else {
+                            val job = eng.addMagnet(valid)
+                            DebugLogger.i("Http", "torrent magnet 추가 id=${job.id}")
+                            call.respondText(
+                                JSONObject().put("id", job.id).toString(),
+                                ContentType.Application.Json,
+                                HttpStatusCode.Created,
+                            )
+                        }
                     }
                 }
                 torrentFile.isNotEmpty() -> {
