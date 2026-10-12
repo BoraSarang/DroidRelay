@@ -262,9 +262,16 @@ fun TorrentScreen(onShowSnack: (String) -> Unit = {}) {
         MagnetInputDialog(
             onDismiss = { showMagnetDialog = false },
             onConfirm = { magnet ->
-                engine.addMagnet(magnet)
-                onShowSnack("magnet 추가됨")
-                showMagnetDialog = false
+                // addMagnet은 토렌트 OFF·형식 불량 시 throw — UI 스레드 미처리 예외가 곧 크래시이므로 스낵바로 전환
+                runCatching { engine.addMagnet(magnet) }
+                    .onSuccess {
+                        onShowSnack("magnet 추가됨")
+                        showMagnetDialog = false
+                    }
+                    .onFailure { e ->
+                        DebugLogger.e("TorrentUI", "magnet 추가 실패", e)
+                        onShowSnack("magnet 추가 실패: ${e.message}")
+                    }
             },
         )
     }
