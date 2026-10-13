@@ -77,6 +77,28 @@ final class AppModel {
 
     var phase: Phase = .idle
     var server: ServerInfo?
+    /// **발견·기억한 기기 목록** — 팝오버·설정이 여기서 골라 붙는다.
+    ///
+    /// ## 왜 1대가 아니라 목록인가
+    ///
+    /// 폰이 2대(S22·A90)면 단일 탐색은 먼저 답한 1대만 보인다.
+    /// 목록이 있어야 "다른 폰으로 바꾸기" 가 성립한다.
+    var availableServers: [ServerInfo] = []
+    /// **목록 스캔 중인가** — 전체 서브넷을 훑어 ~1~2초 걸린다.
+    var isScanning = false
+    /// **마지막 목록 스캔 시각** — "언제 찾은 목록인가" 의 근거.
+    var lastScanAt: Date?
+    /// **기기 별명** — 사용자가 "S22" "A90" 이라 직접 붙인 이름. 디스크에 저장된다.
+    var aliases = DeviceAliases.load()
+
+    /// **목록·헤더에 보여줄 기기 이름** — 별명 > 서버 이름 > ""(주소가 제목이 된다).
+    func displayName(for info: ServerInfo) -> String { aliases.name(for: info) }
+
+    /// **별명을 정한다** — 빈 칸이면 지운다(서버 이름으로 돌아간다).
+    func setAlias(_ name: String, for info: ServerInfo) {
+        aliases.set(name, for: info.displayAddress)
+        aliases.save()
+    }
     var jobs: [RelayClient.Job] = []
     var torrents: [Torrent] = []
     var storage: [StorageEntry] = []
@@ -353,6 +375,23 @@ final class AppModel {
         } else {
             discovery = ServerDiscovery()
         }
+        // **기억한 기기는 스캔 전에도 목록에 둔다** — 버전은 빈칸, 스캔이 채운다.
+        // 빈 목록으로 시작하면 "다시 찾기" 를 누르기 전까지 1대도 안 보인다.
+        var seed: [ServerInfo] = []
+        for addr in Self.loadKnown() {
+            let parts = addr.split(separator: ":")
+            if parts.count == 2, let p = Int(parts[1]) {
+                let info = ServerInfo(host: String(parts[0]), port: p, version: "")
+                if !seed.contains(info) { seed.append(info) }
+            }
+        }
+        if let s = stored, !seed.contains(where: { $0.displayAddress == s }) {
+            let parts = s.split(separator: ":")
+            if parts.count == 2, let p = Int(parts[1]) {
+                seed.append(ServerInfo(host: String(parts[0]), port: p, version: ""))
+            }
+        }
+        availableServers = seed.sorted { $0.displayAddress < $1.displayAddress }
     }
 
     /// **진행 중 잡** — 배지와 "진행" 숫자의 기준.
@@ -510,10 +549,15 @@ final class AppModel {
         server = r.info
         stored = r.info.displayAddress
         persistStored()
+        rememberKnown(r.info)
+        seedList(with: r.info)
         phase = .connected(r.strategy)
         stopReconnectLoop()
         await refresh()
         subscribe()
+        // **연결 뒤 목록을 한 번 채운다** — 2대째 폰이 있으면 여기서 보인다.
+        // 전면을 막지 않게 백그라운드로. `scanDevices` 가 중복 실행을 막는다.
+        Task { await scanDevices() }
     }
 
     /// 실패 상태에서만 도는 재연결 루프 — 중복 생성하지 않는다.
@@ -549,10 +593,118 @@ final class AppModel {
         server = info
         stored = info.displayAddress
         persistStored()
+        rememberKnown(info)
+        seedList(with: info)
         phase = .connected(.manual)
         stopReconnectLoop()
         await refresh()
         subscribe()
+    }
+
+    // MARK: - 기기 목록 (여러 대 선택)
+
+    /// **지금 아는 목록에 현재 기기를 끼운다** — 스캔 전에도 1줄은 보인다.
+    ///
+    /// ## 왜 주소로 비교하나
+    ///
+    /// `ServerInfo` 동등성은 이름·버전까지 본다. 기억한 주소(버전 "")와
+    /// 방금 물은 정보(v0.50.1·기기명)는 **같은 폰인데 다르게** 나온다.
+    /// 값 동등으로 끼우면 "같은 주소 2줄" 이 된다 — 주소가 신원이다.
+    private func seedList(with info: ServerInfo) {
+        if let i = availableServers.firstIndex(where: { $0.displayAddress == info.displayAddress }) {
+            availableServers[i] = info
+        } else {
+            availableServers.append(info)
+        }
+        availableServers.sort { $0.displayAddress < $1.displayAddress }
+    }
+
+    /// **네트워크를 전부 훑어 목록을 채운다** — "다시 찾기" 버튼과 연결 후 1회가 쓴다.
+    ///
+    /// ## 왜 `discover()` 가 아니라 `discoverAll()` 인가
+    ///
+    /// 단일 탐색은 첫 응답에서 멈춘다. 목록은 끝까지 다 봐야 2대째가 보인다.
+    /// 느리다(~1~2초) — 그래서 `isScanning` 으로 버튼을 잠그고 중복 실행을 막는다.
+    func scanDevices() async {
+        guard !isScanning else { return }
+        isScanning = true
+        defer { isScanning = false }
+        let found = await discovery.discoverAll()
+        var merged = found.map(\.info)
+        // **기억한 주소도 다시 두드린다** — 이번 스캔에 안 잡혔어도(다른 공유기)
+        // 목록에서 사라지면 "어제 쓰던 폰이 증발" 한다. 살아 있으면 버전을 갱신한다.
+        for addr in Self.loadKnown() {
+            if merged.contains(where: { $0.displayAddress == addr }) { continue }
+            let parts = addr.split(separator: ":")
+            if parts.count == 2, Int(parts[1]) != nil,
+               let u = URL(string: "http://\(addr)"),
+               let info = await RelayClient.probe(u) {
+                merged.append(info)
+            } else if let cur = server, cur.displayAddress == addr, !merged.contains(cur) {
+                merged.append(cur)
+            }
+        }
+        if let s = server, !merged.contains(where: { $0.displayAddress == s.displayAddress }) { merged.append(s) }
+        merged.sort { $0.displayAddress < $1.displayAddress }
+        availableServers = merged
+        lastScanAt = Date()
+    }
+
+    /// **목록에서 고른 기기로 바꾼다** — SSE·폴링·속도 기준점을 전부 새 기기로 옮긴다.
+    ///
+    /// ## 왜 끊고 다시 구독하나
+    ///
+    /// `EventStream.run` 은 이미 돌고 있으면 **조용히 return** 한다.
+    /// 서버만 바꿔 끼우면 새 폰의 tick 을 영영 안 받는다 —
+    /// 화면은 옛 폰 값을 붙들고 "갱신 안 됨" 이 된다. 그래서 `disconnect()` 로
+    /// 스트림·폴링·속도 샘플러를 먼저 멈춘다.
+    ///
+    /// ## 왜 그래프·카운터를 비우나
+    ///
+    /// 속도 그래프와 기기 카운터 기준점이 옛 폰 것이다. 그대로 두면
+    /// 새 폰 첫 샘플이 옛 값과 섞여 **음수·튀는 속도**가 나온다.
+    func switchTo(_ info: ServerInfo, strategy: DiscoveryStrategy = .subnetScan) async {
+        guard info.displayAddress != server?.displayAddress else { return }
+        disconnect()
+        // **바꾸기 전에 한 번 다시 묻는다** — 목록의 정보(특히 이름·버전)가
+        // 기억된 옛값일 수 있다. 못 물으면(꺼짐) 준 값을 그대로 쓴다.
+        let target = await RelayClient.probe(info.baseURL) ?? info
+        lastDeviceTraffic = nil
+        deviceSpeedAvailable = false
+        deviceSpeed = .init(downBps: 0, upBps: 0)
+        droidSpeed = .init(downBps: 0, upBps: 0)
+        history(for: .droid).clear()
+        history(for: .device).clear()
+        jobs = []; torrents = []; storage = []; trash = []
+        storagePath = ""
+        lastResult = ""
+        server = target
+        stored = target.displayAddress
+        persistStored()
+        rememberKnown(target)
+        seedList(with: target)
+        phase = .connected(strategy)
+        stopReconnectLoop()
+        await refresh()
+        subscribe()
+    }
+
+    /// **지금 붙은 기기인가** — 목록 행의 체크 표시 기준. 주소로 본다(이름·버전은 바뀔 수 있다).
+    func isCurrent(_ info: ServerInfo) -> Bool { server?.displayAddress == info.displayAddress }
+
+    /// **기억한 주소들** — 최대 10개. 다음 실행·다른 공유기에서도 목록에 남는다.
+    static let knownServersKey = "knownServers"
+    private static let knownServersCap = 10
+
+    static func loadKnown(_ defaults: UserDefaults = .standard) -> [String] {
+        defaults.stringArray(forKey: knownServersKey) ?? []
+    }
+
+    private func rememberKnown(_ info: ServerInfo) {
+        var k = Self.loadKnown()
+        k.removeAll { $0 == info.displayAddress }
+        k.insert(info.displayAddress, at: 0)
+        UserDefaults.standard.set(Array(k.prefix(Self.knownServersCap)), forKey: Self.knownServersKey)
     }
 
     var storedAddress: String? { stored }
@@ -602,7 +754,8 @@ final class AppModel {
             return DiscoveryBadge.line(strategy: strategy,
                                       address: s.displayAddress,
                                       version: s.version,
-                                      isManual: strategy == .manual)
+                                      isManual: strategy == .manual,
+                                      deviceName: displayName(for: s))
         case .discovering:
             return DiscoveryBadge.scanningLine()
         case .failed:

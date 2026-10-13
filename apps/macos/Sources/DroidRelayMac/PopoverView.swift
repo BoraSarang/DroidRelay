@@ -265,6 +265,62 @@ struct PopoverView: View {
             // **두 정보가 한 줄에서 경쟁한다.** 어느 쪽이 움직이는지 눈에 띄고
             // 읽히는 쪽은 더 중요하므로 **고정된 줄로 분리**한다.
             connectionLine
+            deviceSwitcher
+        }
+    }
+
+    /// **기기 빠른 전환** — 폰이 2대면 헤더에서 바로 바꾼다.
+    ///
+    /// ## 왜 헤더인가
+    ///
+    /// "어디에 붙었는지" 줄 바로 아래가 "다른 데 붙기" 다.
+    /// 설정 창까지 가야 바꾸면 **바꾸는 법을 모른다** — 목록이 있다는 것 자체를
+    /// 헤더가 말해야 한다. 1대뿐이면 **아예 안 보인다** (자를 이유가 없다).
+    private var deviceSwitcher: some View {
+        Group {
+            if model.availableServers.count > 1 || model.isScanning {
+                HStack(spacing: 5) {
+                    Image(systemName: "iphone")
+                        .font(.system(size: 9))
+                        .foregroundStyle(.tertiary)
+                    Menu {
+                        ForEach(model.availableServers, id: \.displayAddress) { info in
+                            Button {
+                                Task { await model.switchTo(info) }
+                            } label: {
+                                // **이름이 먼저** — 주소만 나열하면 어느 폰인지 모른다.
+                                let n = model.displayName(for: info)
+                                Text("\(model.isCurrent(info) ? "✓ " : "")\(n.isEmpty ? info.displayAddress : "\(n) · \(info.displayAddress)")\(info.version.isEmpty ? "" : " · v\(info.version)")")
+                            }
+                            .disabled(model.isCurrent(info))
+                        }
+                        Divider()
+                        Button("다시 찾기") { Task { await model.scanDevices() } }
+                    } label: {
+                        Text("기기 \(model.availableServers.count)대")
+                            .font(.system(size: 10))
+                            .foregroundStyle(Color.accentColor)
+                    }
+                    .menuStyle(.borderlessButton)
+                    .fixedSize()
+                    .accessibilityLabel("연결할 기기 선택, \(model.availableServers.count)대 발견")
+                    if model.isScanning {
+                        ProgressView().controlSize(.mini)
+                    } else {
+                        Button { Task { await model.scanDevices() } } label: {
+                            Image(systemName: "arrow.triangle.2.circlepath")
+                                .font(.system(size: 9))
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.secondary)
+                        .help("기기 다시 찾기")
+                        .accessibilityLabel("기기 다시 찾기")
+                    }
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 13)
+                .padding(.bottom, 7)
+            }
         }
     }
 

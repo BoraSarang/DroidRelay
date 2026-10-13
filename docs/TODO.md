@@ -826,3 +826,15 @@ T-001~T-008 전부 완료 (커밋 7574486).
 | T-1114 | 복원 강화 — `FAILED`도 `QUEUED`로 (magnet 재검증 통과분만, 형식 불량 격리 유지). `.torrent` 파일 소실은 가짜 `QUEUED` 대신 `FAILED` 명시 | ✅ |
 | T-1115 | 일시정지 삭제 — 앱·웹 토렌트 버튼, API `pause`(→400), 맥 `torrentActions()`, 가드 스로틀의 토렌트 `pause()` (억제만 유지). 가드 해제 재개도 미완료만 대상으로 축소 | ✅ |
 | T-1116 | `MainActivity.onStart` 복귀 시 서버 확인 (프로세스 생존 복귀 함정 해소). 검증: `test android` 그린 · S22 `DOWNLOADING` 11.65% 복귀 실측 · A90 52.52% 이어받기 실측 | ✅ |
+
+## v0.54 (2026-10-13) — 무인 서버 안정화 (Stability Hardening)
+
+> 배경: 받기 404 + 파일 사라짐 (자동분류 `문서/` 이동 vs 루트-only 폴백). 상세: `docs/plans/PLAN_v0.54_stability-hardening_android.md`
+> (Phase 0 계약 동결 · Phase 1 데이터 내구성 · Phase 2 동작 불변 · Phase 3 카나리 순차 배포, 두 대 실기 검증).
+
+| T-번호 | 내용 | 상태 |
+|--------|------|------|
+| T-1120 | 데이터 내구성 — `resolveJobFile()` (보관함 분류 폴더·하위 탐색), DONE 영속 판정에 보관함 실존 포함 (재시작 DONE 증발·`/file` 404 해소), 썸네일을 분류 후 최종 경로로 | ✅ |
+| T-1121 | `StorageRoutes` +29행 (보관함 API), `ServiceNotifications.kt` 신규 | ✅ |
+| T-1122 | `CronParserPerfTest` flaky 수정 ("30 3 1 * *" 월간식은 7일 탐색창에 안 들어감 → 일간식으로 의도 검증) | ✅ |
+| T-1123 | 맥 디스커버리 개편 (AppModel/SettingsWindow/ServerDiscovery 등) + `DeviceListTests` 신규 | ✅ |

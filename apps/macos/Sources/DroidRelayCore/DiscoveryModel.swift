@@ -8,13 +8,55 @@ public struct ServerInfo: Equatable, Sendable {
     public let host: String
     public let port: Int
     public let version: String
+    /// **폰이 알려준 기기 이름** (`/api/info` deviceName — 사용자가 정한 이름, 없으면 모델명).
+    ///
+    /// ## 왜 빈 문자열 기본값인가
+    ///
+    /// 구버전 서버·기억한 주소는 이름을 모른다. `nil` 로 두면 표시마다 분기가
+    /// 늘고, `""` 로 두면 "이름 없음" 이라는 한 가지 규칙으로 통일된다.
+    public let deviceName: String
 
-    public init(host: String, port: Int, version: String) {
-        self.host = host; self.port = port; self.version = version
+    public init(host: String, port: Int, version: String, deviceName: String = "") {
+        self.host = host; self.port = port; self.version = version; self.deviceName = deviceName
     }
 
     public var baseURL: URL { URL(string: "http://\(host):\(port)")! }
     public var displayAddress: String { "\(host):\(port)" }
+}
+
+/// **맥에 저장하는 기기 별명** — 사용자가 "S22" "A90" 이라 직접 붙인 이름.
+///
+/// ## 왜 서버 이름으로 부족한가
+///
+/// 서버가 주는 건 사용자가 폰에 정한 이름인데, 두 폰 다 기본값이면
+/// "Galaxy S22" 같은 비슷한 이름이거나 모델번호(SM-…)라 **여전히 헷갈린다.**
+/// 맥에서 붙인 별명이 **항상 최우선**이다 — 서버가 이름을 바꿔도 흔들리지 않는다.
+public struct DeviceAliases: Equatable, Sendable {
+    public var map: [String: String]
+
+    public init(map: [String: String] = [:]) { self.map = map }
+
+    private static let key = "deviceAliases"
+
+    public static func load(_ defaults: UserDefaults = .standard) -> DeviceAliases {
+        DeviceAliases(map: (defaults.dictionary(forKey: key) as? [String: String]) ?? [:])
+    }
+
+    public func save(_ defaults: UserDefaults = .standard) {
+        defaults.set(map, forKey: Self.key)
+    }
+
+    /// **목록에 보여줄 이름** — 별명 > 서버 이름 > ""(없으면 주소가 제목이 된다).
+    public func name(for info: ServerInfo) -> String {
+        let addr = info.displayAddress
+        if let a = map[addr]?.trimmingCharacters(in: .whitespaces), !a.isEmpty { return a }
+        return info.deviceName.trimmingCharacters(in: .whitespaces)
+    }
+
+    public mutating func set(_ name: String, for address: String) {
+        let t = name.trimmingCharacters(in: .whitespaces)
+        if t.isEmpty { map.removeValue(forKey: address) } else { map[address] = t }
+    }
 }
 
 /// IPv4 주소 — 발견 로직은 `String` 분기 대신 이 타입으로 한다(테스트 가능).

@@ -80,6 +80,35 @@ internal object StorageGuard {
     fun safeLeafName(name: String): String? = name.takeIf {
         it.isNotBlank() && !it.contains('/') && !it.contains('\\') && it != "." && it != ".."
     }
+
+    /**
+     * 완료 잡 원본 탐색 — 루트 → 분류 폴더 → 하위 재귀.
+     *
+     * 왜 필요한가: 완료 시 앱-private 원본은 MediaStore 게시 후 삭제되고
+     * `GET /file/{id}` 는 보관함 폴백에 의존한다. 그런데 `StorageJanitor` 가
+     * zip → `문서/`, 영상 → `영상/` 등으로 자동분류 이동하면 루트에는 파일이
+     * 없어 404 "404 없음" 이 된다 (실측: ghidra zip 이 `문서/` 에 있어 받기 404).
+     * 루트만 보던 폴백 + 재시작 시 앱-private 만 보던 이력 유지를 둘 다 고친다.
+     */
+    fun resolveJobFile(filename: String): java.io.File? {
+        if (safeLeafName(filename) == null) return null
+        // 1. 루트 (기존 동작 — 가장 흔함)
+        storageFile(filename)?.takeIf { it.isFile }?.let { return it }
+        // 2. 알려진 분류 폴더 우선 (walk 없이 빠르게)
+        for (cat in listOf("문서", "영상", "음악")) {
+            storageFile(cat, filename)?.takeIf { it.isFile }?.let { return it }
+        }
+        // 3. 하위 재귀 (사용자 수동 이동 대응 — 숨김 디렉터리 제외)
+        return runCatching {
+            if (!dlRoot.exists()) return null
+            dlRoot.walkTopDown()
+                .onEnter { !isHidden(it.name) }
+                .firstOrNull { it.isFile && it.name == filename }
+                ?.takeIf {
+                    runCatching { !isUnderHidden(it.canonicalFile.path) }.getOrDefault(false)
+                }
+        }.getOrNull()
+    }
 }
 
 /** 보관함·외장스토리지·업로드·다운로드 라우트 (T-936 D1 — RelayServer에서 분리) */

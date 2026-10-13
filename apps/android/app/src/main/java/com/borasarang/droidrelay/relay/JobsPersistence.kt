@@ -10,7 +10,7 @@ import org.json.JSONObject
  * - 상태 변화마다 저장(서비스에서 디바운스 호출 권장)
  * - 복원 규칙:
  *   · RUNNING/QUEUED → QUEUED (.part 존재 시 이어받기, 없으면 처음부터)
- *   · DONE → doneFile 실존 시에만 유지, 없으면 제거
+ *   · DONE → 앱-private 원본 또는 보관함(자동분류 이동 포함) 실존 시에만 유지, 없으면 제거
  *   · PAUSED/FAILED/CANCELED → 그대로 유지
  */
 class JobsPersistence(
@@ -82,7 +82,9 @@ class JobsPersistence(
                     JobState.RUNNING, JobState.QUEUED ->
                         job.copy(state = JobState.QUEUED, progress = 0f)
                     JobState.DONE ->
-                        if (doneFileOf(job).exists()) job.copy(progress = 1f) else null
+                        // 게시 성공 시 앱-private 원본은 삭제되므로 보관함(문서/ 등 분류 포함)도 본다.
+                        // 앱-private 만 보면 재시작 때마다 DONE 잡이 증발하고 /file/{id} 가 404 가 된다.
+                        if (doneFileOf(job).exists() || StorageGuard.resolveJobFile(job.filename) != null) job.copy(progress = 1f) else null
                     else -> job
                 }
             }

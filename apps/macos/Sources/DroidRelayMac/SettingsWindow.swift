@@ -133,6 +133,9 @@ struct SettingsView: View {
     /// 주소는 **열 때마다 실제 저장값을 다시 읽는다** — 위에서 고친 다음
     /// 팝오버를 닫았다가 다시 열면 옛 값이 남아 있으면 사용자는 "저장이 안 된다"고 읽는다.
     @State private var address = ""
+    /// **별명 편집 중인 행 주소** — `nil` 이면 편집줄이 없다. 한 번에 한 행만.
+    @State private var editingAddr: String? = nil
+    @State private var editingText = ""
     /// 로그인 자동 실행 — **Launch Services 를 직접 조회**한다(UserDefaults 플래그가 아니라).
     @State private var loginOn = LoginItem.isEnabled
     @State private var loginMsg: String? = nil
@@ -163,6 +166,7 @@ struct SettingsView: View {
     private var connection: some View {
         VStack(alignment: .leading, spacing: 10) {
             header("DroidRelay 연결")
+            deviceList
             Text("자동으로 찾지 못하면 주소를 직접 입력하세요.")
                 .font(.system(size: 11.5)).foregroundStyle(.secondary)
             HStack {
@@ -175,6 +179,107 @@ struct SettingsView: View {
                 Text("자동 검색으로 다시 시도").font(.system(size: 12))
                 Spacer()
                 Button("다시 찾기") { Task { await model.connect() } }
+            }
+        }
+    }
+
+    /// **기기 목록** — 2대 이상이면 여기서 골라 바꾼다.
+    ///
+    /// ## 왜 설정 창인가
+    ///
+    /// 팝오버는 **지금 붙은 1대**를 쓰는 곳이고, 설정은 **어디에 붙을지**를
+    /// 정하는 곳이다. 목록·스캔·수동 입력이 한 덩어리로 있어야
+    /// "못 찾으면 직접 넣는다" 가 한 화면에서 끝난다.
+    private var deviceList: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("기기 \(model.availableServers.count)대")
+                    .font(.system(size: 12, weight: .semibold))
+                if let t = model.lastScanAt {
+                    Text(t, style: .relative)
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(.tertiary)
+                }
+                Spacer()
+                if model.isScanning {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Button("찾기") { Task { await model.scanDevices() } }
+                        .controlSize(.small)
+                        .help("같은 네트워크의 기기를 전부 찾습니다")
+                        .accessibilityLabel("기기 다시 찾기")
+                }
+            }
+            if model.availableServers.isEmpty {
+                Text(model.isScanning ? "찾는 중…" : "아직 찾은 기기가 없습니다 — 찾기를 눌러보세요")
+                    .font(.system(size: 11.5)).foregroundStyle(.secondary)
+            }
+            ForEach(model.availableServers, id: \.displayAddress) { info in
+                let cur = model.isCurrent(info)
+                // **제목은 이름, 주소는 부제** — IP만 보면 S22인지 A90인지 모른다.
+                // 이름이 없으면(구버전 서버) 주소가 제목이 된다.
+                let name = model.displayName(for: info)
+                let title = name.isEmpty ? info.displayAddress : name
+                let sub = "\(name.isEmpty ? "" : info.displayAddress + " · ")\(info.version.isEmpty ? "" : "v\(info.version)")"
+                VStack(spacing: 0) {
+                    HStack(spacing: 6) {
+                        Image(systemName: cur ? "checkmark.circle.fill" : "circle")
+                            .font(.system(size: 11))
+                            .foregroundStyle(cur ? Color.green : Color.secondary)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(title)
+                                .font(.system(size: 12, weight: cur ? .semibold : .regular))
+                                .lineLimit(1).truncationMode(.middle)
+                            if !sub.isEmpty {
+                                Text(sub)
+                                    .font(.system(size: 10.5))
+                                    .foregroundStyle(.secondary)
+                                    .monospacedDigit()
+                            }
+                        }
+                        Spacer(minLength: 4)
+                        if editingAddr == info.displayAddress {
+                            Button("취소") { editingAddr = nil }
+                                .controlSize(.small)
+                        } else {
+                            // **별명 바꾸기** — 서버 이름이 헷갈리면 여기서 "S22" 라 붙인다.
+                            Button {
+                                editingText = name
+                                editingAddr = info.displayAddress
+                            } label: {
+                                Image(systemName: "pencil").font(.system(size: 10.5))
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(.secondary)
+                            .help("별명 바꾸기")
+                            .accessibilityLabel("\(title) 별명 바꾸기")
+                            if cur {
+                                Text("연결됨").font(.system(size: 11)).foregroundStyle(.green)
+                            } else {
+                                Button("연결") { Task { await model.switchTo(info) } }
+                                    .controlSize(.small)
+                                    .accessibilityLabel("\(title)에 연결")
+                            }
+                        }
+                    }
+                    // **별명 입력줄** — 이 행 아래에 펼친다. 빈 칸 저장은 지우기다.
+                    if editingAddr == info.displayAddress {
+                        HStack(spacing: 6) {
+                            TextField("예: S22", text: $editingText)
+                                .textFieldStyle(.roundedBorder)
+                                .font(.system(size: 11))
+                                .onSubmit { saveAlias(info) }
+                            Button("저장") { saveAlias(info) }
+                                .controlSize(.small)
+                                .buttonStyle(.borderedProminent)
+                        }
+                        .padding(.top, 4)
+                    }
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
+                .background(cur ? Color.green.opacity(0.08) : Color.secondary.opacity(0.06))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
             }
         }
     }
@@ -334,5 +439,11 @@ struct SettingsView: View {
         let r = LoginItem.set(want)
         loginOn = LoginItem.isEnabled   // 요청한 값이 아니라 **실제** 상태를 따른다
         if case .applied = r { loginMsg = nil } else { loginMsg = r.message }
+    }
+
+    /// **별명 저장** — 빈 칸이면 별명을 지운다(서버 이름으로 돌아간다).
+    private func saveAlias(_ info: DroidRelayCore.ServerInfo) {
+        model.setAlias(editingText, for: info)
+        editingAddr = nil
     }
 }
