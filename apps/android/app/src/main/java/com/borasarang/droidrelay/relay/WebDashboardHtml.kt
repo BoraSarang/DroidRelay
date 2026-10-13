@@ -1851,7 +1851,10 @@ function uploadTorrent(input){
 }
 function act(id,a){fetch('/api/jobs/'+id+'/'+a,{method:'POST'}).then(refresh);}
 function delJob(id){fetch('/api/jobs/'+id,{method:'DELETE'}).then(refresh);}
-function torrentAct(id,a){fetch('/api/torrents/'+id+'/'+a,{method:'POST'}).then(refresh);}
+function torrentAct(id,a){fetch('/api/torrents/'+id+'/'+a,{method:'POST'}).then(function(r){
+  if(r.ok){refresh();return;}
+  r.text().then(function(t){var m=t;try{m=JSON.parse(t).error||t;}catch(e){}alert(m);refresh();});
+});}
 // torrent 개별 다운로드 제한 (T-1050) — 응답은 text("ok")라 json 파싱 회피
 function setTorrentLimit(id,bps){
   fetch('/api/torrents/'+id+'/limit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({maxDownBps:Number(bps)||0})})

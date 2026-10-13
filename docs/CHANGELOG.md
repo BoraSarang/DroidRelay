@@ -1,5 +1,37 @@
 # Changelog
 
+## [Unreleased] — 맥 재연결 + 기기 속도 폴백 (M-29, M-30)
+
+> 실측(`--watch`): 다운타임 후 앱만 `.failed` 로 굳음(웹은 정상) + 기기 칸 영영 빈칸.
+> 원인 ① 실패 후 재시도 경로 없음(수동 "다시 찾기"만) ② Wi-Fi STA 폰에 rmnet·swlan0이 없어 `외부만`(기본)이 `supported:false`.
+
+### Fixed [mac]
+
+- 실패 시 15초 간격 자동 재연결 (`ensureReconnectLoop`, 성공·`disconnect()` 시 정리, 수동 주소 형식 오류는 제외)
+- 요청 범위 미지원 시 기기 전체(`.all`)로 폴백 + "‘외부만’ 구간 없음 — 기기 전체로 셉니다" 안내. 네트워크 장애는 폴백 없이 미지원 유지
+- `DeviceTrafficCheckedTests` 4건 신규 — 미지원/정상/연결실패 구분 고정. 전체 304 → **308건** 0 실패
+- 실측: 메뉴바 기기 ↑↓ 표시 + 2열, `~/Applications/DroidRelay.app` 설치
+
+## [Unreleased] — v0.50.1 토렌트 고착 수정 + 앱 완전 종료 (S22 실측)
+
+> S22(SM-S901N) 실측: magnet 2건이 `FETCHING_METADATA 0%`에 영구 고착 + 일시정지 API 200 무응답.
+> 원인: `TorrentEngine.stop()`의 `scope.cancel()`이 공용 scope를 영구히 죽여, 같은 인스턴스 `start()` 후
+> 폴링·복원·`download()` 코루틴이 전부 즉시 취소됨. 유휴 자동 정지 → 재기동 경로가 `resetTorrent()` 없이
+> 죽은 인스턴스를 재사용한 것이 발화 조건.
+> 검증: ktlint GREEN · unit 387 중 386 통과(`CronParserPerfTest` 1건 사전 존재 실패) · 대시보드 35/35 ·
+> S22 debug 0.50.1 설치 후 복원 2건 → 매핑 → 트래커 주입 → 메타데이터 수신 → DOWNLOADING 실측
+
+### Fixed [android] — 토렌트 엔진 scope 사망 (고착 근본 원인)
+
+- `ensureScope()` 신규: `start()` 진입 + 모든 진입점 launch(`addMagnet`·`addTorrentFile`·`probeTrackers`·`restoreTorrentsAsync`·폴링)에서 죽은 scope 재생성 + 감시 collector 재구독 (`launchCollectors()` 추출)
+- 서비스 destroy 경로에 `RelayApp.resetTorrent()` 추가 (마스터 토글 OFF 경로와 동일) — 다음 기동은 새 인스턴스로. 영속 체크용 `isRestored`는 파기 전 캡처해 `torrents.json` 저장 스킵 회귀 방지
+- `pause()`/`resume()` → Boolean 반환 + 핸들 없음 시 warn 로그. 라우트는 미등록 시 404, 엔진 정지/미등록 시 503+안내 문구로 표면화 (기존 침묵 200 해소) · 웹 `torrentAct` 실패 alert · 앱 스낵바 안내
+- `session` 필드 `@Volatile` (`isAlive()` 크로스스레드 판정)
+
+### Added [android] — 앱 완전 종료 버튼
+
+- 설정 → 서버 섹션에 "앱 완전 종료" (확인 다이얼로그) — 서비스 정지 + `finishAffinity` + 600ms 후 프로세스 kill. `RelayApp.exitApp()` 공용 헬퍼
+
 ## [Unreleased] — 시골 LTE 대응: 토렌트 가드 억제·신호 게이트 (T-1101, T-1102)
 
 > Android 테스트 **380건 중 379 통과** (신규 `SignalGateTest` 7건·`GuardSuppressionTest` 2건 0 실패 · `CronParserPerfTest` 1건은 사전 존재 실패, 원본 트리 확인) · ktlint 통과

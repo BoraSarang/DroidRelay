@@ -493,18 +493,44 @@ final class AppModel {
 
     // MARK: - 탐색
 
+    /// **실패 후 재연결 간격(초)** — 서버 재기동·귀가 후 복귀를 기다리는 값.
+    /// 짧으면 다운타임에 무의미한 프로브를 쏘고, 길면 "켜졌는데 앱이 모른다" 가 길어진다.
+    private static let reconnectInterval: TimeInterval = 15
+    private var reconnectTask: Task<Void, Never>?
+
     func connect() async {
         phase = .discovering
         guard let r = await discovery.discover() else {
             phase = .failed
+            // **실패하면 그대로 두지 않는다** — 서버 다운타임(재시작·귀가)에 .failed 로
+            // 굳으면 웹은 되는데 앱만 "접속 실패" 로 보인다. 성공하면 루프가 스스로 멈춘다.
+            ensureReconnectLoop()
             return
         }
         server = r.info
         stored = r.info.displayAddress
         persistStored()
         phase = .connected(r.strategy)
+        stopReconnectLoop()
         await refresh()
         subscribe()
+    }
+
+    /// 실패 상태에서만 도는 재연결 루프 — 중복 생성하지 않는다.
+    private func ensureReconnectLoop() {
+        guard reconnectTask == nil else { return }
+        reconnectTask = Task {
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(Self.reconnectInterval))
+                if Task.isCancelled { break }
+                if phase == .failed { await connect() }
+            }
+        }
+    }
+
+    private func stopReconnectLoop() {
+        reconnectTask?.cancel()
+        reconnectTask = nil
     }
 
     /// 설정 창에서 주소를 직접 넣었을 때.
@@ -514,11 +540,17 @@ final class AppModel {
         guard parts.count == 2, Int(parts[1]) != nil,
               let u = URL(string: "http://\(address)")
         else { phase = .failed; return }
-        guard let info = await RelayClient.probe(u) else { phase = .failed; return }
+        guard let info = await RelayClient.probe(u) else {
+            // 형식은 맞는데 서버가 안 뜸 — 다운타임일 수 있으니 자동 재연결에 맡긴다
+            phase = .failed
+            ensureReconnectLoop()
+            return
+        }
         server = info
         stored = info.displayAddress
         persistStored()
         phase = .connected(.manual)
+        stopReconnectLoop()
         await refresh()
         subscribe()
     }
@@ -1053,17 +1085,34 @@ final class AppModel {
     /// **서버가 값을 안 주면 `deviceSpeedAvailable = false` 로 두고 열을 만들지 않는다.**
     /// `0` 으로 대체하면 "지원하지만 지금 0" 과 "지원 안 함" 이 구분되지 않아,
     /// 스위치를 켜놓고 항상 0 이 보이는 **고장 난 기능** 이 된다.
+    ///
+    /// **요청 범위가 없으면 전체로 폴백한다** — Wi-Fi로 붙은 폰에는 rmnet(셀룰러)이 없고
+    /// 핫스팟이 아니면 swlan0도 없어 `외부만`·`핫스팟` 이 `supported:false` 로 온다.
+    /// 그걸 그대로 "열 없음" 으로 두면 **서버는 살아 있는데 기기 칸만 영영 빈칸** 이 된다.
+    /// 네트워크 장애 때는 폴백하지 않는다 — `deviceTrafficChecked` 로 미지원만 골라낸다.
     private func sampleDeviceTraffic() async {
         guard let s = server else { return }
         let want = trafficScopeSetting.scope
-        let cur = await RelayClient(base: s.baseURL).deviceTraffic(scope: want)
-        guard let cur else {
-            if deviceSpeedAvailable { deviceSpeedAvailable = false; deviceSpeed = .init(downBps: 0, upBps: 0) }
-            deviceScopeNote = nil
-            return
+        let client = RelayClient(base: s.baseURL)
+        do {
+            let cur = try await client.deviceTrafficChecked(scope: want)
+            applyDeviceTraffic(cur, note: Self.scopeNote(requested: want, used: cur.scope))
+        } catch is RelayClient.TrafficScopeError {
+            guard let fallback = await client.deviceTraffic(scope: .all) else {
+                markDeviceUnavailable()
+                return
+            }
+            applyDeviceTraffic(fallback, note: "‘\(want.label)’ 구간 없음 — 기기 전체로 셉니다")
+        } catch {
+            markDeviceUnavailable()
         }
+    }
+
+    private func applyDeviceTraffic(_ cur: DeviceTraffic, note: String?) {
+        // 폴백 등으로 범위가 바뀌면 옛 카운터와 섞어 속도가 튀므로 기준점을 버린다.
+        if lastDeviceTraffic?.t.scope != cur.scope { lastDeviceTraffic = nil }
         deviceSpeedAvailable = true
-        deviceScopeNote = Self.scopeNote(requested: want, used: cur.scope)
+        deviceScopeNote = note
         let now = Date()
         let dt = now.timeIntervalSince(lastDeviceTraffic?.at ?? now)
         deviceSpeed = DeviceTrafficRate.rate(
@@ -1071,6 +1120,11 @@ final class AppModel {
         )
         lastDeviceTraffic = (cur, now)
         history(for: .device).push(deviceSpeed)
+    }
+
+    private func markDeviceUnavailable() {
+        if deviceSpeedAvailable { deviceSpeedAvailable = false; deviceSpeed = .init(downBps: 0, upBps: 0) }
+        deviceScopeNote = nil
     }
 
     /// **요구한 범위와 서버가 실제로 쓴 범위가 다를 때만 경고를 만든다.**
@@ -1084,6 +1138,7 @@ final class AppModel {
 
     func disconnect() {
         Task { await stream.stop() }
+        stopReconnectLoop()
         pollTask?.cancel()
         pollTask = nil
         speedTask?.cancel()

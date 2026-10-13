@@ -594,6 +594,10 @@ class RelayService : Service() {
                 .onFailure { DebugLogger.e(TAG, "서버 백그라운드 정지 실패(무시)", it) }
             runCatching { torrentToStop?.stop() }
                 .onFailure { DebugLogger.e(TAG, "토렌트 백그라운드 정지 실패(무시)", it) }
+            // stop()은 공용 scope를 cancel하므로 인스턴스 재사용 시 폴링·복원이 전부 증발한다 (v0.50.1).
+            // 마스터 토글 OFF 경로와 동일하게 파기 → 다음 기동은 새 인스턴스·새 scope로 생성된다.
+            runCatching { RelayApp.resetTorrent() }
+            DebugLogger.i(TAG, "토렌트 인스턴스 파기 — 다음 기동 시 재생성")
             runCatching { networkToUnregister?.unregister() }
                 .onFailure { DebugLogger.e(TAG, "네트워크 모니터 해제 실패(무시)", it) }
             runCatching { tunnelToStop?.stop() }
@@ -620,10 +624,11 @@ class RelayService : Service() {
                     DebugLogger.w(TAG, "복원 전 종료 — jobs.json 저장 스킵 (${jobs.size}건)")
                 }
             }
-            // Torrent 상태 저장
+            // Torrent 상태 저장 — resetTorrent()로 인스턴스가 파기되므로 복원 여부는 미리 캡처 (v0.50.1)
+            val torrentRestored = torrentToStop?.isRestored() == true
             runCatching {
                 val ts = TorrentRepository.all()
-                if (com.borasarang.droidrelay.relay.RelayApp.torrentEngine?.isRestored() == true) {
+                if (torrentRestored) {
                     TorrentPersistence(appContext).save(ts)
                 } else {
                     DebugLogger.w(TAG, "복원 전 종료 — torrents.json 저장 스킵 (${ts.size}건)")
