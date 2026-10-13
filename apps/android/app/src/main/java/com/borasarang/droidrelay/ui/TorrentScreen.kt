@@ -217,8 +217,14 @@ fun TorrentScreen(onShowSnack: (String) -> Unit = {}) {
                         // onClick 는 메인 스레드에서 실행되므로 동기 호출이면
                         // 폴러/alert 가 게이트를 쥔 동안 UI 가 멈춘다 (ANR).
                         // 전부 IO 스레드에서 실행한다.
-                        onPause = { scope.launch { withContext(Dispatchers.IO) { engine.pause(job.id) } } },
-                        onResume = { scope.launch { withContext(Dispatchers.IO) { engine.resume(job.id) } } },
+                        onPause = { scope.launch {
+                            val ok = withContext(Dispatchers.IO) { engine.pause(job.id) }
+                            if (!ok) onShowSnack("일시정지 실패 — 앱 완전 종료 후 다시 시작하세요")
+                        } },
+                        onResume = { scope.launch {
+                            val ok = withContext(Dispatchers.IO) { engine.resume(job.id) }
+                            if (!ok) onShowSnack("재개 실패 — 앱 완전 종료 후 다시 시작하세요")
+                        } },
                         onDelete = { showDeleteDialog = job },
                         onMoveUp = { scope.launch { withContext(Dispatchers.IO) { engine.reorder(job.id, -1) } } },
                         onMoveDown = { scope.launch { withContext(Dispatchers.IO) { engine.reorder(job.id, 1) } } },

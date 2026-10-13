@@ -2,6 +2,10 @@ package com.borasarang.droidrelay.relay
 
 import android.content.Context
 import android.content.Intent
+import android.app.Activity
+import android.os.Handler
+import android.os.Looper
+import android.os.Process
 import android.os.StatFs
 import android.provider.Settings
 import io.ktor.http.ContentType
@@ -99,6 +103,20 @@ object RelayApp {
     /** 토렌트 인스턴스 파기 — 마스터 토글 OFF 시 stop() 후 호출 (scope가 취소되므로 재사용 불가) */
     fun resetTorrent() {
         synchronized(this) { torrentEngine = null }
+    }
+
+    /**
+     * 앱 완전 종료 (v0.50.1) — 서비스 정지 후 프로세스를 끝내 모든 singleton/scope를 초기화한다.
+     * 토렌트 고착 등 scope 사망 상태의 수동 복구용. 영속 저장은 서비스 onDestroy의
+     * 백그라운드 스레드가 수행하므로 kill까지 600ms 여유를 둔다.
+     */
+    fun exitApp(ctx: Context) {
+        DebugLogger.i(TAG, "앱 완전 종료 요청")
+        runCatching { RelayService.stop(ctx) }
+        (ctx as? Activity)?.finishAffinity()
+        Handler(Looper.getMainLooper()).postDelayed({
+            Process.killProcess(Process.myPid())
+        }, 600)
     }
 
     /** 비디오(범용 스트림) 다운로드 매니저 — 최초 생성 시 FFmpeg 스모크 + 스테일 잡 정리 */

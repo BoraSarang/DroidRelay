@@ -793,3 +793,20 @@ T-001~T-008 전부 완료 (커밋 7574486).
 **함정 13종** (리서치 6 + 구현 중 발견 7): `docs/plans/PLAN_v0.42_api-mcp-hardening_android.md` 6-2 / 6-2-1
 
 | M-14 | **속도가 0 으로 표시되던 버그 2건** — ① 잡 상태를 `"RUNNING"` 하드코딩 → 서버는 `DOWNLOADING`. `Job.isRunning` 으로 교체 ② `refresh()` 가 토렌트를 **탭 조건부로** 당김 → 메뉴바용 속도가 0. 항상 당기도록 변경 | ✅ |
+
+## v0.50.1 (2026-10-13) — 토렌트 고착 수정 + 앱 완전 종료
+
+> S22 실측: magnet 2건 `FETCHING_METADATA 0%` 영구 고착. 원인 = `stop()`의 `scope.cancel()`이 공용 scope를 영구히 죽여
+> 같은 인스턴스 `start()` 후 폴링·복원·`download()`가 전부 즉시 취소됨. 유휴 자동 정지 → 재기동이 `resetTorrent()` 없이
+> 죽은 인스턴스를 재사용한 것이 발화 조건. 수정 후 S22 실측: 복원 2건 → 매핑 → 트래커 주입 20개 → 메타데이터 수신 → DOWNLOADING.
+
+| T-번호 | 내용 | 상태 |
+|--------|------|------|
+| T-1106 | `ensureScope()` — start 진입·진입점 launch에서 죽은 scope 재생성 + `launchCollectors()` 재구독, `session` @Volatile, `isAlive()` | ✅ |
+| T-1107 | 서비스 destroy 경로 `RelayApp.resetTorrent()` + 영속 체크용 `isRestored` 사전 캡처 (torrents.json 스킵 회귀 방지) | ✅ |
+| T-1108 | `pause()`/`resume()` Boolean + warn 로그, 라우트 404/503 표면화, 웹 `torrentAct` 실패 alert, 앱 스낵바 안내 | ✅ |
+| T-1109 | 설정 → 서버에 "앱 완전 종료" 버튼 + 확인 다이얼로그 (`RelayApp.exitApp()`) | ✅ |
+| T-1110 | 검증: ktlint GREEN · unit 387건 중 386 통과(CronParserPerfTest 1건 사전 존재 실패) · 릴리즈 서명 검증 · S22 debug 0.50.1 설치·복원·다운로드 실측 | ✅ |
+
+| M-29 | **실패 후 자동 재연결** — 서버 다운타임(재시작·귀가)에 `.failed` 로 굳으면 웹은 되는데 앱만 "접속 실패" 로 보임. `connect()` 실패 시 15초 간격 재연결 루프(`ensureReconnectLoop`, 성공·종료 시 정리). `--watch` 실측: 다운타임 후 수동 "다시 찾기" 없이도 복구 | ✅ |
+| M-30 | **기기 속도 범위 폴백** — Wi-Fi STA 연결 폰에는 rmnet(셀룰러)·swlan0(핫스팟)이 없어 `외부만`(기본)이 `supported:false` → 기기 칸 영영 빈칸 + 사유 폐기. `deviceTrafficChecked` 로 미지원만 골라 `.all` 로 폴백 + "‘외부만’ 구간 없음 — 기기 전체로 셉니다" 안내(설정 화면 기존 note 줄에 표시). 네트워크 장애 때는 폴백 없이 미지원 유지(매초 2건 방지). `--watch` 실측: 기기 ↑↓ 값 표시 + 메뉴바 2열. `DeviceTrafficCheckedTests` 4건 신규, 전체 304 → **308건** 0 실패 | ✅ |

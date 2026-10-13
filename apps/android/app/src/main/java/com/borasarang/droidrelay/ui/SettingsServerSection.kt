@@ -251,6 +251,35 @@ internal fun ServerSection(
                 style = MaterialTheme.typography.labelSmall,
             )
         }
+
+        // Line 5: 앱 완전 종료 (v0.50.1) — scope 사망 등 먹통 상태의 수동 복구
+        Spacer(Modifier.height(12.dp))
+        var showExitDialog by remember { mutableStateOf(false) }
+        OutlinedButton(onClick = { showExitDialog = true }) {
+            Text("앱 완전 종료", color = cs.error)
+        }
+        Text(
+            "토렌트가 멈춰 있거나 제어가 안 될 때 사용 — 서비스 정지 후 앱을 완전히 종료합니다",
+            color = cs.onSurfaceVariant,
+            style = MaterialTheme.typography.labelSmall,
+        )
+        if (showExitDialog) {
+            AlertDialog(
+                onDismissRequest = { showExitDialog = false },
+                title = { Text("앱을 완전히 종료할까요?") },
+                text = { Text("진행 중인 다운로드는 중단됩니다. 목록은 저장되며 다시 실행하면 복원을 시도합니다.") },
+                confirmButton = {
+                    TextButton(onClick = {
+                        showExitDialog = false
+                        DebugLogger.i("Settings", "앱 완전 종료 확인 — 프로세스 종료")
+                        RelayApp.exitApp(ctx)
+                    }) { Text("종료", color = cs.error) }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showExitDialog = false }) { Text("취소") }
+                },
+            )
+        }
     }
     
 }

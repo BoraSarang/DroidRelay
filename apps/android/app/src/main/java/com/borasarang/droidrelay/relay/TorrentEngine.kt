@@ -12,6 +12,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.util.concurrent.TimeUnit
 import okhttp3.OkHttpClient
@@ -232,7 +233,7 @@ class TorrentEngine(
     private val persistence: TorrentPersistence,
 ) {
     private val TAG = "TorrentEngine"
-    private var session: SessionManager? = null
+    @Volatile private var session: SessionManager? = null
     // libtorrent JNI는 스레드 안전하지 않음 — remove/status 경합으로 네이티브 SIGSEGV (T-930)
     // 모든 세션/핸들 접근을 단일 락으로 직렬화한다.
     private val sessionGate = ReentrantLock()
@@ -264,7 +265,28 @@ class TorrentEngine(
         }
         return try { block(); true } finally { sessionGate.unlock() }
     }
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    @Volatile private var scope = newEngineScope()
+    private fun newEngineScope(): CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    /**
+     * scope 재생성 (v0.50.1) — stop()이 공용 scope를 cancel()하면 취소된 scope는 부활하지 않아,
+     * 같은 인스턴스로 start()해도 폴링·복원·download() 코루틴이 전부 즉시 취소돼
+     * magnet이 FETCHING_METADATA에 영구 고착됐다. start 진입 시 재생성으로 복원한다.
+     */
+    private fun ensureScope(): CoroutineScope {
+        if (scope.isActive) return scope
+        synchronized(this) {
+            if (!scope.isActive) {
+                scope = newEngineScope()
+                launchCollectors()
+                DebugLogger.i(TAG, "코루틴 scope 재생성 (stop 후 재기동)")
+            }
+            return scope
+        }
+    }
+
+    /** 엔진 생존 여부 — scope가 죽었거나 세션이 없으면 추가·제어 요청은 무의미하다 */
+    fun isAlive(): Boolean = scope.isActive && session != null
     private val handleMap = ConcurrentHashMap<String, TorrentHandle>()
     private val hashToId = ConcurrentHashMap<String, String>()
     private val http by lazy {
@@ -325,7 +347,7 @@ class TorrentEngine(
     fun probeTrackers(): Boolean {
         if (probingTrackers) return false
         probingTrackers = true
-        scope.launch {
+        ensureScope().launch {
             try {
                 val urls = TrackerListProvider.getCached(context)
                 DebugLogger.i(TAG, "[FEATURE] 트래커 프로브 시작 ${urls.size}개")
@@ -514,6 +536,14 @@ class TorrentEngine(
     }
 
     init {
+        launchCollectors()
+    }
+
+    /**
+     * 설정·목록 감시 구독 (v0.50.1) — init 1회 + scope 재생성 시 재구독.
+     * 반드시 살아있는 scope에서 호출해야 한다 (ensureScope 경유).
+     */
+    private fun launchCollectors() {
         scope.launch {
             settings.settings.collect { s ->
                 // 캐시 필드는 세션 유무와 무관하게 먼저 갱신해야 한다 —
@@ -697,6 +727,8 @@ class TorrentEngine(
     }
 
     fun start() {
+        // 죽은 scope 부활 (v0.50.1) — stop() 후 같은 인스턴스로 start()해도 폴링·복원이 동작한다
+        ensureScope()
         if (session != null) return
         withGate {
             if (session != null) return
@@ -753,7 +785,9 @@ class TorrentEngine(
 
     fun stop() {
         // scope 미취소 시 addMagnet/restore/설정 collector 코루틴이 살아남아 파괴된 세션에
-        // JNI 호출(네이티브 크래시)을 시도한다. stop() 은 마지막 정리 지점이다.
+        // JNI 호출(네이티브 크래시)을 시도한다. 취소된 scope는 다음 start()의 ensureScope()가
+        // 재생성하므로 인스턴스 재사용이 안전하다 (v0.50.1 — 그래도 서비스 destroy 경로는
+        // RelayApp.resetTorrent()로 파기하는 것을 권장).
         scope.cancel()
         withGate {
             statusPollingJob?.cancel()
@@ -798,7 +832,7 @@ class TorrentEngine(
         persistNow()
         DebugLogger.i(TAG, "magnet 추가 id=$id hash=$hash")
 
-        scope.launch {
+        ensureScope().launch {
             try {
                 val flags = if (latestSequentialDownload) TorrentFlags.SEQUENTIAL_DOWNLOAD else torrent_flags_t()
                 // 세션 미기동 시 session?.download()는 no-op → FETCHING_METADATA 영구 고착 방지 (결함 #1)
@@ -874,7 +908,7 @@ class TorrentEngine(
         persistNow()
         DebugLogger.i(TAG, "torrent 파일 추가 id=$id name=$filename")
 
-        scope.launch {
+        ensureScope().launch {
             try {
                 val tempFile = File(saveDir, "temp_$id.torrent")
                 tempFile.writeBytes(bytes)
@@ -939,8 +973,16 @@ val th = withGate { session?.find(Sha1Hash.parseHex(expectedHash)) }
         return job
     }
 
-    fun pause(id: String) {
-        val th = handleMap[id] ?: return
+    /**
+     * @return 핸들이 있어 실제로 일시정지했으면 true. 세션 미등록이면 false + warn 로그
+     * (v0.50.1 — 이전엔 조용히 return이라 죽은 엔진 상태가 API 200 뒤에 숨었다)
+     */
+    fun pause(id: String): Boolean {
+        val th = handleMap[id]
+        if (th == null) {
+            DebugLogger.w(TAG, "일시정지 스킵 — 세션 핸들 없음 id=$id (엔진 정지 상태 가능 — 앱 완전 종료 후 재시작)")
+            return false
+        }
         withGate {
             val currentStatus = try { th.status() } catch (_: Exception) { null }
             val currentProgress = currentStatus?.progress() ?: 0f
@@ -963,11 +1005,24 @@ val th = withGate { session?.find(Sha1Hash.parseHex(expectedHash)) }
         stallSince.remove(id)
         persistNow()
         DebugLogger.i(TAG, "torrent 일시정지 id=$id")
+        return true
     }
 
-    fun resume(id: String) {
-        val th = handleMap[id] ?: return
-        val job = TorrentRepository.get(id) ?: return
+    /**
+     * @return 재개 요청이 유효했으면 true. 세션 미등록이면 false + warn 로그 (v0.50.1).
+     * 이미 진행 중인 상태의 재개 요청은 효과상 no-op이므로 true를 반환한다.
+     */
+    fun resume(id: String): Boolean {
+        val th = handleMap[id]
+        if (th == null) {
+            DebugLogger.w(TAG, "재개 스킵 — 세션 핸들 없음 id=$id (엔진 정지 상태 가능 — 앱 완전 종료 후 재시작)")
+            return false
+        }
+        val job = TorrentRepository.get(id)
+        if (job == null) {
+            DebugLogger.w(TAG, "재개 스킵 — 목록에 없음 id=$id")
+            return false
+        }
         val resumable = job.state == TorrentState.PAUSED || job.state == TorrentState.FAILED ||
             job.state == TorrentState.STALLED || job.state == TorrentState.QUEUED
         if (resumable) {
@@ -981,7 +1036,10 @@ val th = withGate { session?.find(Sha1Hash.parseHex(expectedHash)) }
             }
             persistNow()
             DebugLogger.i(TAG, "torrent 재개 id=$id")
+        } else {
+            DebugLogger.d(TAG, "재개 스킵 — 대상 상태 아님 id=$id state=${job.state}")
         }
+        return true
     }
 
     fun cancel(id: String) {
@@ -1319,7 +1377,7 @@ val th = withGate { session?.find(Sha1Hash.parseHex(expectedHash)) }
     }
 
     private fun startStatusPolling() {
-        statusPollingJob = scope.launch {
+        statusPollingJob = ensureScope().launch {
             while (true) {
                 // 적응형 주기 — 핸들·목록 모두 비면 30초, 그 외 5초.
                 // 0건 유휴에도 5초 JNI sweep을 돌 필요가 없다.
@@ -1702,7 +1760,7 @@ val th = withGate { session?.find(Sha1Hash.parseHex(expectedHash)) }
      * ③ 이 데이터 손실은 아래 [restored] 플래그 가 막는다 — 비동기화는 ①·②의 원인이므로.
      */
     private fun restoreTorrentsAsync() {
-        scope.launch(Dispatchers.IO) {
+        ensureScope().launch(Dispatchers.IO) {
             try {
                 restoreTorrents()
             } finally {

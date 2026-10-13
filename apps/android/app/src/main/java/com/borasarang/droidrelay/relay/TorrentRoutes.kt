@@ -136,9 +136,45 @@ internal fun Route.torrentRoutes(context: Context, serverRef: RelayServer) {
         val id = call.parameters["id"]!!
         val action = call.parameters["action"]
         val engine = RelayApp.getTorrent(context)
+        // 엔진 사망 시 200 뒤에 숨지 않고 503으로 표면화 (v0.50.1 — FETCHING_METADATA 고착 진단)
+        fun engineDead(): Boolean {
+            if (engine.isAlive()) return false
+            DebugLogger.w("Http", "torrent $action 거부 — 엔진 정지 중 id=$id")
+            return true
+        }
+        suspend fun respondEngineDead() = call.respondText(
+            JSONObject().put("error", "토렌트 엔진 정지 중 — 설정에서 앱 완전 종료 후 다시 시작해 주세요").toString(),
+            ContentType.Application.Json,
+            HttpStatusCode.ServiceUnavailable,
+        )
+        suspend fun respondNoHandle() = call.respondText(
+            JSONObject().put("error", "토렌트 작업이 엔진에 등록되지 않음 — 앱 완전 종료 후 다시 추가해 주세요").toString(),
+            ContentType.Application.Json,
+            HttpStatusCode.ServiceUnavailable,
+        )
         when (action) {
-            "pause" -> { engine.pause(id); call.respondText("ok") }
-            "resume" -> { engine.resume(id); call.respondText("ok") }
+            "pause" -> {
+                if (TorrentRepository.get(id) == null) {
+                    call.respondText("없음", ContentType.Text.Plain, HttpStatusCode.NotFound)
+                } else if (engineDead()) {
+                    respondEngineDead()
+                } else if (!engine.pause(id)) {
+                    respondNoHandle()
+                } else {
+                    call.respondText("ok")
+                }
+            }
+            "resume" -> {
+                if (TorrentRepository.get(id) == null) {
+                    call.respondText("없음", ContentType.Text.Plain, HttpStatusCode.NotFound)
+                } else if (engineDead()) {
+                    respondEngineDead()
+                } else if (!engine.resume(id)) {
+                    respondNoHandle()
+                } else {
+                    call.respondText("ok")
+                }
+            }
             "files" -> {
                 if (TorrentRepository.get(id) == null) {
                     call.respondText("없음", ContentType.Text.Plain, HttpStatusCode.NotFound)
