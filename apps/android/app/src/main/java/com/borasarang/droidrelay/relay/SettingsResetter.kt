@@ -45,7 +45,6 @@ object SettingsResetter {
         repo.setTorrentDownloadLimit(SettingsConstraints.DEFAULT_TORRENT_DOWNLOAD_KBPS)
         repo.setTorrentMaxActive(SettingsConstraints.DEFAULT_TORRENT_MAX_ACTIVE)
         repo.setTorrentSeedRatio(2.0f)
-        repo.setTorrentMinSeedWaitSec(0)
         repo.setTorrentDhtEnabled(true)
         repo.setTorrentPexEnabled(true)
         repo.setTorrentSequentialDownload(false)

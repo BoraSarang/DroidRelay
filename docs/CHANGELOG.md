@@ -1,6 +1,29 @@
 # Changelog
 
-## [Unreleased] — 맥 재연결 + 기기 속도 폴백 (M-29, M-30)
+## [Unreleased] — 무조건 시도 원칙: 삭제 외에는 토렌트를 멈추지 않는다 (S22 영구 정지 사건)
+
+> S22(SM-S901N) 실측: 사용자가 멈춘 적 없는데 토렌트 1건이 `PAUSED` 8.87%에서 굳고 서버까지
+> `대기 중`으로 사망, 재시작 없음. 설정 실측: `torrentMinSeedWaitSec=300`.
+> 원인 사슬: ① 시더 부재 300초 → `pause()` → `PAUSED` ② `PAUSED`를 유휴로 쳐서 10분 뒤
+> 서비스 자동 자살 ③ PAUSED는 `maintainSlots` 대상이 아니라 스스로 못 돌아오고, 프로세스 생존 시
+> `onCreate` 미발동이라 자동시작도 안 걸림 → 영구 정지. "누가 멈췄는지"를 기록하지 않아
+> 양방향으로 틀렸던 것도 확인 (규칙-정지는 못 깨우고, 사용자-정지는 가드해제·복원이 깨워버림).
+
+### Changed [android] — 멈추는 길은 리스트 삭제뿐
+
+- 시더 부재 자동중단 삭제 (엔진·앱 설정 UI·웹 설정 UI). 시드 0이면 어차피 속도 0이라 정체 회전이 슬롯만 양보하고 heartbeat로 계속 재시도 — 별도 규칙 불필요
+- `maintainSlots()`에 미완료 `PAUSED` 자동 재시도 추가 (슬롯 여유 + 가드 억제 아님 + `progress<1` — 시드비율 완료분 제외). 순수 판정 `shouldAutoResume()` + `TorrentRetryTest` 4건
+- 유휴 판정 변경: `DONE` 아닌 토렌트가 하나라도 있으면 유휴 아님 (`PAUSED/STALLED/FAILED` 포함). `isIdleForAutoStop` 단일 기준을 자동정지·스와이프종료·완료동작 3곳에 통일 (`IdlePowerSaveTest` 개정)
+- 재시작 복원: `FAILED`도 `QUEUED`로 살려냄 (magnet 재검증 통과분만 — 형식 불량은 크래시 루프 방지 격리 유지). `.torrent` 파일 소실은 가짜 `QUEUED` 대신 `FAILED` 명시
+- 앱·웹 토렌트 일시정지 버튼 삭제 (재개·삭제만). API `pause`는 맥 호환 유지 — 엔진이 5초 안에 살려내서 사실상 무효
+- `MainActivity.onStart` 복귀 시 서버 확인: 프로세스 생존 복귀에도 자동시작 발동 (기존 `onCreate` 한정 함정 해소)
+
+### Removed [android] — 일시정지 자체를 없앰 (2차: 웹·맥·API·설정 전수)
+
+- 가드 스로틀의 토렌트 `pause()` 삭제 — 억제(업로드 최소·DHT/PEX 정지)만 남기고 다운로드는 계속. 가드 해제의 일괄 재개도 미완료(`shouldAutoResume`)만 대상으로 축소 (시드비율 완료분 재시드 회귀 차단)
+- API `POST /api/torrents/{id}/pause` 삭제 → 400 "지원 없는 동작" (`resume`·`files`·`limit`·삭제 유지)
+- `torrentMinSeedWaitSec` 설정 자체를 삭제 (저장소·API·리셋·상수·테스트 — 엔진·UI는 전차에 제거됨. 맥은 참조 없음)
+- 맥 `torrentActions()`: 진행 중 동작 없음, 정지·실패·정체·대기만 재개 (`ActionRulesTests` 개정)
 
 > 실측(`--watch`): 다운타임 후 앱만 `.failed` 로 굳음(웹은 정상) + 기기 칸 영영 빈칸.
 > 원인 ① 실패 후 재시도 경로 없음(수동 "다시 찾기"만) ② Wi-Fi STA 폰에 rmnet·swlan0이 없어 `외부만`(기본)이 `supported:false`.

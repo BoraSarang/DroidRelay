@@ -49,6 +49,12 @@ internal fun isStalledTorrent(enabled: Boolean, rateBps: Long, thresholdKbps: In
 internal fun stallTimedOut(sinceMs: Long, nowMs: Long, timeoutSec: Int): Boolean =
     timeoutSec > 0 && nowMs - sinceMs >= timeoutSec * 1000L
 
+/** 무조건 시도 원칙: 미완료 PAUSED는 엔진이 스스로 살려낸다 — 순수 함수.
+ *  - 시드비율로 멈춘 완료분(progress==1)은 제외 (다운로드는 끝난 것)
+ *  - 그 외 PAUSED는 전부 재시도 대상 (누가 멈췄든 상관없다 — 멈추는 길은 삭제뿐) */
+internal fun shouldAutoResume(state: TorrentState, progress: Float): Boolean =
+    state == TorrentState.PAUSED && progress < 1f
+
 /** magnet URI의 SHA-1 infohash(hex 40자) 그룹 캡처 */
 private val magnetHexRegex = Regex("urn:btih:([0-9a-fA-F]{40})")
 /** magnet URI의 SHA-1 infohash(base32 32자, padding 없음) 그룹 캡처 */
@@ -449,7 +455,6 @@ class TorrentEngine(
     @Volatile private var latestUploadKbps: Long = 0L
     @Volatile private var latestDownloadKbps: Long = 0L
     @Volatile private var latestSequentialDownload: Boolean = false
-    @Volatile private var torrentMinSeedWaitSec: Int = 0
     @Volatile private var latestSeedRatio: Float = 2.0f
     @Volatile private var latestDhtEnabled: Boolean = true
     @Volatile private var latestPexEnabled: Boolean = true
@@ -469,8 +474,6 @@ class TorrentEngine(
      */
     @Volatile private var guardSuppressed = false
     @Volatile private var latestSavePath: String = StorageGuard.dlRoot.path
-    /** id → 시더 부재 대기 시작 시각(ms). 0이면 미측정 */
-    private val seedWaitSince = ConcurrentHashMap<String, Long>()
     /** id → 정체(스톨) 조건 첫 충족 시각(ms) — 키가 지워지면 조건이 해소된 것 */
     private val stallSince = ConcurrentHashMap<String, Long>()
     /**
@@ -561,9 +564,6 @@ class TorrentEngine(
                 latestStallThresholdKbps = s.torrentStallThresholdKbps
                 latestStallTimeoutSec = s.torrentStallTimeoutSec
                 latestMaxActive = PowerTune.effectiveTorrentMaxActive(s.torrentMaxActive, s.lowPowerMode)
-                // 누락됐던 필드: 시드 미확보 시 대기 시간. 이전엔 applySettings 안에서만 갱신돼
-                // 앱 설정 화면에서 바꿔도 반영되지 않았다.
-                torrentMinSeedWaitSec = s.torrentMinSeedWaitSec
                 DebugLogger.d(TAG, "설정 반영 업로드=${s.torrentUploadLimit}KB/s 다운로드=${s.torrentDownloadLimit}KB/s 시퀀셜=${s.torrentSequentialDownload} 비율=${s.torrentSeedRatio} DHT=${s.torrentDhtEnabled} PEX=${s.torrentPexEnabled} 정체=${s.torrentStallEnabled}(${s.torrentStallThresholdKbps}KB/s·${s.torrentStallTimeoutSec}초)")
                 applyRateLimits()
                 applySequentialToAll(s.torrentSequentialDownload)
@@ -652,12 +652,12 @@ class TorrentEngine(
     private val storageDir: File
         get() = File(latestSavePath).apply { mkdirs() }
 
-    /** 완료된 토렌트 파일을 보관함으로 이동 */
-    private fun moveToStorage(id: String, torrentName: String): Boolean {
+    /** 완료된 토렌트 파일을 보관함으로 이동 — 성공 시 최종 위치, 실패 시 null */
+    private fun moveToStorage(id: String, torrentName: String): File? {
         val src = File(saveDir, torrentName)
         if (!src.exists()) {
             DebugLogger.w(TAG, "보관함 이동 스킵(소스 없음) id=$id name=$torrentName")
-            return false
+            return null
         }
         var dst = File(storageDir, torrentName)
         // 작업 디렉터리가 보관함 **아래**에 있으므로 자기참조·포함 관계를 막아야 한다.
@@ -668,7 +668,7 @@ class TorrentEngine(
             (dstCanonical == tmpCanonical || dstCanonical.path.startsWith(tmpCanonical.path + File.separator))
         ) {
             DebugLogger.e(TAG, "보관함 이동 거부(작업 디렉터리 자기참조) id=$id name=$torrentName")
-            return false
+            return null
         }
         if (dst.exists()) {
             // 기존 보존 — 삭제 대신 고유 이름 회피 (데이터 손실 방지)
@@ -701,14 +701,13 @@ class TorrentEngine(
             }
             DebugLogger.i(TAG, "보관함 이동 완료 id=$id → ${dst.absolutePath}")
             // 보관함 자동 운영 (v0.19) — 단일 파일은 분류+쿼터, 폴더는 쿼터만
-            runCatching {
-                if (dst.isFile) StorageJanitor.onCompleted(context, dst)
-                else StorageJanitor.enforceIfNeeded(context)
-            }
-            return true
+            val finalDst = runCatching {
+                if (dst.isFile) StorageJanitor.onCompleted(context, dst) else dst.also { StorageJanitor.enforceIfNeeded(context) }
+            }.getOrDefault(dst)
+            return finalDst
         } catch (e: Exception) {
             DebugLogger.e(TAG, "보관함 이동 실패 id=$id", e)
-            return false
+            return null
         }
     }
 
@@ -795,7 +794,6 @@ class TorrentEngine(
             session = null
             handleMap.clear()
             hashToId.clear()
-            seedWaitSince.clear()
             stallSince.clear()
             storageMoved.clear()
             storageMoveAttempts.clear()
@@ -1052,7 +1050,6 @@ val th = withGate { session?.find(Sha1Hash.parseHex(expectedHash)) }
         // Repository를 먼저 제거 → polling 재등록 레이스 차단, 매핑 해제 (T-934 S3)
         TorrentRepository.remove(id)
         unregisterMapping(id)
-        seedWaitSince.remove(id)
         stallSince.remove(id)
         storageMoved.remove(id)
         storageMoveAttempts.remove(id)
@@ -1419,8 +1416,11 @@ val th = withGate { session?.find(Sha1Hash.parseHex(expectedHash)) }
                             try {
                                 withGate { th.unsetFlags(TorrentFlags.AUTO_MANAGED); th.pause() }
                             } catch (_: Exception) {}
-                            if (moveToStorage(id, job.name)) {
+                            val movedDst = moveToStorage(id, job.name)
+                            if (movedDst != null) {
                                 storageMoved.add(id)
+                                // 상세·웹훅이 구 워킹 경로를 돌려주지 않게 최종 보관 위치로 갱신
+                                TorrentRepository.update(id) { it.copy(savePath = movedDst.parent ?: it.savePath) }
                                 DebugLogger.i(TAG, "torrent 완료 → 시딩 중단 + 보관함 이동 id=$id")
                                 // 완료 후 제거 옵션 — 보관함 이동이 끝난 핸들을 세션에서 해제 (시딩 안 함)
                                 if (latestRemoveAfterMove) {
@@ -1507,23 +1507,9 @@ val th = withGate { session?.find(Sha1Hash.parseHex(expectedHash)) }
                             stallSince.remove(id)
                         }
 
-                        // 시더 부재 자동 중단 (이슈 4) — 설정 토글 시에만 동작
-                        val seedLimit = torrentMinSeedWaitSec
-                        if (seedLimit > 0 && state == TorrentState.DOWNLOADING && status.progress() < 1f) {
-                            if (status.listSeeds() > 0) {
-                                seedWaitSince.remove(id)
-                            } else {
-                                val waitSince = seedWaitSince[id] ?: System.currentTimeMillis().also { seedWaitSince[id] = it }
-                                val waitedSec = (System.currentTimeMillis() - waitSince) / 1000
-                                if (waitedSec >= seedLimit) {
-                                    seedWaitSince.remove(id)
-                                    DebugLogger.w(TAG, "시더 부재 ${waitedSec}초(제한 ${seedLimit}초) → 자동 일시정지 id=$id")
-                                    pause(id)
-                                }
-                            }
-                        } else {
-                            seedWaitSince.remove(id)
-                        }
+                        // 무조건 시도 원칙: 시더가 없어도 절대 멈추지 않는다.
+                        // 예전 시더부재 자동중단은 영구 정지로 이어져 삭제됐다.
+                        // 저속이면 정체 회전(T-1050)이 슬롯만 양보하고 heartbeat로 계속 재시도한다.
                     }
                     invalidIds.forEach { unregisterMapping(it) }
                     // 슬롯 유지 — 정체 회전/자연 완료로 빈 슬롯이 생기면 다음 torrent 즉시 기동 (T-1050)
@@ -1571,7 +1557,9 @@ val th = withGate { session?.find(Sha1Hash.parseHex(expectedHash)) }
     }
 
     /** 슬롯이 남으면 다음 torrent를 즉시 기동한다 (T-1050).
-     *  우선순위: 대기(QUEUED) → 모두 정체한 경우에만 정체(STALLED) 재기동(하트비트) */
+     *  우선순위: 대기(QUEUED) → 모두 정체한 경우에만 정체(STALLED) 재기동(하트비트)
+     *  → 미완료 중단(PAUSED) 자동 재시도 (무조건 시도 원칙: 멈추는 길은 삭제뿐.
+     *  시드비율로 멈춘 완료분 progress==1은 제외, 가드 억제 중에는 제외) */
     private fun maintainSlots() {
         val all = TorrentRepository.all()
         val active = all.count {
@@ -1580,11 +1568,22 @@ val th = withGate { session?.find(Sha1Hash.parseHex(expectedHash)) }
         if (active >= latestMaxActive) return
         val next = all.firstOrNull { it.state == TorrentState.QUEUED && handleMap.containsKey(it.id) }
             ?: (if (active == 0) all.firstOrNull { it.state == TorrentState.STALLED && handleMap.containsKey(it.id) } else null)
-            ?: return
-        withGate { handleMap[next.id]?.resume() }
-        stallSince.remove(next.id)
-        TorrentRepository.update(next.id) { it.copy(state = TorrentState.DOWNLOADING) }
-        DebugLogger.i(TAG, "[FEATURE] 슬롯 승격 id=${next.id} '${next.name}' 활성=${active + 1}/${latestMaxActive}")
+        if (next != null) {
+            withGate { handleMap[next.id]?.resume() }
+            stallSince.remove(next.id)
+            TorrentRepository.update(next.id) { it.copy(state = TorrentState.DOWNLOADING) }
+            DebugLogger.i(TAG, "[FEATURE] 슬롯 승격 id=${next.id} '${next.name}' 활성=${active + 1}/${latestMaxActive}")
+            return
+        }
+        if (!isGuardSuppressed()) {
+            val stuck = all.firstOrNull {
+                shouldAutoResume(it.state, it.progress) && handleMap.containsKey(it.id)
+            }
+            if (stuck != null) {
+                resume(stuck.id)
+                DebugLogger.i(TAG, "[FEATURE] 중단 torrent 자동 재시도 id=${stuck.id} '${stuck.name}'")
+            }
+        }
     }
 
     /** 트래커 재발표 + DHT 발표 강제 (추가 직후 시드·피어 0 지연 해소) */
@@ -1777,8 +1776,11 @@ val th = withGate { session?.find(Sha1Hash.parseHex(expectedHash)) }
         migrateLegacyWorkDir()
         val restored = persistence.load()
         restored.forEach { job ->
-            if (job.state != TorrentState.DONE && job.state != TorrentState.FAILED) {
-                TorrentRepository.restore(job.copy(state = TorrentState.QUEUED))
+            // 무조건 시도 원칙: DONE 빼고 전부 QUEUED로 살려낸다 (FAILED·PAUSED 포함).
+            // magnet이면 아래에서 재검증한다 — 형식 불량이면 JNI에 넣지 않고 FAILED로 격리
+            // (기동 크래시 루프 차단). 검증 통과분은 다시 다운로드한다.
+            if (job.state != TorrentState.DONE) {
+                TorrentRepository.restore(job.copy(state = TorrentState.QUEUED, errorMessage = null))
                 val hasMagnet = job.magnet != null && job.magnet!!.startsWith("magnet:")
                 if (hasMagnet) {
                     scope.launch {
@@ -1848,7 +1850,13 @@ val th = withGate { session?.find(Sha1Hash.parseHex(expectedHash)) }
                             }
                         }
                     } else {
+                        // 원본 .torrent 파일이 없으면 살릴 방법이 없다 — 가짜 QUEUED로 두지 않고
+                        // FAILED로 명시한다 (리스트에 남아 사용자가 다시 추가·삭제 결정).
                         DebugLogger.w(TAG, "torrent 파일 없음 id=${job.id}, 복원 불가")
+                        TorrentRepository.update(job.id) {
+                            it.copy(state = TorrentState.FAILED, errorMessage = "원본 torrent 파일이 없어 복원할 수 없습니다 — 다시 추가해 주세요")
+                        }
+                        persistNow()
                         TorrentRepository.update(job.id) {
                             it.copy(state = TorrentState.FAILED, errorMessage = "torrent 파일 없음 — 재추가 필요")
                         }
@@ -1861,8 +1869,10 @@ val th = withGate { session?.find(Sha1Hash.parseHex(expectedHash)) }
                 // DONE job 은 handleMap 에 없으므로 폴링이 이걸 다시 잡지 못한다 → 복원 시 수습.
                 if (job.state == TorrentState.DONE && File(saveDir, job.name).exists()) {
                     scope.launch {
-                        if (moveToStorage(job.id, job.name)) {
+                        val movedDst = moveToStorage(job.id, job.name)
+                        if (movedDst != null) {
                             storageMoved.add(job.id)
+                            TorrentRepository.update(job.id) { it.copy(savePath = movedDst.parent ?: it.savePath) }
                             DebugLogger.i(TAG, "완료 torrent 복구 이동 id=${job.id} → ${job.name}")
                         } else {
                             DebugLogger.w(TAG, "완료 torrent 복구 이동 실패 id=${job.id} name='${job.name}'")

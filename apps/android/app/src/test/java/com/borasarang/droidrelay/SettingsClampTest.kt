@@ -48,12 +48,6 @@ class SettingsClampTest {
     }
 
     @Test
-    fun `시드 부재 대기 상한`() {
-        assertEquals(0, SettingsConstraints.TORRENT_MIN_SEED_WAIT_MAX.coerceAtMost(0))
-        assertTrue(SettingsConstraints.TORRENT_MIN_SEED_WAIT_MAX in 1..86400)
-    }
-
-    @Test
     fun `토렌트 최대 활성 범위는 라벨과 일치`() {
         assertEquals(1, SettingsConstraints.TORRENT_MAX_ACTIVE_MIN)
         assertEquals(10, SettingsConstraints.TORRENT_MAX_ACTIVE_MAX)
