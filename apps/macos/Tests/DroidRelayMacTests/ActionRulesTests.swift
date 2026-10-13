@@ -61,17 +61,16 @@ final class ActionRulesTests: XCTestCase {
         XCTAssertTrue(ActionRules.jobLimitEditable(state: "RUNNING", type: nil))
     }
 
-    // MARK: - 토렌트 (웹 1325~1326행)
+    // MARK: - 토렌트 (무조건 시도 원칙: 일시정지 없음)
 
-    /// **토렌트는 DOWNLOADING 이다** — 잡의 RUNNING 이 아니다.
-    /// 잡의 규칙을 그대로 쓰면 토렌트에서 일시정지가 아예 안 뜬다.
-    func test_토렌트_다운로딩은_일시정지() {
-        XCTAssertEqual(ActionRules.torrentActions(state: "DOWNLOADING"), [.pause])
+    /// **진행 중에는 동작이 없다** — 멈추는 길은 삭제뿐. 재개는 정지·실패·정체·대기에서만.
+    func test_토렌트_다운로딩은_동작이_없다() {
+        XCTAssertTrue(ActionRules.torrentActions(state: "DOWNLOADING").isEmpty)
     }
 
-    /// 메타데이터를 받는 중에도 중단할 수 있다
-    func test_토렌트_메타데이터_추출중도_일시정지() {
-        XCTAssertEqual(ActionRules.torrentActions(state: "FETCHING_METADATA"), [.pause])
+    /// 메타데이터 추출 중에도 동작이 없다
+    func test_토렌트_메타데이터_추출중도_동작이_없다() {
+        XCTAssertTrue(ActionRules.torrentActions(state: "FETCHING_METADATA").isEmpty)
     }
 
     /// 잡과 달리 **토렌트는 4개 상태에서 재개**한다 (정체·대기 포함) — 웹 1326행

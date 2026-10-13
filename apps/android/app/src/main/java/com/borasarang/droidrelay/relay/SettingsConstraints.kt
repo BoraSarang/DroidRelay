@@ -77,9 +77,6 @@ object SettingsConstraints {
     /** 속도 상한 클램프 (음수는 0) */
     fun clampBps(bps: Long): Long = bps.coerceIn(0L, MAX_BPS)
 
-    // 시드 미확보 대기 (초, 0=끄기)
-    const val TORRENT_MIN_SEED_WAIT_MAX = 3600
-
     // 내장 웹 서버 포트 (v0.34) — HTTP·HTTPS는 서로 달라야 한다
     const val PORT_MIN = 1024
     const val PORT_MAX = 65535

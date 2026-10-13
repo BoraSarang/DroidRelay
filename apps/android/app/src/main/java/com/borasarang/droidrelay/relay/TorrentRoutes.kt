@@ -153,17 +153,8 @@ internal fun Route.torrentRoutes(context: Context, serverRef: RelayServer) {
             HttpStatusCode.ServiceUnavailable,
         )
         when (action) {
-            "pause" -> {
-                if (TorrentRepository.get(id) == null) {
-                    call.respondText("없음", ContentType.Text.Plain, HttpStatusCode.NotFound)
-                } else if (engineDead()) {
-                    respondEngineDead()
-                } else if (!engine.pause(id)) {
-                    respondNoHandle()
-                } else {
-                    call.respondText("ok")
-                }
-            }
+            // 무조건 시도 원칙: 토렌트 일시정지 없음 — 멈추는 길은 삭제뿐.
+            // pause는 400 "지원 없는 동작"으로 떨어진다. 재개는 유지 (수동 보조 수단).
             "resume" -> {
                 if (TorrentRepository.get(id) == null) {
                     call.respondText("없음", ContentType.Text.Plain, HttpStatusCode.NotFound)

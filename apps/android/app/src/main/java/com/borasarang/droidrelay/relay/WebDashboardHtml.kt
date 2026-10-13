@@ -629,14 +629,6 @@ internal object WebDashboardHtml {
           </div>
           <div class="sb" style="margin-top:4px">시퀀셜: 첫 번째 조각부터 순서대로 다운로드하여 재생 미리보기 지원</div>
           <div class="sb" style="margin-top:4px">PEX: 피어 탐색용으로 트래픽은 미미합니다. 끄면 DHT·트래커로만 피어를 찾습니다</div>
-          <div class="ti">시더 부재 자동 중단</div>
-          <div class="si">
-            <div class="sl">시더 부재 시 대기 (초)</div>
-            <div class="sv">
-              <input type="number" id="torrentMinSeedWaitSec" min="0" max="3600" value="0" style="width:90px">
-            </div>
-            <div class="sb">시더(파일 100% 보유 피어)가 없으면 이 시간만큼 기다린 뒤 자동 일시정지. 0 = 끄기 (기본). 예: 300 = 5분 대기</div>
-          </div>
           <div class="ti">정체 torrent 회전</div>
           <div class="ck"><input type="checkbox" id="torrentStallEnabled" checked><label for="torrentStallEnabled">정체 감지 → 자동 일시정지 + 순서 맨뒤로</label></div>
           <div class="sr">
@@ -1344,7 +1336,6 @@ function renderTorrents(ts){
     var st=t.state||'UNKNOWN';
     var badgeClass={DOWNLOADING:'RUNNING',SEEDING:'DONE',DONE:'DONE',PAUSED:'PAUSED',STALLED:'STALLED',ERROR:'FAILED',FAILED:'FAILED',FETCHING_METADATA:'QUEUED',METADATA:'QUEUED',ADDING:'QUEUED'}[st]||'QUEUED';
     var pause='';
-    if(st==='DOWNLOADING'||st==='FETCHING_METADATA')pause='<button class="ghost" onclick="torrentAct(\''+t.id+'\',\'pause\')">일시정지</button>';
     if(st==='PAUSED'||st==='FAILED'||st==='STALLED'||st==='QUEUED')pause='<button class="ghost" onclick="torrentAct(\''+t.id+'\',\'resume\')">재개</button>';
     var del='<button class="ghost" onclick="torrentDelConfirm(\''+t.id+'\')">삭제</button>';
     var tlimit='<select class="ghost" onchange="setTorrentLimit(\''+t.id+'\',this.value)" title="torrent 다운로드 제한">'
@@ -2276,7 +2267,6 @@ function loadSettings(){
     document.getElementById('torrentTrackerSync').checked=tr.torrentTrackerSync!==false;
     document.getElementById('torrentListenPort').value=tr.torrentListenPort!=null?tr.torrentListenPort:6881;
     document.getElementById('torrentSavePath').value=tr.torrentSavePath||'${com.borasarang.droidrelay.relay.StorageGuard.dlRoot.path}';
-    document.getElementById('torrentMinSeedWaitSec').value=tr.torrentMinSeedWaitSec!=null?tr.torrentMinSeedWaitSec:0;
     document.getElementById('pathTestResult').textContent='';
     // Debrid 설정
     document.getElementById('debridEnabled').checked=db.debridEnabled===true;
@@ -2493,8 +2483,7 @@ function saveTorrentSettings(){
     torrentSequentialDownload:document.getElementById('torrentSequentialDownload').checked,
     torrentTrackerSync:document.getElementById('torrentTrackerSync').checked,
     torrentListenPort:num(document.getElementById('torrentListenPort').value,6881),
-    torrentSavePath:document.getElementById('torrentSavePath').value.trim(),
-    torrentMinSeedWaitSec:num(document.getElementById('torrentMinSeedWaitSec').value,0)
+    torrentSavePath:document.getElementById('torrentSavePath').value.trim()
   };
   document.getElementById('torrentUploadLabel').textContent=kblabel(body.torrentUploadLimit,512,'끔');
   document.getElementById('torrentDownloadLabel').textContent=kbpsName(body.torrentDownloadLimit);

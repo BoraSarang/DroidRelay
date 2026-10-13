@@ -1,9 +1,5 @@
 package com.borasarang.droidrelay.relay
 
-import android.app.Notification
-import android.app.NotificationChannel
-import android.app.NotificationManager
-import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
@@ -45,12 +41,14 @@ class RelayService : Service() {
     private var schedulerManager: SchedulerManager? = null
     private var speedScheduleManager: SpeedScheduleManager? = null
     private var isForeground = false
+    /** 알림 빌더 전담 — 생명주기와 분리 (Phase 2). 호출 순서·문구·ID 그대로 위임한다 */
+    private val notifs by lazy { ServiceNotifications(this) }
 
     override fun onCreate() {
         super.onCreate()
         DebugLogger.i(TAG, "서비스 생성 시작")
         // 채널 생성이 최초 알림 게시보다 앞서야 Android 8+에서 무시되지 않음
-        createChannel()
+        notifs.createChannel()
         // FGS 승격을 가장 먼저 시도 — startForegroundService fallback 경로의 5초 의무 창 확보
         startInForeground()
 
@@ -142,13 +140,10 @@ class RelayService : Service() {
                     }
                 }
                 // 토렌트도 함께 스로틀 (결함 #5) + 가드 억제 진입 (T-1101):
-                // 업로드 최소·DHT/PEX 정지로 모뎀 TX를 내려 발열 사이클을 끊는다
+                // 업로드 최소·DHT/PEX 정지로 모뎀 TX를 내려 발열 사이클을 끊는다.
+                // 무조건 시도 원칙: 토렌트를 멈추지는 않는다 — 멈추는 길은 삭제뿐.
+                // 억제 중에도 다운로드는 계속되고, 해제되면 속도가 복귀한다.
                 runCatching { torrentEng.setGuardSuppressed(true) }
-                TorrentRepository.all().forEach { t ->
-                    if (t.state == TorrentState.DOWNLOADING || t.state == TorrentState.SEEDING) {
-                        runCatching { torrentEng.pause(t.id) }
-                    }
-                }
             } else {
                 // 가드가 pause한 잡(PAUSED)과 실패 잡을 재개 — retryFailed만으로는 일시정지가 풀리지 않음
                 runCatching { engine.retryFailed() }
@@ -163,7 +158,7 @@ class RelayService : Service() {
                 runCatching { torrentEng.setGuardSuppressed(false) }
                 scope.launch {
                     TorrentRepository.all()
-                        .filter { it.state == TorrentState.PAUSED }
+                        .filter { shouldAutoResume(it.state, it.progress) }
                         .forEachIndexed { i, t ->
                             if (i > 0) delay(GUARD_RESUME_STAGGER_MS)
                             runCatching { torrentEng.resume(t.id) }
@@ -261,7 +256,7 @@ class RelayService : Service() {
                             settingsRepo.updateServerState(ServerState(running = false, port = s.port, httpsPort = s.httpsPort, httpsEnabled = s.httpsEnabled, url = null))
                         }
                         lastPorts = Triple(s.port, s.httpsPort, s.httpsEnabled)
-                        updateRunningNotification(s.port)
+                        notifs.updateRunningNotification(s.port)
                         return@collectLatest
                     }
                     server?.updateSettings(s)
@@ -286,7 +281,7 @@ class RelayService : Service() {
                             }
                         }
                         lastPorts = Triple(s.port, s.httpsPort, s.httpsEnabled)
-                        updateRunningNotification(s.port)
+                        notifs.updateRunningNotification(s.port)
                     }
                 }
             }
@@ -418,7 +413,7 @@ class RelayService : Service() {
                     jobs.forEach { j ->
                         if (last[j.id] == JobState.RUNNING && j.state == JobState.DONE) {
                             DebugLogger.i(TAG, "완료 알림 '${j.filename}'")
-                            notify(j.id.hashCode(), getString(R.string.notif_done_title), j.filename, done = true)
+                            notifs.notify(j.id.hashCode(), getString(R.string.notif_done_title), j.filename, done = true)
                             // T-1095 플러그인 이벤트 (연동 허용 시, 알림 전이와 같은 지점)
                             scope.launch {
                                 val allowed = runCatching { settingsRepo.settings.first().pluginAllowed }.getOrDefault(true)
@@ -440,7 +435,7 @@ class RelayService : Service() {
                             if (lastFailReason[j.id] != reason) {
                                 lastFailReason[j.id] = reason
                                 DebugLogger.i(TAG, "실패 알림 '${j.filename}' (${j.errorCode})")
-                                notify(j.id.hashCode(), getString(R.string.notif_fail_title), j.filename + (j.errorMessage?.let { " — $it" } ?: ""), done = false)
+                                notifs.notify(j.id.hashCode(), getString(R.string.notif_fail_title), j.filename + (j.errorMessage?.let { " — $it" } ?: ""), done = false)
                                 // T-1095 플러그인 이벤트 (동일 원인 1회만 — 알림 dedup과 같은 지점)
                                 scope.launch {
                                     val allowed = runCatching { settingsRepo.settings.first().pluginAllowed }.getOrDefault(true)
@@ -459,14 +454,11 @@ class RelayService : Service() {
                     }
                 }
 
-                // 완료 후 동작 (v0.24) — 전이 기반: 직전까지 활성이었는데 지금 유휴면 1회 실행
+                // 완료 후 동작 (v0.24) — 전이 기반: 직전까지 활성이었는데 지금 유휴면 1회 실행.
+                // 무조건 시도 원칙: DONE이 아닌 토렌트가 남아있으면 "전체 완료"가 아니다.
                 val wasActive = last.values.any { it == JobState.RUNNING || it == JobState.QUEUED }
                 val nowIdle = current.values.none { it == JobState.RUNNING || it == JobState.QUEUED } &&
-                    TorrentRepository.all().none {
-                        it.state == TorrentState.DOWNLOADING ||
-                            it.state == TorrentState.FETCHING_METADATA ||
-                            it.state == TorrentState.QUEUED
-                    }
+                    TorrentRepository.all().all { it.state == TorrentState.DONE }
                 if (wasActive && nowIdle) {
                     val action = runCatching { settingsRepo.firstBlocking().completionAction }.getOrDefault("none")
                     if (action == SettingsConstraints.COMPLETION_ACTION_STOP_SERVER) {
@@ -479,14 +471,14 @@ class RelayService : Service() {
                 // 진행바 실시간 갱신 (2초 스로틀)
                 if (now - lastNotifUpdate >= NOTIF_THROTTLE_MS) {
                     lastNotifUpdate = now
-                    updateProgressNotification(jobs)
+                    notifs.updateProgressNotification(jobs, activePort())
                 }
             }
         }
 
         // ③ 신규 기기 승인 팝업 (T-112)
         DeviceGate.onRequest = { ip, resolve ->
-            showDeviceGateNotification(ip, resolve)
+            notifs.showDeviceGateNotification(ip, resolve, scope)
         }
 
         // ④ 네트워크 복구 시 FAILED 작업 자동 재시도
@@ -503,7 +495,7 @@ class RelayService : Service() {
                         val prev = lastTorrentStates[t.id]
                         if (prev == TorrentState.DOWNLOADING && t.state == TorrentState.DONE) {
                             DebugLogger.i(TAG, "torrent 완료 알림 '${t.name}'")
-                            notifyTorrent(t.id.hashCode(), "Torrent 완료", t.name)
+                            notifs.notifyTorrent(t.id.hashCode(), "Torrent 완료", t.name)
                             // T-1095 플러그인 이벤트 (연동 허용 시)
                             scope.launch {
                                 val allowed = runCatching { settingsRepo.settings.first().pluginAllowed }.getOrDefault(true)
@@ -520,7 +512,7 @@ class RelayService : Service() {
                         }
                         if (prev != null && prev != TorrentState.FAILED && t.state == TorrentState.FAILED) {
                             DebugLogger.i(TAG, "torrent 실패 알림 '${t.name}'")
-                            notifyTorrent(t.id.hashCode() + 10000, "Torrent 실패", t.name + (t.errorMessage?.let { " — $it" } ?: ""))
+                            notifs.notifyTorrent(t.id.hashCode() + 10000, "Torrent 실패", t.name + (t.errorMessage?.let { " — $it" } ?: ""))
                             // T-1095 플러그인 이벤트 (연동 허용 시)
                             scope.launch {
                                 val allowed = runCatching { settingsRepo.settings.first().pluginAllowed }.getOrDefault(true)
@@ -534,7 +526,7 @@ class RelayService : Service() {
                 val nowT = System.currentTimeMillis()
                 if (nowT - lastTorrentNotifUpdate >= NOTIF_THROTTLE_MS) {
                     lastTorrentNotifUpdate = nowT
-                    runCatching { updateProgressNotification(JobsRepository.all()) }
+                    runCatching { notifs.updateProgressNotification(JobsRepository.all(), activePort()) }
                 }
             }
         }
@@ -571,10 +563,7 @@ class RelayService : Service() {
         DeviceGate.onRequest = null
         DeviceGate.clearSession()
         // FGS로 승격된 경우 반드시 제거 — 누락 시 ForegroundServiceDidNotStopInTimeException(E-AND-SRV-0110)
-        if (isForeground) {
-            ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
-            isForeground = false
-        }
+        stopForegroundIfNeeded()
         // 무거운 정지·영구 저장 전부 백그라운드로 — onDestroy가 메인스레드에서
         // 시스템 FGS 정지 타임아웃(약 10초)을 넘기면 ForegroundServiceDidNotStopInTimeException 크래시
         val serverToStop = server.also { server = null }
@@ -616,24 +605,10 @@ class RelayService : Service() {
             // 강제종료/서비스 종료 시 즉시 영구 저장 (T-111)
             // 복원 전 저장 금지 (T-1085) — 복원 전엔 저장소가 비어 있어
             // "원본 N건" 이 "[]" 로 덮여써지면 목록이 영구히 사라진다(실제로 그랬다).
-            runCatching {
-                val jobs = com.borasarang.droidrelay.relay.JobsRepository.all()
-                if (com.borasarang.droidrelay.relay.RelayApp.engine?.isRestored() == true) {
-                    JobsPersistence(appContext).save(jobs)
-                } else {
-                    DebugLogger.w(TAG, "복원 전 종료 — jobs.json 저장 스킵 (${jobs.size}건)")
-                }
-            }
             // Torrent 상태 저장 — resetTorrent()로 인스턴스가 파기되므로 복원 여부는 미리 캡처 (v0.50.1)
             val torrentRestored = torrentToStop?.isRestored() == true
-            runCatching {
-                val ts = TorrentRepository.all()
-                if (torrentRestored) {
-                    TorrentPersistence(appContext).save(ts)
-                } else {
-                    DebugLogger.w(TAG, "복원 전 종료 — torrents.json 저장 스킵 (${ts.size}건)")
-                }
-            }
+            runCatching { persistJobs("복원 전 종료") }
+            runCatching { persistTorrents("복원 전 종료", torrentRestored) }
             DebugLogger.i(TAG, "백그라운드 정지·영구 저장 완료")
         }
         scope.cancel()
@@ -644,30 +619,18 @@ class RelayService : Service() {
     /** 강제종료 직전 상태 저장 (onTaskRemoved = 사용자가 앱 스와이프 종료 시) */
     override fun onTaskRemoved(rootIntent: Intent?) {
         DebugLogger.i(TAG, "onTaskRemoved → 즉시 영구 저장")
-        val jobs = com.borasarang.droidrelay.relay.JobsRepository.all()
-        if (com.borasarang.droidrelay.relay.RelayApp.engine?.isRestored() == true) {
-            JobsPersistence(applicationContext).save(jobs)
-        } else {
-            DebugLogger.w(TAG, "복원 전 스와이프 종료 — jobs.json 저장 스킵 (${jobs.size}건)")
-        }
-        val ts = TorrentRepository.all()
-        if (com.borasarang.droidrelay.relay.RelayApp.torrentEngine?.isRestored() == true) {
-            TorrentPersistence(applicationContext).save(ts)
-        } else {
-            DebugLogger.w(TAG, "복원 전 스와이프 종료 — torrents.json 저장 스킵 (${ts.size}건)")
-        }
+        persistJobs("복원 전 스와이프 종료")
+        persistTorrents("복원 전 스와이프 종료", RelayApp.torrentEngine?.isRestored() == true)
         // FGS 제거 누락 시 시스템에 의해 타임아웃 크래시 발생 — 스와이프 종료 시에도 명시적으로 해제 (E-AND-SRV-0110)
-        if (isForeground) {
-            ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
-            isForeground = false
-        }
-        val active = jobs.any { it.state == JobState.RUNNING || it.state == JobState.QUEUED } ||
-            runCatching {
-                TorrentRepository.all().any {
-                    it.state == TorrentState.DOWNLOADING || it.state == TorrentState.FETCHING_METADATA || it.state == TorrentState.QUEUED
-                }
-            }.getOrDefault(false)
-        if (!active) {
+        stopForegroundIfNeeded()
+        // 무조건 시도 원칙: DONE이 아닌 토렌트가 남아있으면 유휴가 아니므로 서비스 유지.
+        // (PAUSED·STALLED·FAILED도 대기 작업이다 — isIdleForAutoStop 단일 기준으로 판정)
+        val idle = isIdleForAutoStop(
+            jobStates = JobsRepository.all().map { it.state },
+            torrentStates = runCatching { TorrentRepository.all().map { it.state } }.getOrDefault(emptyList()),
+            activeTransfers = TransferTracker.count,
+        )
+        if (idle) {
             DebugLogger.i(TAG, "onTaskRemoved → 유휴 상태 stopSelf")
             stopSelf()
         } else {
@@ -676,20 +639,52 @@ class RelayService : Service() {
         super.onTaskRemoved(rootIntent)
     }
 
+    /** 강제종료 내성 영속 — onDestroy·onTaskRemoved 공통 (T-111/T-1085). 순서·가드·문구 태그만 다르다 */
+    private fun persistJobs(tag: String) {
+        val jobs = JobsRepository.all()
+        if (RelayApp.engine?.isRestored() == true) {
+            JobsPersistence(applicationContext).save(jobs)
+        } else {
+            DebugLogger.w(TAG, "$tag — jobs.json 저장 스킵 (${jobs.size}건)")
+        }
+    }
+
+    private fun persistTorrents(tag: String, torrentRestored: Boolean) {
+        val ts = TorrentRepository.all()
+        if (torrentRestored) {
+            TorrentPersistence(applicationContext).save(ts)
+        } else {
+            DebugLogger.w(TAG, "$tag — torrents.json 저장 스킵 (${ts.size}건)")
+        }
+    }
+
+    /** FGS 해제 누락 시 시스템 타임아웃 크래시 (E-AND-SRV-0110) — 종료 경로 공통 */
+    private fun stopForegroundIfNeeded() {
+        if (isForeground) {
+            ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+            isForeground = false
+        }
+    }
+
     override fun onBind(intent: Intent?) = null
+
+    /** 설정 반영 전(-1)에는 기본 HTTP 포트로 폴백 */
+    private fun activePort(): Int =
+        if (currentPort in SettingsConstraints.PORT_MIN..SettingsConstraints.PORT_MAX) currentPort
+        else SettingsConstraints.DEFAULT_HTTP_PORT
 
     private fun startInForeground() {
         if (isForeground) return
-        val notif = runningNotification(lanAddress(), activePort())
+        val notif = notifs.runningNotification(lanAddress(), activePort())
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
                 // Android 15+ dataSync 6시간 제한으로 ForegroundServiceDidNotStopInTimeException 크래시
                 // → API 34+는 specialUse로 승격 (LAN 릴레이 서버, 무제한)
-                startForeground(NOTIF_ID, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+                startForeground(ServiceNotifications.NOTIF_ID, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
             } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                startForeground(NOTIF_ID, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
+                startForeground(ServiceNotifications.NOTIF_ID, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
             } else {
-                startForeground(NOTIF_ID, notif)
+                startForeground(ServiceNotifications.NOTIF_ID, notif)
             }
             isForeground = true
             DebugLogger.i(TAG, "포그라운드 서비스 시작 완료")
@@ -700,199 +695,7 @@ class RelayService : Service() {
         }
     }
 
-    private fun baseNotif(): Notification.Builder =
-        Notification.Builder(this, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.stat_sys_download_done)
-
-    private fun runningNotification(ip: String?, port: Int): Notification =
-        baseNotif()
-            .setContentTitle(getString(R.string.notif_running_title))
-            .setContentText(if (ip != null) "http://$ip:$port 접속 가능" else getString(R.string.notif_running_text))
-            .setOngoing(true)
-            .build()
-
-    private fun updateRunningNotification(port: Int) {
-        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        nm.notify(NOTIF_ID, runningNotification(lanAddress(), port))
-    }
-
-    /** 설정 반영 전(-1)에는 기본 HTTP 포트로 폴백 */
-    private fun activePort(): Int =
-        if (currentPort in SettingsConstraints.PORT_MIN..SettingsConstraints.PORT_MAX) currentPort
-        else SettingsConstraints.DEFAULT_HTTP_PORT
-
-    private fun updateProgressNotification(jobs: List<Job>) {
-        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        val running = jobs.filter { it.state == JobState.RUNNING }
-        val torrents = runCatching { TorrentRepository.all() }.getOrDefault(emptyList())
-        val tActive = torrents.filter {
-            it.state == TorrentState.DOWNLOADING || it.state == TorrentState.FETCHING_METADATA
-        }
-        val seeding = torrents.filter { it.state == TorrentState.SEEDING }
-        val ip = lanAddress()
-        val httpSpeed = running.sumOf { it.speedBps }
-        val tDownSpeed = tActive.sumOf { it.downloadSpeed }
-        val tUpSpeed = (tActive + seeding).sumOf { it.uploadSpeed }
-
-        val notif = if (running.isEmpty() && tActive.isEmpty()) {
-            if (seeding.isNotEmpty()) {
-                val first = seeding.maxByOrNull { it.uploadSpeed }!!
-                baseNotif()
-                    .setContentTitle("🌱 시딩 중 ${seeding.size}건 · ↑ ${tUpSpeed / 1024} KB/s")
-                    .setContentText("${first.name} (${first.seeds}시드/${first.peers}피어)")
-                    .setOngoing(true)
-                    .setOnlyAlertOnce(true)
-                    .build()
-            } else {
-                baseNotif()
-                    .setContentTitle(getString(R.string.notif_running_title))
-                    .setContentText("http://$ip:${activePort()} · 대기 중인 다운로드 없음")
-                    .setOngoing(true)
-                    .build()
-            }
-        } else {
-            val total = running.size + tActive.size
-            val totalSpeed = httpSpeed + tDownSpeed
-            val topHttp = running.maxByOrNull { it.progress }
-            val topTorrent = tActive.maxByOrNull { it.progress }
-            // 진행률 높은 쪽을 대표 표시 (동률이면 HTTP 우선)
-            val useTorrent = topTorrent != null &&
-                (topHttp == null || topTorrent.progress >= topHttp.progress)
-            if (useTorrent) {
-                val t = topTorrent!!
-                val pct = (t.progress * 100).toInt().coerceIn(0, 100)
-                val sizeText = if (t.totalSize > 0) {
-                    " (${fmtBytes(t.downloadedSize)}/${fmtBytes(t.totalSize)})"
-                } else {
-                    ""
-                }
-                val stateText = if (t.state == TorrentState.FETCHING_METADATA) "메타데이터 받는 중" else "$pct%$sizeText"
-                baseNotif()
-                    .setContentTitle("🌊 ${total}건 다운로드 중 · ⚡ ${totalSpeed / 1024} KB/s")
-                    .setContentText("${t.name} $stateText")
-                    .setProgress(100, pct, t.totalSize <= 0)
-                    .setOngoing(true)
-                    .setOnlyAlertOnce(true)
-                    .build()
-            } else {
-                val first = topHttp!!
-                val pct = (first.progress * 100).toInt().coerceIn(0, 100)
-                baseNotif()
-                    .setContentTitle("${total}건 다운로드 중 · ⚡ ${totalSpeed / 1024} KB/s")
-                    .setContentText("${first.filename} $pct% (${fmtBytes(first.downloadedBytes)}${if (first.totalBytes > 0) "/" + fmtBytes(first.totalBytes) else ""})")
-                    .setProgress(100, pct, first.totalBytes <= 0)
-                    .setOngoing(true)
-                    .setOnlyAlertOnce(true)
-                    .build()
-            }
-        }
-        nm.notify(NOTIF_ID, notif)
-    }
-
-    private fun showDeviceGateNotification(ip: String, resolve: (Boolean) -> Unit) {
-        val allow = PendingIntent.getService(
-            this, ip.hashCode(),
-            Intent(this, RelayService::class.java).setAction(ACTION_ALLOW).putExtra(EXTRA_IP, ip),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        )
-        val deny = PendingIntent.getService(
-            this, ("deny$ip").hashCode(),
-            Intent(this, RelayService::class.java).setAction(ACTION_DENY).putExtra(EXTRA_IP, ip),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        )
-        val notif = Notification.Builder(this, CHANNEL_GATE_ID)
-            .setSmallIcon(android.R.drawable.ic_dialog_alert)
-            .setContentTitle("새 기기 접속 요청")
-            .setContentText("$ip — 이 기기를 허용할까요?")
-            .setAutoCancel(true)
-            .addAction(0, "허용", allow)
-            .addAction(0, "거부", deny)
-            .build()
-        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        nm.notify(GATE_NOTIF_PREFIX + ip.hashCode(), notif)
-
-        // 알림 액션 없이 무응답이면 대기 유지 (웹은 503 반환)
-        scope.launch {
-            delay(GATE_TIMEOUT_MS)
-            runCatching { resolve(false) }
-        }
-    }
-
-    private fun notify(id: Int, title: String, text: String, done: Boolean) {
-        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        // 완료 알림 탭 → 보관함으로 이동 (v0.24)
-        val openTab = PendingIntent.getActivity(
-            this, 9000 + id,
-            Intent(this, com.borasarang.droidrelay.MainActivity::class.java)
-                .setAction(com.borasarang.droidrelay.MainActivity.ACTION_OPEN_TAB)
-                .putExtra(com.borasarang.droidrelay.MainActivity.EXTRA_TAB, 2),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        )
-        val notif = Notification.Builder(this, CHANNEL_RESULT_ID)
-            .setSmallIcon(if (done) android.R.drawable.stat_sys_download_done else android.R.drawable.stat_notify_error)
-            .setContentTitle(title)
-            .setContentText(text)
-            .setContentIntent(if (done) openTab else null)
-            .setAutoCancel(true)
-            .build()
-        nm.notify(id, notif)
-    }
-
-    private fun notifyTorrent(id: Int, title: String, text: String) {
-        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        // 토렌트 완료 알림 탭 → 토렌트 탭으로 이동 (v0.24)
-        val openTab = PendingIntent.getActivity(
-            this, 9100 + id,
-            Intent(this, com.borasarang.droidrelay.MainActivity::class.java)
-                .setAction(com.borasarang.droidrelay.MainActivity.ACTION_OPEN_TAB)
-                .putExtra(com.borasarang.droidrelay.MainActivity.EXTRA_TAB, 1),
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        )
-        val notif = Notification.Builder(this, CHANNEL_TORRENT_ID)
-            .setSmallIcon(android.R.drawable.stat_sys_download_done)
-            .setContentTitle(title)
-            .setContentText(text)
-            .setContentIntent(openTab)
-            .setAutoCancel(true)
-            .build()
-        nm.notify(TORRENT_NOTIF_PREFIX + id, notif)
-    }
-
-    private fun createChannel() {
-        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        // 서버 실행 상태 알림 — 배지 없음
-        nm.createNotificationChannel(
-            NotificationChannel(CHANNEL_ID, getString(R.string.notif_channel_name), NotificationManager.IMPORTANCE_LOW).apply {
-                setShowBadge(false)
-            },
-        )
-        // 다운로드 완료/실패 알림 — 배지 표시
-        nm.createNotificationChannel(
-            NotificationChannel(CHANNEL_RESULT_ID, "다운로드 결과", NotificationManager.IMPORTANCE_DEFAULT).apply {
-                setShowBadge(true)
-            },
-        )
-        // 기기 접속 승인 알림
-        nm.createNotificationChannel(
-            NotificationChannel(CHANNEL_GATE_ID, "기기 접속 승인", NotificationManager.IMPORTANCE_HIGH),
-        )
-        // torrent 다운로드 알림
-        nm.createNotificationChannel(
-            NotificationChannel(CHANNEL_TORRENT_ID, "Torrent 다운로드", NotificationManager.IMPORTANCE_LOW).apply {
-                setShowBadge(true)
-            },
-        )
-    }
-
     companion object {
-        private const val CHANNEL_ID = "relay_status"
-        private const val CHANNEL_RESULT_ID = "relay_result"
-        private const val CHANNEL_GATE_ID = "relay_gate"
-        private const val CHANNEL_TORRENT_ID = "relay_torrent"
-        private const val NOTIF_ID = 1001
-        private const val TORRENT_NOTIF_PREFIX = 30000
-        private const val GATE_TIMEOUT_MS = 60_000L
-        private const val GATE_NOTIF_PREFIX = 20000
         private const val SAVE_DEBOUNCE_MS = 10_000L
         private const val NOTIF_THROTTLE_MS = 2_000L
         private const val WATCHDOG_FAIL_STREAK = 3
@@ -923,10 +726,4 @@ class RelayService : Service() {
             context.stopService(Intent(context, RelayService::class.java))
         }
     }
-}
-
-private fun fmtBytes(n: Long): String = when {
-    n < 1_048_576 -> "${n / 1024} KB"
-    n < 1_073_741_824 -> String.format("%.1f MB", n / 1_048_576.0)
-    else -> String.format("%.2f GB", n / 1_073_741_824.0)
 }

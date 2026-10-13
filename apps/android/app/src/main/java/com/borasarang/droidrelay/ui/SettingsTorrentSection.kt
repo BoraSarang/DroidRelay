@@ -188,28 +188,6 @@ internal fun TorrentSection(
         )
         TrackerProbeRow()
 
-        var seedWait by remember(s.torrentMinSeedWaitSec) { mutableStateOf(s.torrentMinSeedWaitSec.toString()) }
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-            OutlinedTextField(
-                value = seedWait,
-                onValueChange = { seedWait = it.filter { c -> c.isDigit() } },
-                label = { Text("시더 부재 대기 (초, 0=끄기)") },
-                singleLine = true,
-                shape = MaterialTheme.shapes.small,
-                modifier = Modifier.weight(1f),
-            )
-            Spacer(Modifier.width(8.dp))
-            Button(onClick = {
-                val sec = seedWait.toIntOrNull()
-                if (sec == null || sec !in 0..3600) {
-                    DebugLogger.w("Settings", "시더 대기 무효 값: $seedWait")
-                } else {
-                    DebugLogger.i("Settings", "시더 대기 → $sec 초")
-                    scope.launch { repo.setTorrentMinSeedWaitSec(sec) }
-                }
-            }) { Text("적용") }
-        }
-
         var listenPort by remember(s.torrentListenPort) { mutableStateOf(s.torrentListenPort.toString()) }
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
             OutlinedTextField(

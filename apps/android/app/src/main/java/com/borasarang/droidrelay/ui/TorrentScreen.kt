@@ -28,7 +28,6 @@ import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
@@ -217,10 +216,6 @@ fun TorrentScreen(onShowSnack: (String) -> Unit = {}) {
                         // onClick 는 메인 스레드에서 실행되므로 동기 호출이면
                         // 폴러/alert 가 게이트를 쥔 동안 UI 가 멈춘다 (ANR).
                         // 전부 IO 스레드에서 실행한다.
-                        onPause = { scope.launch {
-                            val ok = withContext(Dispatchers.IO) { engine.pause(job.id) }
-                            if (!ok) onShowSnack("일시정지 실패 — 앱 완전 종료 후 다시 시작하세요")
-                        } },
                         onResume = { scope.launch {
                             val ok = withContext(Dispatchers.IO) { engine.resume(job.id) }
                             if (!ok) onShowSnack("재개 실패 — 앱 완전 종료 후 다시 시작하세요")
@@ -313,7 +308,6 @@ fun TorrentScreen(onShowSnack: (String) -> Unit = {}) {
 @Composable
 private fun TorrentItem(
     job: TorrentJob,
-    onPause: () -> Unit,
     onResume: () -> Unit,
     onDelete: () -> Unit,
     onMoveUp: () -> Unit,
@@ -380,11 +374,9 @@ private fun TorrentItem(
                                 }
                             }
                         }
-                        if (job.state == TorrentState.DOWNLOADING || job.state == TorrentState.FETCHING_METADATA) {
-                            IconButton(onClick = onPause) {
-                                Icon(Icons.Filled.Pause, "일시정지")
-                            }
-                        } else if (job.state == TorrentState.PAUSED || job.state == TorrentState.FAILED ||
+                        // 무조건 시도 원칙: 멈춤 버튼 없음 — 멈추는 길은 삭제뿐.
+                        // 엔진이 미완료 항목을 스스로 살려내므로 수동 재개는 보조 수단이다.
+                        if (job.state == TorrentState.PAUSED || job.state == TorrentState.FAILED ||
                             job.state == TorrentState.STALLED || job.state == TorrentState.QUEUED
                         ) {
                             IconButton(onClick = onResume) {

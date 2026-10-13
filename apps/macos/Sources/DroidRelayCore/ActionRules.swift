@@ -8,8 +8,7 @@ import Foundation
 /// ```
 /// 1177행: if(j.type!=='video'&&j.state==='RUNNING') pause='<button>일시정지</button>';
 /// 1178행: if(j.type!=='video'&&(j.state==='PAUSED'||j.state==='FAILED')) pause='<button>재개</button>';
-/// 1325행: if(st==='DOWNLOADING'||st==='FETCHING_METADATA') pause='<button>일시정지</button>';
-/// 1326행: if(st==='PAUSED'||st==='FAILED'||st==='STALLED'||st==='QUEUED') pause='<button>재개</button>';
+/// 토렌트: 무조건 시도 원칙 — 일시정지 없음. 재개는 PAUSED/FAILED/STALLED/QUEUED에서만.
 /// ```
 /// 메뉴바 앱이 **자기 멋대로 세 번째 규칙**을 만들면 사용자는
 /// "웹에서는 일시정지가 나오는데 앱에서는 재개가 나온다" 는 혼란을 겪는다.
@@ -178,11 +177,9 @@ public enum ActionRules {
 
     // MARK: - 토렌트
 
-    /// 토렌트 행의 동작 — 웹 1325~1326행과 동일.
+    /// 토렌트 행의 동작 — 무조건 시도 원칙: 일시정지 없음, 멈추는 길은 삭제뿐.
+    /// 미완료 중단(PAUSED)·실패(FAILED)·정체(STALLED)·대기(QUEUED)는 수동 재개 보조만.
     public static func torrentActions(state raw: String) -> [JobAction] {
-        if raw == State.downloading.rawValue || raw == State.fetchingMetadata.rawValue {
-            return [.pause]
-        }
         if raw == State.paused.rawValue || raw == State.failed.rawValue
             || raw == State.stalled.rawValue || raw == State.queued.rawValue {
             return [.resume]

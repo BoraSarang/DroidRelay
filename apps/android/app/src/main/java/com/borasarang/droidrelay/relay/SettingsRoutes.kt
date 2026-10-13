@@ -1,7 +1,9 @@
 package com.borasarang.droidrelay.relay
 
 import android.content.Context
+import android.os.Build
 import android.os.StatFs
+import android.provider.Settings
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.request.receiveText
@@ -24,16 +26,26 @@ internal fun Route.settingsRoutes(context: Context, serverRef: RelayServer) {
         }.getOrNull() ?: "0.5.0"
     }
     get("/api/info") {
-        val dir = RelayApp.get(context).workDir
+        // 여유공간은 실제 쓰기처(보관함) 기준 — 앱-private 로 재면 마운트·쿼터가 다를 때 오보고된다.
+        // 보관함이 아직 없으면(최초 설치) 앱-private 로 폴백해 null 을 피한다.
+        val dir = StorageGuard.dlRoot.takeIf { it.exists() } ?: RelayApp.get(context).workDir
         val stat = runCatching { StatFs(dir.path) }.getOrNull()
         val jobs = JobsRepository.all()
         val appVersion = appVersionLazy.value
+        // **기기 식별** — 맥 목록에서 "어느 폰인지" 구분용.
+        // `DEVICE_NAME` 은 사용자가 정한 이름(설정→휴대전화 정보→이름),
+        // 없으면 `Build.MODEL`(SM-S901N 등). 권한 불필요·읽기만이라 매번 읽어도 싸다.
+        val deviceName = runCatching {
+            Settings.Global.getString(context.contentResolver, Settings.Global.DEVICE_NAME)
+        }.getOrNull()?.takeIf { it.isNotBlank() } ?: Build.MODEL
         val info = JSONObject().apply {
             put("ip", lanAddress() ?: JSONObject.NULL)
             put("port", serverRef.port)
             put("httpsPort", serverRef.effectiveHttpsPort)
             put("httpsEnabled", serverRef.settings.httpsEnabled)
             put("version", appVersion)
+            put("deviceModel", Build.MODEL)
+            put("deviceName", deviceName)
             put("storageFree", stat?.availableBytes ?: JSONObject.NULL)
             put("storageTotal", stat?.totalBytes ?: JSONObject.NULL)
             put("running", jobs.count { it.state == JobState.RUNNING })
@@ -261,7 +273,6 @@ internal fun Route.settingsRoutes(context: Context, serverRef: RelayServer) {
                 put("torrentListenPort", s.torrentListenPort)
                 put("torrentSavePath", s.torrentSavePath)
                 put("torrentSequentialDownload", s.torrentSequentialDownload)
-                put("torrentMinSeedWaitSec", s.torrentMinSeedWaitSec)
                 put("torrentTrackerSync", s.torrentTrackerSync)
                 put("torrentStallEnabled", s.torrentStallEnabled)
                 put("torrentStallThresholdKbps", s.torrentStallThresholdKbps)
@@ -287,7 +298,6 @@ internal fun Route.settingsRoutes(context: Context, serverRef: RelayServer) {
         json?.optInt("torrentListenPort", -1)?.let { if (it >= 1024) repo.setTorrentListenPort(it) }
         json?.optString("torrentSavePath", "")?.let { if (it.isNotBlank()) repo.setTorrentSavePath(it) }
         if (json?.has("torrentSequentialDownload") == true) json?.optBoolean("torrentSequentialDownload")?.let { repo.setTorrentSequentialDownload(it) }
-        json?.optInt("torrentMinSeedWaitSec", -1)?.let { if (it >= 0) repo.setTorrentMinSeedWaitSec(it) }
         if (json?.has("torrentTrackerSync") == true) json?.optBoolean("torrentTrackerSync")?.let { repo.setTorrentTrackerSync(it) }
         if (json?.has("torrentStallEnabled") == true) json?.optBoolean("torrentStallEnabled")?.let { repo.setTorrentStallEnabled(it) }
         if (json?.has("torrentEnabled") == true) json?.optBoolean("torrentEnabled")?.let { repo.setTorrentEnabled(it) }

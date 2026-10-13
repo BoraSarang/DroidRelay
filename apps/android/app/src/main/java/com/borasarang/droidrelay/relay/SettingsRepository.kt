@@ -92,7 +92,6 @@ data class AppSettings(
     // 신호 게이트 (T-1102, 시골 LTE) — 켜면 RSRP/SINR 나쁠 때 큐 신규 시작·스케줄 발화를 보류
     val signalGateEnabled: Boolean = false,
     val watchdogIntervalSec: Int = 60,
-    val torrentMinSeedWaitSec: Int = 0,
     // 정체(스톨) 감지→회전 (T-1050): 0 이하 임계값은 "속도 조건 끔"
     val torrentStallEnabled: Boolean = SettingsConstraints.DEFAULT_TORRENT_STALL_ENABLED,
     val torrentStallThresholdKbps: Int = SettingsConstraints.DEFAULT_TORRENT_STALL_THRESHOLD_KBPS,
@@ -195,7 +194,6 @@ class SettingsRepository(private val context: Context) {
         val SCHED_BATTERY_MIN = intPreferencesKey("sched_battery_min")
         val SIGNAL_GATE_ENABLED = booleanPreferencesKey("signal_gate_enabled")
         val WATCHDOG_INTERVAL_SEC = intPreferencesKey("watchdog_interval_sec")
-        val TORRENT_MIN_SEED_WAIT_SEC = intPreferencesKey("torrent_min_seed_wait_sec")
         val TORRENT_STALL_ENABLED = booleanPreferencesKey("torrent_stall_enabled")
         val TORRENT_STALL_THRESHOLD_KBPS = intPreferencesKey("torrent_stall_threshold_kbps")
         val TORRENT_STALL_TIMEOUT_SEC = intPreferencesKey("torrent_stall_timeout_sec")
@@ -278,8 +276,6 @@ class SettingsRepository(private val context: Context) {
             scheduleBatteryMin = (p[Keys.SCHED_BATTERY_MIN] ?: 30).coerceIn(5, 100),
             signalGateEnabled = p[Keys.SIGNAL_GATE_ENABLED] ?: false,
             watchdogIntervalSec = (p[Keys.WATCHDOG_INTERVAL_SEC] ?: 60).coerceIn(15, 3600),
-            torrentMinSeedWaitSec = (p[Keys.TORRENT_MIN_SEED_WAIT_SEC] ?: 0)
-                .coerceIn(0, SettingsConstraints.TORRENT_MIN_SEED_WAIT_MAX),
             torrentStallEnabled = p[Keys.TORRENT_STALL_ENABLED] ?: SettingsConstraints.DEFAULT_TORRENT_STALL_ENABLED,
             torrentStallThresholdKbps = (p[Keys.TORRENT_STALL_THRESHOLD_KBPS] ?: SettingsConstraints.DEFAULT_TORRENT_STALL_THRESHOLD_KBPS)
                 .coerceIn(SettingsConstraints.TORRENT_STALL_THRESHOLD_MIN, SettingsConstraints.TORRENT_STALL_THRESHOLD_MAX),
@@ -388,12 +384,6 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun setWatchdogIntervalSec(sec: Int) =
         context.settingsDataStore.edit { it[Keys.WATCHDOG_INTERVAL_SEC] = sec.coerceIn(15, 3600) }
-
-    suspend fun setTorrentMinSeedWaitSec(sec: Int) =
-        context.settingsDataStore.edit {
-            it[Keys.TORRENT_MIN_SEED_WAIT_SEC] =
-                sec.coerceIn(0, SettingsConstraints.TORRENT_MIN_SEED_WAIT_MAX)
-        }
 
     suspend fun setForceHttpsRedirect(b: Boolean) =
         context.settingsDataStore.edit { it[Keys.FORCE_HTTPS_REDIRECT] = b }

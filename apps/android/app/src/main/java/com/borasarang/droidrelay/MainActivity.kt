@@ -96,8 +96,20 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    override fun onNewIntent(intent: android.content.Intent) {
-        super.onNewIntent(intent)
+    override fun onStart() {
+        super.onStart()
+        // 무조건 시도 원칙: 프로세스 생존 상태로 앱에 복귀하면 onCreate가 안 돌아서
+        // 죽은 서버가 다시 안 살아나는 함정이 있었다. 포그라운드 복귀 때마다 확인한다.
+        lifecycleScope.launch {
+            val repo = SettingsRepository.get(this@MainActivity)
+            if (repo.settings.first().launchAutoStart && !repo.serverState.first().running) {
+                DebugLogger.i("UI", "포그라운드 복귀 — 서버 미기동이라 자동 시작")
+                RelayService.start(this@MainActivity)
+            }
+        }
+    }
+
+    override fun onNewIntent(intent: android.content.Intent) {        super.onNewIntent(intent)
         setIntent(intent)
         handleSharedIntent(intent)
         handleOpenTab(intent)
