@@ -111,11 +111,28 @@ public struct RelayClient: Sendable {
         let resp: (Data, URLResponse)? = try? await URLSession.shared.data(for: req)
         guard let d = resp?.0 else { return nil }
         guard let any = try? JSONSerialization.jsonObject(with: d, options: [.fragmentsAllowed]),
-              let o = any as? [String: Any],
-              let port = o["port"] as? Int, let version = o["version"] as? String
+              let o = any as? [String: Any]
+        else { return nil }
+        return Self.info(from: o, base: base)
+    }
+
+    /// **`/api/info` JSON → `ServerInfo`. 순수 함수라 OS 없이 검증한다.**
+    ///
+    /// ## 왜 따로 뺐나
+    ///
+    /// `probe` 는 네트워크를 때려 테스트가 못 들어간다. 파싱 규칙
+    /// (포트·버전 필수, 기기 이름은 deviceName > deviceModel > 없음)은
+    /// 여기서 고정한다 — 서버가 키를 바꿔도 테스트가 먼저 운다.
+    static func info(from o: [String: Any], base: URL) -> ServerInfo? {
+        guard let port = o["port"] as? Int, let version = o["version"] as? String
         else { return nil }
         let host = base.host() ?? o["ip"] as? String ?? ""
-        return ServerInfo(host: host, port: port, version: version)
+        // **deviceName 우선** — 사용자가 폰에 정한 이름. 없으면 모델명(SM-S901N),
+        // 둘 다 없으면 "" — 그땐 주소가 제목이 된다(`DeviceAliases.name` 규칙).
+        let rawName = (o["deviceName"] as? String)?.trimmingCharacters(in: .whitespaces) ?? ""
+        let rawModel = (o["deviceModel"] as? String)?.trimmingCharacters(in: .whitespaces) ?? ""
+        return ServerInfo(host: host, port: port, version: version,
+                          deviceName: rawName.isEmpty ? rawModel : rawName)
     }
 
     /// 바이트 표기 — 화면과 진단 출력 양쪽에서 쓴다

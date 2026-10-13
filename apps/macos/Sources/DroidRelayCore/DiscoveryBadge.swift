@@ -50,18 +50,27 @@ public enum DiscoveryBadge {
     public static func line(strategy: DiscoveryStrategy,
                             address: String,
                             version: String?,
-                            isManual: Bool) -> String {
+                            isManual: Bool,
+                            deviceName: String? = nil) -> String {
         // **빈 버전 문자열을 걸러낸다.** `cached` 경로는 프로브를 하지 않고
         // `version: ""` 로 `ServerInfo` 를 만든다. 그대로 붙이면
         // **"10.38.120.211:3000 · v"** 가 화면에 나온다 — 잘린 버전 번호처럼 보인다.
         let trimmed = version?.trimmingCharacters(in: .whitespaces) ?? ""
         let v = "\(address)\(trimmed.isEmpty ? "" : " · v\(trimmed)")"
+        // **기기 이름이 있으면 앞에 붙인다** — "어느 폰인지" 가 주소보다 먼저 읽힌다.
+        // 없으면 예전 그대로 주소부터. 빈 문자열도 없는 취급(기억한 주소는 이름이 없다).
+        let named: String
+        if let n = deviceName?.trimmingCharacters(in: .whitespaces), !n.isEmpty {
+            named = "\(n) · \(v)"
+        } else {
+            named = v
+        }
         // **수동 입력을 별도로 다룬다** — 자동 발견과 오해의 방향이 정반대라
         // "수동 입력" 이라는 말을 지우면 사용자가 어느 쪽인지 알 수 없다.
         if isManual || strategy == .manual {
-            return "\(v) · 직접 입력"
+            return "\(named) · 직접 입력"
         }
-        return "\(v) · \(strategy.displayName)"
+        return "\(named) · \(strategy.displayName)"
     }
 
     /// **탐색 실패 — 왜인지.**

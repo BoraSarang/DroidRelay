@@ -340,11 +340,12 @@ class VideoDownloadManager(
                 // 트래픽 통계 (v0.37)
                 TrafficLedger.addDownVideo(size)
                 TrafficLedger.addDoneVideo()
-                // 보관함 자동 운영 (분류·쿼터, v0.19)
-                runCatching { StorageJanitor.onCompleted(context, java.io.File(StorageGuard.dlRoot, out.name)) }
+                // 보관함 자동 운영 (분류·쿼터, v0.19) — 분류 이동 후 최종 경로로 썸네일 만든다.
+                // 이전엔 루트 경로로 썸네일을 시도해 분류 켜면 썸네일이 항상 빗나갔다.
+                val finalFile = runCatching { StorageJanitor.onCompleted(context, java.io.File(StorageGuard.dlRoot, out.name)) }.getOrDefault(java.io.File(StorageGuard.dlRoot, out.name))
                 // 썸네일 선행 생성 — 보관함 열람 시 lazy burst 방지 (백그라운드, 실패 무시)
                 ensureScope().launch(Dispatchers.IO) {
-                    runCatching { ThumbManager.thumbFor(context, java.io.File(StorageGuard.dlRoot, out.name)) }
+                    runCatching { ThumbManager.thumbFor(context, finalFile) }
                 }
             }
             else -> {

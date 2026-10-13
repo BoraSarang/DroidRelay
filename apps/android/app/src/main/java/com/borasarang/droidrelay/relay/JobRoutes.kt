@@ -229,10 +229,11 @@ internal fun Route.jobRoutes(context: Context, serverRef: RelayServer) {
     get("/file/{id}") {
         val id = call.parameters["id"]!!
         val job = JobsRepository.get(id)
-        // 완료 후 앱 전용 원본은 MediaStore로 게시 후 삭제됨 → 보관함 경로 폴백
+        // 완료 후 앱 전용 원본은 MediaStore로 게시 후 삭제됨 → 보관함 경로 폴백.
+        // 자동분류(zip→문서/ 등)로 루트에 없을 수 있어 분류 폴더·하위까지 탐색한다.
         val file = job?.let { j ->
             val appFile = RelayApp.get(context).doneFile(j)
-            if (appFile.exists()) appFile else StorageGuard.storageFile(j.filename)?.takeIf { it.exists() }
+            if (appFile.exists()) appFile else StorageGuard.resolveJobFile(j.filename)
         }
         when {
             job == null || file == null ->

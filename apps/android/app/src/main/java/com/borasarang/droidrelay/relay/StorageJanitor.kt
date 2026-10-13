@@ -15,8 +15,8 @@ object StorageJanitor {
         }
     }
 
-    /** 다운로드 완료 후처리 — 분류 후 쿼터 검사 */
-    fun onCompleted(context: Context, file: java.io.File) {
+    /** 다운로드 완료 후처리 — 분류 후 쿼터 검사. 최종 보관 위치를 반환한다. */
+    fun onCompleted(context: Context, file: java.io.File): java.io.File {
         val s = SettingsRepository.get(context).firstBlocking()
         var target = file
         if (s.autoClassify) {
@@ -26,6 +26,7 @@ object StorageJanitor {
             enforceQuota(s.storageQuotaGb)
         }
         DebugLogger.d("Janitor", "완료 후처리 '${target.name}' 분류=${s.autoClassify} 쿼터=${s.storageQuotaGb}GB")
+        return target
     }
 
     /** 쿼터만 검사 (토렌트 보관함 이동 후 등 파일 특정 없는 경우) */

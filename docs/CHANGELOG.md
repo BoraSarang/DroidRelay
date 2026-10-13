@@ -1,6 +1,19 @@
 # Changelog
 
-## [Unreleased] — 무조건 시도 원칙: 삭제 외에는 토렌트를 멈추지 않는다 (S22 영구 정지 사건)
+## [Unreleased] — v0.54 무인 서버 안정화 (T-1120~T-1123)
+
+> 배경: 받기 404 + 파일 사라짐 (자동분류 `문서/` 이동 vs 루트-only 폴백).
+> 상세: `docs/plans/PLAN_v0.54_stability-hardening_android.md` (Phase 0~3, 두 대 실기 검증).
+
+### Fixed [android]
+
+- 데이터 내구성 — `StorageGuard.resolveJobFile()` (보관함 분류 폴더·하위 탐색), DONE 영속 판정에 보관함 실존 포함 (재시작 DONE 증발·`/file` 404 해소), 썸네일을 분류 후 최종 경로로 생성
+- `StorageRoutes` +29행, `ServiceNotifications.kt` 신규
+- `CronParserPerfTest` flaky 수정 (월간식 → 일간식으로 의도 검증)
+
+### Changed [mac]
+
+- 디스커버리 개편 (AppModel/SettingsWindow/ServerDiscovery 등) + `DeviceListTests` 신규
 
 > S22(SM-S901N) 실측: 사용자가 멈춘 적 없는데 토렌트 1건이 `PAUSED` 8.87%에서 굳고 서버까지
 > `대기 중`으로 사망, 재시작 없음. 설정 실측: `torrentMinSeedWaitSec=300`.
