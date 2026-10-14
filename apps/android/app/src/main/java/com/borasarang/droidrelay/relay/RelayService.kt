@@ -41,16 +41,35 @@ class RelayService : Service() {
     private var schedulerManager: SchedulerManager? = null
     private var speedScheduleManager: SpeedScheduleManager? = null
     private var isForeground = false
+    // 장시간 파일 서빙 중 Wi-Fi 절전·CPU 슬립으로 전송이 중간에 끊기지 않게 유지.
+    // 화면 꺼진 A90에서 실측되는 "다운로드 중 취소"의 대표 원인이라 서비스 수명과 함께 보유한다.
+    private var wifiLock: android.net.wifi.WifiManager.WifiLock? = null
+    private var wakeLock: android.os.PowerManager.WakeLock? = null
     /** 알림 빌더 전담 — 생명주기와 분리 (Phase 2). 호출 순서·문구·ID 그대로 위임한다 */
     private val notifs by lazy { ServiceNotifications(this) }
 
     override fun onCreate() {
         super.onCreate()
+        NettyTuning.apply()
         DebugLogger.i(TAG, "서비스 생성 시작")
         // 채널 생성이 최초 알림 게시보다 앞서야 Android 8+에서 무시되지 않음
         notifs.createChannel()
         // FGS 승격을 가장 먼저 시도 — startForegroundService fallback 경로의 5초 의무 창 확보
         startInForeground()
+        // Wi-Fi·CPU 락 선점 — 대용량 서빙 중 화면 OFF 절전으로 소켓이 끊기는 것 방지
+        runCatching {
+            val wifi = applicationContext.getSystemService(android.content.Context.WIFI_SERVICE) as android.net.wifi.WifiManager
+            wifiLock = wifi.createWifiLock(android.net.wifi.WifiManager.WIFI_MODE_FULL_HIGH_PERF, "DroidRelay:serve").apply {
+                setReferenceCounted(false)
+                if (!isHeld) acquire()
+            }
+            val pm = applicationContext.getSystemService(android.content.Context.POWER_SERVICE) as android.os.PowerManager
+            wakeLock = pm.newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "DroidRelay:serve").apply {
+                setReferenceCounted(false)
+                if (!isHeld) acquire()
+            }
+            DebugLogger.i(TAG, "Wi-Fi·CPU 락 확보 (서빙 중 절전 방지)")
+        }.onFailure { DebugLogger.w(TAG, "Wi-Fi·CPU 락 확보 실패(무시하고 계속): ${it.message}") }
 
         val settingsRepo = SettingsRepository.get(applicationContext)
         val engine = RelayApp.get(applicationContext)
@@ -458,7 +477,8 @@ class RelayService : Service() {
                 // 무조건 시도 원칙: DONE이 아닌 토렌트가 남아있으면 "전체 완료"가 아니다.
                 val wasActive = last.values.any { it == JobState.RUNNING || it == JobState.QUEUED }
                 val nowIdle = current.values.none { it == JobState.RUNNING || it == JobState.QUEUED } &&
-                    TorrentRepository.all().all { it.state == TorrentState.DONE }
+                    TorrentRepository.all().all { it.state == TorrentState.DONE } &&
+                    TransferTracker.count == 0
                 if (wasActive && nowIdle) {
                     val action = runCatching { settingsRepo.firstBlocking().completionAction }.getOrDefault("none")
                     if (action == SettingsConstraints.COMPLETION_ACTION_STOP_SERVER) {
@@ -574,6 +594,8 @@ class RelayService : Service() {
         val guardToStop = guardDaemon.also { guardDaemon = null }
         val schedulerToStop = schedulerManager.also { schedulerManager = null }
         val speedScheduleToStop = speedScheduleManager.also { speedScheduleManager = null }
+        val wifiToRelease = wifiLock.also { wifiLock = null }
+        val wakeToRelease = wakeLock.also { wakeLock = null }
         val appContext = applicationContext
         val port = currentPort
         val httpsPort = currentHttpsPort
@@ -609,6 +631,8 @@ class RelayService : Service() {
             val torrentRestored = torrentToStop?.isRestored() == true
             runCatching { persistJobs("복원 전 종료") }
             runCatching { persistTorrents("복원 전 종료", torrentRestored) }
+            runCatching { if (wifiToRelease?.isHeld == true) wifiToRelease.release() }
+            runCatching { if (wakeToRelease?.isHeld == true) wakeToRelease.release() }
             DebugLogger.i(TAG, "백그라운드 정지·영구 저장 완료")
         }
         scope.cancel()

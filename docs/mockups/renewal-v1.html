@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DroidRelay 리뉴얼 목업 v1</title>
+<style>
+  :root{
+    --bg:#0b0f14; --surface:#151c26; --surface2:#1b2431; --line:#26313f;
+    --txt:#e8eef5; --sub:#93a1b3; --dim:#5c6a7d;
+    --blue:#7fb3ff; --blue-dim:#3b5a80; --green:#5fd68a; --amber:#ffcf7d; --red:#ff8f8f;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  body{margin:0; background:#05070a; color:var(--txt);
+    font-family:-apple-system,"Apple SD Gothic Neo","Noto Sans KR",sans-serif;
+    display:flex; gap:24px; justify-content:center; align-items:flex-start;
+    padding:28px 16px; flex-wrap:wrap;}
+  .note{width:100%; max-width:1180px; color:var(--sub); font-size:13px; line-height:1.7;
+    background:#0e141c; border:1px solid var(--line); border-radius:12px; padding:14px 18px;}
+  .note b{color:var(--txt);}
+  .phone{width:390px; height:844px; background:var(--bg); border-radius:44px;
+    border:1px solid #2a3542; overflow:hidden; display:flex; flex-direction:column;
+    box-shadow:0 24px 80px rgba(0,0,0,.6); position:relative; flex-shrink:0;}
+  .statusbar{display:flex; justify-content:space-between; padding:14px 26px 6px;
+    font-size:13px; color:var(--txt);}
+  .topbar{display:flex; align-items:center; justify-content:space-between;
+    padding:10px 20px 12px;}
+  .topbar h1{font-size:22px; margin:0; font-weight:700;}
+  .bug{width:34px; height:34px; border-radius:10px; background:var(--surface2);
+    display:flex; align-items:center; justify-content:center; font-size:17px; color:var(--sub);}
+  .body{flex:1; overflow-y:auto; padding:0 16px 12px; scrollbar-width:none;}
+  .body::-webkit-scrollbar{display:none;}
+  .card{background:var(--surface); border-radius:18px; padding:14px 16px; margin-bottom:12px;}
+  .row{display:flex; align-items:center; gap:8px;}
+  .grow{flex:1; min-width:0;}
+  .muted{color:var(--sub);} .dim{color:var(--dim);} .blue{color:var(--blue);}
+  .t-title{font-size:15px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+  .t-sub{font-size:12.5px; color:var(--sub); margin-top:2px;}
+  .t-meta{font-size:12px; color:var(--dim); margin-top:2px;}
+  .bar{height:5px; border-radius:3px; background:#2a3542; margin-top:8px; overflow:hidden;}
+  .bar>i{display:block; height:100%; background:var(--blue); border-radius:3px;}
+  .iconbtn{width:34px; height:34px; border-radius:10px; background:transparent; border:0;
+    color:var(--txt); font-size:17px; display:flex; align-items:center; justify-content:center; cursor:pointer;}
+  .iconbtn:active{background:var(--surface2);}
+  .chipbtn{border:1px solid var(--blue-dim); color:var(--blue); background:transparent;
+    border-radius:12px; padding:7px 14px; font-size:13px; font-weight:600; cursor:pointer;}
+  .solidbtn{background:var(--blue); color:#0b1420; border:0; border-radius:12px;
+    padding:9px 16px; font-size:13.5px; font-weight:700; cursor:pointer;}
+  .inputrow{display:flex; gap:8px; margin-bottom:12px;}
+  .input{flex:1; background:transparent; border:1.5px solid #3a4656; border-radius:12px;
+    padding:12px 14px; color:var(--txt); font-size:14px; outline:none; min-width:0;}
+  .input::placeholder{color:var(--dim);}
+  .sqbtn{width:52px; border-radius:12px; background:var(--blue); border:0; color:#0b1420;
+    font-size:20px; font-weight:700; cursor:pointer; flex-shrink:0;}
+  .statusdot{width:9px; height:9px; border-radius:50%; background:var(--green); flex-shrink:0;}
+  .url{font-size:14.5px; font-weight:700; color:var(--blue); text-decoration:underline;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+  .qr{width:76px; height:76px; background:#fff; border-radius:8px; flex-shrink:0;
+    display:flex; align-items:center; justify-content:center; color:#000; font-size:9px; text-align:center;}
+  .sumline{font-size:12.5px; color:var(--sub); padding:2px 4px 10px;}
+  .section-label{font-size:13px; color:var(--sub); margin:6px 2px 8px;}
+  .empty{text-align:center; color:var(--dim); padding:48px 0;}
+  .empty .big{font-size:40px; margin-bottom:10px;}
+  .tabbar{display:flex; border-top:1px solid var(--line); background:#0e141c;
+    padding:8px 4px 20px;}
+  .tab{flex:1; background:none; border:0; color:var(--dim); font-size:10.5px;
+    display:flex; flex-direction:column; align-items:center; gap:3px; cursor:pointer;
+    padding:6px 0; border-radius:12px; font-family:inherit;}
+  .tab .ic{font-size:20px;}
+  .tab.on{color:var(--txt); background:var(--surface2);}
+  .screen{display:none;}
+  .screen.on{display:block; animation:fade .18s ease;}
+  @keyframes fade{from{opacity:.4} to{opacity:1}}
+  .vgrid{display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:8px;}
+  .vgrid .input{font-size:13px; padding:10px 12px;}
+  .cap{width:390px; color:var(--sub); font-size:12.5px; line-height:1.7;}
+  .cap b{color:var(--txt); display:block; font-size:14px; margin-bottom:6px;}
+  .cap ul{margin:6px 0; padding-left:18px;}
+  .cap li{margin-bottom:4px;}
+</style>
+</head>
+<body>
+
+<div class="note">리뉴얼 목업 v1 — <b>탭 6개(상태·다운로드·토렌트·보관함·설정·통계)</b> · 서버카드 → 상태탭으로 이동 · 토렌트 카드 컴팩트화(한 화면 4장 목표) · 검색=설정값 연동. 아래 폰 하단 탭을 눌러 화면 전환 가능.</div>
+
+<!-- ============ PHONE ============ -->
+<div class="phone">
+  <div class="statusbar"><span>7:51</span><span>LTE ▮▮▮ 84%</span></div>
+  <div class="topbar"><h1 id="ttl">토렌트</h1><div class="bug">🐞</div></div>
+
+  <div class="body">
+    <!-- 상태 -->
+    <div class="screen" data-s="0">
+      <div class="card">
+        <div class="row"><span class="statusdot"></span><span class="blue" style="font-size:13.5px; font-weight:600;">HTTP 3000 · HTTPS 끔 실행 중</span><span class="grow"></span><button class="chipbtn">정지</button></div>
+        <div class="row" style="margin-top:12px;"><div class="grow"><div class="url">http://192.168.198.8:3000</div><div class="t-sub dim" style="margin-top:4px;">HTTPS 끔 (설정에서 사용 가능)</div><div class="t-sub" style="margin-top:4px;">📶 네트워크: LTE</div></div><div class="qr">QR</div></div>
+        <div class="row" style="margin-top:10px;"><button class="solidbtn">복사</button><button class="chipbtn">공유</button></div>
+        <div class="t-sub" style="margin-top:12px;">저장공간 여유 102.32 GB / 110.42 GB</div>
+        <div class="bar"><i style="width:8%"></i></div>
+      </div>
+      <div class="card"><div class="row"><span class="t-title">가드</span><span class="grow"></span><span class="t-sub">정상 · 27° · 84%</span></div></div>
+      <div class="section-label">이 화면 = 기존 다운로드 상단 서버카드가 통째로 이동 (다운로드 탭 공간 확보)</div>
+    </div>
+
+    <!-- 다운로드 -->
+    <div class="screen" data-s="1">
+      <div class="inputrow"><input class="input" placeholder="https:// 다운로드 URL"><button class="sqbtn">＋</button></div>
+      <div class="card">
+        <div class="t-title blue" style="font-size:14px;">비디오 (스트림)</div>
+        <div class="t-sub">스트림 주소(m3u8/mpd) 또는 스트리밍 웹페이지</div>
+        <div class="inputrow" style="margin:10px 0 0;"><input class="input" placeholder="스트림 URL"><button class="sqbtn" style="font-size:14px; width:64px;">분석</button></div>
+        <div class="vgrid"><input class="input" placeholder="Referer (선택)"><input class="input" placeholder="Cookie (선택·저장 안 됨)"></div>
+      </div>
+      <div class="section-label">작업 목록 (2)</div>
+      <div class="card">
+        <div class="row"><div class="grow"><div class="t-title">ubuntu-24.04.iso</div><div class="t-sub blue">진행 중 62% · 1.2GB / 2.0GB</div><div class="t-meta">12분 경과 · 8분 남음 · 3.1MB/s</div></div><button class="iconbtn">⏸</button><button class="iconbtn dim">✕</button></div>
+        <div class="bar"><i style="width:62%"></i></div>
+      </div>
+      <div class="card">
+        <div class="row"><div class="grow"><div class="t-title">드라마 EP12.mp4</div><div class="t-sub" style="color:var(--green);">완료 ✓ · 1.4GB</div></div><button class="iconbtn">📥</button><button class="iconbtn dim">✕</button></div>
+      </div>
+    </div>
+
+    <!-- 토렌트 -->
+    <div class="screen on" data-s="2">
+      <div class="inputrow"><input class="input" placeholder="토렌트 검색"><button class="sqbtn">🔍︎</button><button class="sqbtn" title="magnet">🔗</button><button class="sqbtn" title="파일">＋</button></div>
+      <div class="sumline">⚡다운 합계 385KB/s · ▲34KB/s · 진행 1건 · 시드 61 피어 650</div>
+      <div class="card">
+        <div class="row"><div class="grow"><div class="t-title">AWAW-031</div><div class="t-sub blue">다운로드 중 · 37분 51초 경과 · 1시간 28분 남음</div></div><button class="iconbtn dim">🗑</button></div>
+        <div class="t-meta">제한: <span class="blue">무제한 ▾</span> · 파일 2개 (2개 선택) ▸</div>
+        <div class="bar"><i style="width:22%"></i></div>
+        <div class="row" style="margin-top:6px;"><span class="t-sub">532.6MB / 2.46GB</span><span class="grow"></span><span class="t-sub">385KB/s ↓ / 34KB/s ↑ · 시드 58 · 피어 283</span></div>
+      </div>
+      <div class="card">
+        <div class="row"><div class="grow"><div class="t-title">추출 중…</div><div class="t-sub">대기 중 · 0KB / 6.88GB</div></div><button class="iconbtn">▶</button><button class="iconbtn dim">🗑</button></div>
+        <div class="t-meta">제한: <span class="blue">무제한 ▾</span> · 시드 3 · 피어 367</div>
+        <div class="bar"><i style="width:0%"></i></div>
+      </div>
+      <div class="card">
+        <div class="row"><div class="grow"><div class="t-title">예능 모음.zip</div><div class="t-sub" style="color:var(--green);">완료 ✓ · 시딩 중 · ratio 1.2</div></div><button class="iconbtn">⏸</button><button class="iconbtn dim">🗑</button></div>
+        <div class="bar"><i style="width:100%"></i></div>
+        <div class="row" style="margin-top:6px;"><span class="t-sub">8.2GB / 8.2GB</span><span class="grow"></span><span class="t-sub">▲ 512KB/s · 시드 12 · 피어 40</span></div>
+      </div>
+      <div class="card">
+        <div class="row"><div class="grow"><div class="t-title">다큐 4K 모음</div><div class="t-sub amber" style="color:var(--amber);">정체 · 45분간 속도 없음</div></div><button class="iconbtn">▶</button><button class="iconbtn dim">🗑</button></div>
+        <div class="bar"><i style="width:8%"></i></div>
+        <div class="row" style="margin-top:6px;"><span class="t-sub">900MB / 11GB</span><span class="grow"></span><span class="t-sub">0B/s · 시드 0 · 피어 5</span></div>
+      </div>
+      <div class="section-label">검색 서버 미설정 시 → 이 자리에 "설정 → 토렌트 → 검색 서버 연결" 안내 카드 표시 (웹과 동일 조건)</div>
+    </div>
+
+    <!-- 보관함 -->
+    <div class="screen" data-s="3">
+      <div class="section-label">현행 유지 (파일 목록 · 폴더 이동 · 휴지통)</div>
+      <div class="empty"><div class="big">📁</div>보관함은 그대로 — 이번 리뉴얼 범위 밖</div>
+    </div>
+    <!-- 설정 -->
+    <div class="screen" data-s="4">
+      <div class="section-label">현행 유지 + 토렌트 검색 서버(Torznab URL·API키) 행은 토렌트 탭 안내와 연결</div>
+      <div class="empty"><div class="big">⚙</div>설정은 그대로 — 이번 리뉴얼 범위 밖</div>
+    </div>
+    <!-- 통계 -->
+    <div class="screen" data-s="5">
+      <div class="section-label">유지 또는 디버그(🐞) 옆으로 이동 가능 — 탭 5개로 줄이고 싶을 때</div>
+      <div class="empty"><div class="big">📊</div>통계는 그대로 — 이번 리뉴얼 범위 밖</div>
+    </div>
+  </div>
+
+  <div class="tabbar">
+    <button class="tab" data-t="0"><span class="ic">●</span>상태</button>
+    <button class="tab" data-t="1"><span class="ic">⭳</span>다운로드</button>
+    <button class="tab on" data-t="2"><span class="ic">⭳☁</span>토렌트</button>
+    <button class="tab" data-t="3"><span class="ic">🗀</span>보관함</button>
+    <button class="tab" data-t="4"><span class="ic">⚙</span>설정</button>
+    <button class="tab" data-t="5"><span class="ic">▮▮▮</span>통계</button>
+  </div>
+</div>
+
+<div class="cap" style="max-width:340px;">
+  <b>바뀐 점</b>
+  <ul>
+    <li><b>탭 5→6:</b> 상태 탭 신설, 서버카드 이동. 다운로드 탭은 입력+작업만.</li>
+    <li><b>토렌트 카드 2.5장→4장:</b> 제목 1줄·상태 1줄·메타 1줄·바+수치 1줄. 순서 화살표·펼침 제거, 파일선택은 ▸ 한 줄로.</li>
+    <li><b>검색행 통합:</b> 검색+magnet+파일추가를 한 행에. FAB 제거.</li>
+    <li><b>요약줄:</b> 웹 `#torrentInfo`와 동일 (합계 속도·진행·시드/피어).</li>
+    <li><b>검색 설정 연동:</b> `searchEnabled=false`면 검색행 대신 설정 연결 안내 카드 (웹 표시 조건과 동일).</li>
+    <li><b>비디오:</b> Referer/Cookie 이미 이식됨 확인 — 레이아웃만 소형화.</li>
+  </ul>
+  <b>확인 필요</b>
+  <ul><li>통계 탭 유지 vs 🐞 옆 이동?</li>
+  <li>토렌트 일시정지 버튼 표시 (웹엔 없음, 앱엔 필요?) — 목업엔 뺌.</li>
+  <li>상태 탭에 가드 카드 포함 여부.</li></ul>
+</div>
+
+<script>
+  const tabs=[...document.querySelectorAll('.tab')], screens=[...document.querySelectorAll('.screen')],
+        names=['상태','다운로드','토렌트','보관함','설정','통계'];
+  tabs.forEach(b=>b.onclick=()=>{tabs.forEach(x=>x.classList.remove('on'));b.classList.add('on');
+    screens.forEach(s=>s.classList.toggle('on',s.dataset.s===b.dataset.t));
+    document.getElementById('ttl').textContent=names[+b.dataset.t];});
+</script>
+</body>
+</html>

@@ -33,16 +33,11 @@ import io.ktor.http.content.PartData
 import io.ktor.server.response.header
 import io.ktor.server.response.respond
 import io.ktor.server.response.respondBytes
-import io.ktor.server.response.respondBytesWriter
 import io.ktor.server.response.respondText
 import io.ktor.server.routing.delete
 import io.ktor.server.routing.get
 import io.ktor.server.routing.post
 import io.ktor.server.routing.routing
-import io.ktor.utils.io.writeFully
-import io.ktor.utils.io.toByteArray
-import io.ktor.utils.io.readAvailable
-import io.ktor.utils.io.writeStringUtf8
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
@@ -690,12 +685,21 @@ internal object TransferTracker {
     }
 }
 
-/** Range(이어받기) 지원 파일 스트리밍 */
+/** Range(이어받기) 지원 파일 스트리밍.
+ *
+ * A90 OOM 수정(v0.5x): 대용량 body를 Ktor 채널 스트리밍(respondBytesWriter /
+ * respondOutputStream / ReadChannelContent)으로 보내면 NettyHttpResponsePipeline의
+ * 청크 소비 경로가 소켓 배출 대비 과도한 직접 버퍼를 적재한다(A90 실측: 32MB 전송에
+ * RSS +2.2GB, 3.7GB 전송 중 lmkd kill). 대신 단일 응답 body를 32MB 슬라이스로 자르고
+ * 통짜 바이트(FullHttpResponse)로 보내면 힙 32MB 스파이크만 생기고 GC가 정상 회수한다.
+ * 잘린 경우 206 + 정확한 Content-Range를 보내므로 브라우저·플레이어·WebDAV
+ * 클라이언트가 Range로 자동 이어받아 전송이 끝까지 간다. 작은 파일은 기존 그대로다. */
 internal suspend fun ApplicationCall.serveFile(
     file: File,
     jobId: String,
     inline: Boolean = false,
     contentType: ContentType? = null,
+    displayName: String? = null,
 ) {
     val total = file.length()
     response.header(HttpHeaders.AcceptRanges, "bytes")
@@ -707,44 +711,47 @@ internal suspend fun ApplicationCall.serveFile(
         return
     }
 
-    val length = range.to - range.from + 1L
+    val effTo = clampServeEnd(range.from, range.to, total)
+    val effLen = effTo - range.from + 1L
+    val sliced = effTo < range.to
+    val shown = displayName ?: file.name
     if (inline) {
-        val enc = java.net.URLEncoder.encode(file.name, "UTF-8").replace("+", "%20")
+        val enc = java.net.URLEncoder.encode(shown, "UTF-8").replace("+", "%20")
         response.header(HttpHeaders.ContentDisposition, "inline; filename=\"$enc\"; filename*=UTF-8''$enc")
     } else {
-        response.header(HttpHeaders.ContentDisposition, DispositionHeader.make(file.name))
+        response.header(HttpHeaders.ContentDisposition, DispositionHeader.make(shown))
     }
-    if (range.partial) {
+    if (range.partial || sliced) {
         response.status(HttpStatusCode.PartialContent)
-        response.header(HttpHeaders.ContentRange, "bytes ${range.from}-${range.to}/$total")
+        response.header(HttpHeaders.ContentRange, "bytes ${range.from}-$effTo/$total")
     }
 
     val t0 = System.currentTimeMillis()
+    val mime = contentType ?: ContentType.Application.OctetStream
     TransferTracker.track {
-        respondBytesWriter(contentType = contentType ?: ContentType.Application.OctetStream, contentLength = length) {
-            withContext(Dispatchers.IO) {
-                RandomAccessFile(file, "r").use { raf ->
-                    raf.seek(range.from)
-                    val buf = ByteArray(SERVE_BUFFER_SIZE)
-                    var remaining = length
-                    while (remaining > 0) {
-                        val want = minOf(buf.size.toLong(), remaining).toInt()
-                        val n = raf.read(buf, 0, want)
-                        if (n <= 0) break
-                        writeFully(buf, 0, n)
-                        remaining -= n
-                    }
+        val bytes = withContext(Dispatchers.IO) {
+            java.io.RandomAccessFile(file, "r").use { raf ->
+                raf.seek(range.from)
+                val out = ByteArray(effLen.toInt())
+                var off = 0
+                while (off < out.size) {
+                    val n = raf.read(out, off, out.size - off)
+                    if (n <= 0) break
+                    off += n
                 }
+                if (off < out.size) out.copyOf(off) else out
             }
         }
+        respondBytes(bytes, mime, if (range.partial || sliced) HttpStatusCode.PartialContent else null)
     }
     DebugLogger.d(
         "Serve",
-        "전송 종료 id=$jobId '${file.name}' ${fmt(length)} " +
-            "(${if (range.partial) "206 부분" else "200 전체"}) 소요=${System.currentTimeMillis() - t0}ms",
+        "전송 종료 id=$jobId '$shown' ${fmt(effLen)} " +
+            "(${if (range.partial || sliced) "206 부분" else "200 전체"}${if (sliced) " 슬라이스" else ""}) " +
+            "소요=${System.currentTimeMillis() - t0}ms",
     )
     // 트래픽 통계 (v0.37) — 썸네일(내부 UI 에셋)은 제외
-    if (jobId != "thumb") TrafficLedger.addUpServe(length)
+    if (jobId != "thumb") TrafficLedger.addUpServe(effLen)
 }
 
 /** 재생용 Content-Type — 확장자 기반 (T-940) */
@@ -836,6 +843,22 @@ internal object RangeParser {
 
 internal const val BUFFER_SIZE = 64 * 1024
 internal const val SERVE_BUFFER_SIZE = 256 * 1024
+/**
+ * 단일 서빙 응답 body 상한 — 32MB.
+ * Ktor-Netty 3.5.2의 대용량 body 경로는 소켓 배출과 무관하게 응답 전체를 프로세스에
+ * 적재할 수 있어 A90에서 3.7GB 전송 중 RSS 3.5GB → lmkd kill이 실측됐다.
+ * 이 상한으로 자른 206 + 정확한 Content-Range에는 브라우저·플레이어·WebDAV
+ * 클라이언트가 Range로 자동 이어받으므로 전송은 끊기지 않고 끝까지 간다.
+ */
+internal const val MAX_SERVE_SLICE = 32 * 1024 * 1024L
+
+/** 서빙 구간 끝점 클램프 — 순수 함수 (단위 테스트 대상). to가 상한을 넘으면 잘라낸다. */
+internal fun clampServeEnd(from: Long, to: Long, total: Long): Long {
+    if (total <= 0) return -1
+    val safeFrom = from.coerceIn(0, total - 1)
+    val safeTo = to.coerceIn(safeFrom, total - 1)
+    return minOf(safeTo, safeFrom + MAX_SERVE_SLICE - 1)
+}
 
 /** 전송량 표기 — 단위 경계 1024/1024²/1024³ (MB 분기가 GB 나눗셈을 쓰면 250MB가 "0.2MB"로 찍힌다) */
 internal fun fmt(n: Long): String = when {

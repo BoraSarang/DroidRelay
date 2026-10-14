@@ -390,6 +390,9 @@ class DownloadEngine(
 
                 RandomAccessFile(partial, "rw").use { raf ->
                     raf.seek(offset)
+                    // 서버가 Range를 무시하고 200으로 온 경우 기존 .part 꼬리가 남으면
+                    // 새 본문보다 길었던 stale 바이트가 파일 끝을 오염시킨다 → 신규는 절단
+                    if (!resumed) raf.setLength(0)
                     val input = res.body!!.byteStream()
                     val buf = ByteArray(BUFFER_SIZE)
                     var lastTick = System.currentTimeMillis()

@@ -25,7 +25,9 @@ object ThumbManager {
     fun thumbFor(context: Context, src: File): File? {
         if (!isThumbable(src.name) || !src.exists() || !src.isFile || src.length() <= 0) return null
         val dir = File(context.cacheDir, "thumbs").apply { mkdirs() }
-        val key = md5("${src.name}|${src.lastModified()}|${src.length()}")
+        // 키에 경로 포함 — 동명·동일크기·동일mtime 파일이 다른 폴더에 있으면 충돌한다
+        val here = runCatching { src.canonicalPath }.getOrDefault(src.absolutePath)
+        val key = md5("$here|${src.lastModified()}|${src.length()}")
         memCache.get(key)?.takeIf { it.exists() && it.length() > 0 }?.let { return it }
         val out = File(dir, "$key.jpg")
         if (out.exists() && out.length() > 0) {

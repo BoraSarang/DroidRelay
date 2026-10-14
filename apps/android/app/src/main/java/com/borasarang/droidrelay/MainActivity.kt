@@ -48,6 +48,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.core.app.ActivityCompat
 import androidx.lifecycle.lifecycleScope
 import com.borasarang.droidrelay.relay.DebugLogger
+import com.borasarang.droidrelay.relay.NettyTuning
 import com.borasarang.droidrelay.relay.RelayService
 import com.borasarang.droidrelay.relay.SettingsRepository
 import com.borasarang.droidrelay.ui.DebugPanelContent
@@ -66,6 +67,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        NettyTuning.apply()
         enableEdgeToEdge()
         DebugLogger.i("UI", "앱 실행 onCreate")
         handleSharedIntent(intent)

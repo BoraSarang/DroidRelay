@@ -9,15 +9,12 @@ import io.ktor.server.request.receiveChannel
 import io.ktor.server.request.receiveMultipart
 import io.ktor.server.request.receiveText
 import io.ktor.server.response.header
-import io.ktor.server.response.respondOutputStream
 import io.ktor.server.response.respondText
 import io.ktor.server.routing.Route
 import io.ktor.server.routing.get
 import io.ktor.server.routing.post
 import io.ktor.utils.io.readAvailable
 import io.ktor.utils.io.toByteArray
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
 /** 보관함 경로 가드 — dlRoot 하위로 한정 (T-936 D1, routing 지역함수에서 승격) */
@@ -112,6 +109,50 @@ internal object StorageGuard {
 }
 
 /** 보관함·외장스토리지·업로드·다운로드 라우트 (T-936 D1 — RelayServer에서 분리) */
+/** 폴더 ZIP 임시 빌드 후 serveFile로 서빙 — 호출부는 TransferTracker로 감싸 빌드 중 재시작/정지를 막는다 */
+private suspend fun io.ktor.server.application.ApplicationCall.serveFolderZip(
+    context: android.content.Context,
+    dir: java.io.File,
+    zipName: String,
+) {
+    val tmpZip = java.io.File.createTempFile("dlfolder-", ".zip", context.cacheDir)
+    try {
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            val root = dir.canonicalFile
+            java.io.BufferedOutputStream(java.io.FileOutputStream(tmpZip), 256 * 1024).use { buffered ->
+                java.util.zip.ZipOutputStream(buffered).use { zip ->
+                    zip.setLevel(0)
+                    fun addDir(d: java.io.File, prefix: String) {
+                        d.listFiles()?.sortedBy { it.name }?.forEach { f ->
+                            // canonical 재검증 — 심볼릭링크 탈출 차단
+                            val c = runCatching { f.canonicalFile }.getOrNull() ?: return@forEach
+                            if (!c.path.startsWith(root.path)) return@forEach
+                            val entryName = prefix + f.name
+                            if (f.isDirectory) {
+                                zip.putNextEntry(java.util.zip.ZipEntry("$entryName/"))
+                                zip.closeEntry()
+                                addDir(f, "$entryName/")
+                            } else if (f.isFile) {
+                                zip.putNextEntry(java.util.zip.ZipEntry(entryName))
+                                f.inputStream().use { input ->
+                                    val buf = ByteArray(256 * 1024)
+                                    var n: Int
+                                    while (input.read(buf).also { n = it } != -1) zip.write(buf, 0, n)
+                                }
+                                zip.closeEntry()
+                            }
+                        }
+                    }
+                    addDir(root, "")
+                }
+            }
+        }
+        serveFile(tmpZip, "dl-folder", inline = false, contentType = ContentType.Application.Zip, displayName = zipName)
+    } finally {
+        runCatching { tmpZip.delete() }
+    }
+}
+
 internal fun Route.storageRoutes(context: Context, serverRef: RelayServer) {
     // 업로드 상한 (2 GiB) — 스트리밍하므로 힙 소모는 무관하지만 디스크 고갈·장시간 점유는 막아야 한다
     val MAX_UPLOAD_BYTES = 2L * 1024 * 1024 * 1024
@@ -549,68 +590,30 @@ internal fun Route.storageRoutes(context: Context, serverRef: RelayServer) {
         }
         val zipName = (dir.name.ifBlank { "download" }) + ".zip"
         DebugLogger.i("Http", "폴더 다운로드 요청 name=$name")
-        call.response.header(HttpHeaders.ContentDisposition, DispositionHeader.make(zipName))
         call.response.header("X-Content-Type-Options", "nosniff")
         call.response.header(HttpHeaders.CacheControl, "no-store, must-revalidate")
-        // 실시간 ZIP 스트리밍 — 임시 파일 없이 대용량 대응 (T-938)
-        // T-939: 영상 등 기압축 파일 재압축 방지 — DEFLATED+level 0 패스스루(사전 스캔 불필요) + 256KB 버퍼
-        // 전송 중 watchdog 재시작 방지용 추적 + 블로킹 ZIP I/O는 Dispatchers.IO (이벤트루프 기아 방지)
+        // ZIP 임시 파일 경유 서빙 (v0.5x OOM 수정).
+        // 이전 실시간 respondOutputStream 스트리밍은 Ktor-Netty 청크 소비 경로에서
+        // 소켓 배출 대비 과도한 직접 버퍼를 적재한다(단일 파일 서빙과 동일 원인, A90 실측).
+        // level 0 패스스루(재압축 없음, T-939) + 256KB 버퍼는 그대로, 목적지만 파일이다.
+        // 완성 후 serveFile(32MB 슬라이스·Range 이어받기)로 보내고 임시 파일은 지운다.
         val startedAt = System.currentTimeMillis()
         var fileCount = 0
         var totalBytes = 0L
-        var sentBytes = 0L
+        runCatching { dir.walkTopDown().filter { it.isFile }.forEach { fileCount++; totalBytes += it.length() } }
+        val freeBytes = runCatching { context.cacheDir.usableSpace }.getOrDefault(Long.MAX_VALUE)
+        if (totalBytes + 64L * 1024 * 1024 > freeBytes) {
+            DebugLogger.w("Http", "폴더 ZIP 용량 부족 필요=${totalBytes}B 여유=${freeBytes}B (E-AND-STOR-1005)")
+            call.respondText("저장 공간이 부족합니다", ContentType.Text.Plain, HttpStatusCode.InsufficientStorage)
+            return@get
+        }
+        // ZIP 빌드(수 분 가능)도 전송으로 간주 — 바깥에 두면 watchdog·completion·idle이
+        // 전송량 0으로 보고 빌드 중 서버 재시작/정지를 때려 다운로드가 깨진다
         TransferTracker.track {
-            call.respondOutputStream(contentType = ContentType.Application.Zip) {
-                val raw = this
-                withContext(Dispatchers.IO) {
-                    // 트래픽 통계 (v0.37) — 실제 전송 바이트 계수
-                    val counting = object : java.io.OutputStream() {
-                        override fun write(b: Int) {
-                            raw.write(b); sentBytes++
-                        }
-                        override fun write(b: ByteArray, off: Int, len: Int) {
-                            raw.write(b, off, len); sentBytes += len
-                        }
-                        override fun flush() = raw.flush()
-                        override fun close() = raw.close()
-                    }
-                    val root = dir.canonicalFile
-                    java.io.BufferedOutputStream(counting, 256 * 1024).use { buffered ->
-                        java.util.zip.ZipOutputStream(buffered).use { zip ->
-                            zip.setLevel(0)
-                            fun addDir(d: java.io.File, prefix: String) {
-                                d.listFiles()?.sortedBy { it.name }?.forEach { f ->
-                                    // canonical 재검증 — 심볼릭링크 탈출 차단
-                                    val c = runCatching { f.canonicalFile }.getOrNull() ?: return@forEach
-                                    if (!c.path.startsWith(root.path)) return@forEach
-                                    val entryName = prefix + f.name
-                                    if (f.isDirectory) {
-                                        zip.putNextEntry(java.util.zip.ZipEntry("$entryName/"))
-                                        zip.closeEntry()
-                                        addDir(f, "$entryName/")
-                                    } else if (f.isFile) {
-                                        zip.putNextEntry(java.util.zip.ZipEntry(entryName))
-                                        f.inputStream().use { input ->
-                                            val buf = ByteArray(256 * 1024)
-                                            var n: Int
-                                            while (input.read(buf).also { n = it } != -1) zip.write(buf, 0, n)
-                                        }
-                                        zip.closeEntry()
-                                        fileCount++
-                                        totalBytes += f.length()
-                                    }
-                                }
-                            }
-                            addDir(root, "")
-                        }
-                    }
-                }
-            }
+            call.serveFolderZip(context, dir, zipName)
         }
         val elapsedSec = (System.currentTimeMillis() - startedAt).coerceAtLeast(1) / 1000.0
         val totalMb = totalBytes / (1024.0 * 1024.0)
-        // 트래픽 통계 (v0.37) — ZIP 실전송 바이트
-        TrafficLedger.addUpServe(sentBytes)
         DebugLogger.i("Http", "폴더 다운로드 완료 name=$name 파일 ${fileCount}개 원본 ${"%.1f".format(totalMb)}MB 소요 ${"%.1f".format(elapsedSec)}초 (${"%.1f".format(totalMb / elapsedSec)}MB/s)")
     }
 
