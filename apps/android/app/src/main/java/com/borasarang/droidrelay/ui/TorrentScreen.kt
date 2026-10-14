@@ -339,8 +339,11 @@ private fun TorrentItem(
     var filesExpanded by remember(job.id) { mutableStateOf(false) }
     var showLimitDialog by remember(job.id) { mutableStateOf(false) }
 
-    // 상태+ETA 한 줄 (웹 label + 경과·남음과 동일)
-    val etaLine = if (job.state == TorrentState.DOWNLOADING && job.downloadSpeed > 0) {
+    // 상태+ETA 한 줄 (웹 label + 경과·남음과 동일).
+    // 받은 게 0이면 오버헤드 속도에서 계산한 허위 ETA(수십 시간)를 숨긴다.
+    val etaLine = if (job.state == TorrentState.DOWNLOADING && job.downloadSpeed > 0 &&
+        (job.downloadedSize > 0 || job.progress > 0)
+    ) {
         val etaParts = mutableListOf<String>()
         if (job.startedAt > 0) etaParts.add("${fmtDurationT((now - job.startedAt) / 1000)} 경과")
         if (job.totalSize > 0 && job.downloadedSize < job.totalSize) {
@@ -422,9 +425,15 @@ private fun TorrentItem(
                         "${fmtSize(job.downloadedSize)} / ${fmtSize(job.totalSize)}",
                         style = MaterialTheme.typography.labelSmall,
                     )
+                    // QUEUED/PAUSED의 미미한 속도(피어 신호 수준 오버헤드)는 실제 전송이 아니므로 숨긴다
+                    val idleHold = job.state == TorrentState.QUEUED || job.state == TorrentState.PAUSED
                     Text(
-                        "${fmtSpeed(job.downloadSpeed)} ↓ / ${fmtSpeed(job.uploadSpeed)} ↑" +
-                            if (job.seeds > 0 || job.peers > 0) " · 시드 ${job.seeds} · 피어 ${job.peers}" else "",
+                        if (idleHold) {
+                            if (job.seeds > 0 || job.peers > 0) "시드 ${job.seeds} · 피어 ${job.peers}" else "대기 중"
+                        } else {
+                            "${fmtSpeed(job.downloadSpeed)} ↓ / ${fmtSpeed(job.uploadSpeed)} ↑" +
+                                if (job.seeds > 0 || job.peers > 0) " · 시드 ${job.seeds} · 피어 ${job.peers}" else ""
+                        },
                         style = MaterialTheme.typography.labelSmall,
                     )
                 }
@@ -539,7 +548,10 @@ private fun MagnetInputDialog(
 private fun stateLabel(job: TorrentJob): String = when (job.state) {
     TorrentState.QUEUED -> "대기 중"
     TorrentState.FETCHING_METADATA -> "메타데이터 수신 중"
-    TorrentState.DOWNLOADING -> "다운로드 중"
+    // 메타데이터는 왔으나(속도 표시) 받은 조각이 아직 없으면 받는 중으로 보이지 않게
+    TorrentState.DOWNLOADING ->
+        if (job.name == com.borasarang.droidrelay.relay.METADATA_PLACEHOLDER) "메타데이터 받는 중"
+        else "다운로드 중"
     TorrentState.SEEDING -> "시딩 중"
     TorrentState.PAUSED -> "일시정지"
     TorrentState.STALLED -> "정체 — 다음 torrent로 전환"

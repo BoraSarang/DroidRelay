@@ -1330,29 +1330,27 @@ val th = withGate { session?.find(Sha1Hash.parseHex(expectedHash)) }
             AlertType.METADATA_RECEIVED -> {
                 // transient handle: 콜백 내에서만 torrentFile 읽기 (저장 금지)
                 val th = (alert as org.libtorrent4j.alerts.MetadataReceivedAlert).handle()
-                val id = hashToId[th.infoHash().toString()] ?: return
+                val hash = th.infoHash().toString()
+                // ADD_TORRENT보다 메타데이터가 먼저 오면 매핑이 없어 조용히 유실됐다
+                // (이름 영원히 "추출 중...", 파일 목록 빈 채). 늦게라도 매핑 후 적용한다.
+                val id = hashToId[hash] ?: run {
+                    val found = findJobIdForNewTorrent(hash)
+                    if (found != null) {
+                        val independent = session?.find(Sha1Hash.parseHex(hash))
+                        if (independent != null) {
+                            registerMapping(found, hash, independent)
+                            DebugLogger.d(TAG, "메타데이터 뒤늦은 매핑 id=$found hash=$hash")
+                        } else {
+                            TorrentRepository.update(found) { it.copy(infoHash = hash) }
+                        }
+                    } else {
+                        DebugLogger.w(TAG, "메타데이터 수신 — 대응 job 없음 hash=$hash")
+                    }
+                    found
+                } ?: return
                 val ti = th.torrentFile()
                 if (ti != null) {
-                    val files = (0 until ti.numFiles()).map { fi ->
-                        TorrentFile(
-                            index = fi,
-                            path = ti.files().filePath(fi),
-                            size = ti.files().fileSize(fi),
-                            progress = 0f,
-                            selected = true,
-                        )
-                    }
-                    TorrentRepository.update(id) {
-                        it.copy(
-                            infoHash = th.infoHash().toString(),
-                            name = ti.name(),
-                            totalSize = ti.totalSize(),
-                            state = TorrentState.DOWNLOADING,
-                            files = files,
-                        )
-                    }
-                    persistNow()
-                    DebugLogger.d(TAG, "메타데이터 수신 id=$id name='${ti.name()}'")
+                    applyMetadata(id, hash, ti)
                 }
             }
             else -> Unit
@@ -1360,16 +1358,48 @@ val th = withGate { session?.find(Sha1Hash.parseHex(expectedHash)) }
         }
     }
 
-    /** ADD_TORRENT 시 아직 매핑되지 않은 torrent를 찾음 */
+    /** 메타데이터 확정 반영 — 이름·크기·파일목록·상태 (alert/폴링 공용) */
+    private fun applyMetadata(id: String, hash: String, ti: TorrentInfo) {
+        val files = (0 until ti.numFiles()).map { fi ->
+            TorrentFile(
+                index = fi,
+                path = ti.files().filePath(fi),
+                size = ti.files().fileSize(fi),
+                progress = 0f,
+                selected = true,
+            )
+        }
+        TorrentRepository.update(id) {
+            it.copy(
+                infoHash = hash,
+                name = ti.name(),
+                totalSize = ti.totalSize(),
+                state = TorrentState.DOWNLOADING,
+                files = files,
+            )
+        }
+        persistNow()
+        DebugLogger.d(TAG, "메타데이터 수신 id=$id name='${ti.name()}'")
+    }
+
+    /** ADD_TORRENT/METADATA 시 아직 매핑되지 않은 torrent를 찾음.
+     * FETCHING_METADATA뿐 아니라 복원된 QUEUED도 대상이다 — 복원은 전부 QUEUED로
+     * 살려내므로 FETCHING만 보면 재시작 뒤 ADD_TORRENT가 영원히 매핑되지 않는다. */
     private fun findJobIdForNewTorrent(hash: String): String? {
         // 이미 매핑된 경우
         hashToId[hash]?.let { return it }
         // addMagnet이 미리 infoHash를 주입한 job과 정확히 일치하는 것 우선 매핑 (교차 매핑 방지)
         TorrentRepository.all()
-            .firstOrNull { it.infoHash == hash && it.state == TorrentState.FETCHING_METADATA }
+            .firstOrNull {
+                it.infoHash == hash &&
+                    (it.state == TorrentState.FETCHING_METADATA || it.state == TorrentState.QUEUED)
+            }
             ?.let { return it.id }
         // infoHash가 비어있는 가장 오래된 미매핑 torrent (해시 파싱 실패 폴백, FIFO)
-        val candidates = TorrentRepository.all().filter { it.infoHash.isEmpty() && it.state == TorrentState.FETCHING_METADATA }
+        val candidates = TorrentRepository.all().filter {
+            it.infoHash.isEmpty() &&
+                (it.state == TorrentState.FETCHING_METADATA || it.state == TorrentState.QUEUED)
+        }
         return candidates.minByOrNull { it.id }?.id
     }
 
@@ -1403,6 +1433,21 @@ val th = withGate { session?.find(Sha1Hash.parseHex(expectedHash)) }
                         }
                         val job = TorrentRepository.get(id) ?: return@forEach
                         val prevState = job.state
+
+                        // 이름 미확정 복구 — 메타데이터 alert가 매핑 전에 와서 유실된 경우
+                        // (이름 영원히 "추출 중..."). 핸들은 살아있으니 직접 읽어 확정한다.
+                        if (job.name == METADATA_PLACEHOLDER) {
+                            val healed = runCatching {
+                                val ti = withGate { th.torrentFile() }
+                                if (ti != null) {
+                                    applyMetadata(id, job.infoHash.ifEmpty { th.infoHash().toString() }, ti)
+                                    true
+                                } else false
+                            }.getOrDefault(false)
+                            if (healed) {
+                                DebugLogger.d(TAG, "폴링 이름 복구 id=$id")
+                            }
+                        }
 
                         // ── 완료 → 보관함 이동 (v0.43, T-1085) ──
                         // **상태 전이가 아니라 "완료인데 아직 안 옮김" 으로 판정한다.**
