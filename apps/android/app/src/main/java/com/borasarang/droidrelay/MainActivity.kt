@@ -18,6 +18,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.CloudDownload
+import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Settings
@@ -56,6 +57,7 @@ import com.borasarang.droidrelay.ui.DownloadsScreen
 import com.borasarang.droidrelay.ui.FilesScreen
 import com.borasarang.droidrelay.ui.SettingsScreen
 import com.borasarang.droidrelay.ui.StatsScreen
+import com.borasarang.droidrelay.ui.StatusScreen
 import com.borasarang.droidrelay.ui.TorrentScreen
 import com.borasarang.droidrelay.ui.theme.DroidRelayTheme
 import kotlinx.coroutines.flow.first
@@ -204,7 +206,7 @@ class MainActivity : ComponentActivity() {
     private fun handleOpenTab(intent: android.content.Intent?) {
         if (intent?.action != ACTION_OPEN_TAB) return
         val tab = intent.getIntExtra(EXTRA_TAB, -1)
-        if (tab in 0..4) {
+        if (tab in 0..5) {
             pendingOpenTab = tab
             signalPending()
             DebugLogger.i("UI", "[FEATURE] 알림 탭 이동 tab=$tab")
@@ -222,7 +224,7 @@ fun RootApp() {
     val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
     val context = androidx.compose.ui.platform.LocalContext.current
     val engine = com.borasarang.droidrelay.relay.RelayApp.get(context)
-    val tabTitles = listOf("다운로드", "토렌트", "보관함", "설정", "통계")
+    val tabTitles = listOf("상태", "다운로드", "토렌트", "보관함", "설정", "통계")
 
     // 클립보드 URL 감지 제안 (T-110) + 공유 받기 (T-941) + 알림 탭 이동 (v0.24)
     // 1.5초 폴링 대신 이벤트 구독 — pending* 가 채워질 때만 깨어난다.
@@ -264,11 +266,11 @@ fun RootApp() {
                 MainActivity.pendingSharedMagnet = null
                 val torrentEngine = com.borasarang.droidrelay.relay.RelayApp.getTorrent(context)
                 if (torrentEngine.isDuplicateMagnet(magnet)) {
-                    tab = 1
+                    tab = 2
                     scope.launch { snackbar.showSnackbar("이미 등록된 토렌트입니다") }
                 } else {
                     runCatching { torrentEngine.addMagnet(magnet) }
-                        .onSuccess { tab = 1 }
+                        .onSuccess { tab = 2 }
                         .onFailure { e ->
                             DebugLogger.e("UI", "공유 magnet 추가 실패: ${e.message}")
                             scope.launch { snackbar.showSnackbar("magnet 추가 실패: ${e.message}") }
@@ -299,30 +301,36 @@ fun RootApp() {
                 NavigationBarItem(
                     selected = tab == 0,
                     onClick = { tab = 0 },
-                    icon = { Icon(Icons.Filled.Download, null) },
-                    label = { Text("다운로드") },
+                    icon = { Icon(Icons.Filled.Dns, null) },
+                    label = { Text("상태") },
                 )
                 NavigationBarItem(
                     selected = tab == 1,
                     onClick = { tab = 1 },
-                    icon = { Icon(Icons.Filled.CloudDownload, null) },
-                    label = { Text("토렌트") },
+                    icon = { Icon(Icons.Filled.Download, null) },
+                    label = { Text("다운로드") },
                 )
                 NavigationBarItem(
                     selected = tab == 2,
                     onClick = { tab = 2 },
-                    icon = { Icon(Icons.Filled.Folder, null) },
-                    label = { Text("보관함") },
+                    icon = { Icon(Icons.Filled.CloudDownload, null) },
+                    label = { Text("토렌트") },
                 )
                 NavigationBarItem(
                     selected = tab == 3,
                     onClick = { tab = 3 },
-                    icon = { Icon(Icons.Filled.Settings, null) },
-                    label = { Text("설정") },
+                    icon = { Icon(Icons.Filled.Folder, null) },
+                    label = { Text("보관함") },
                 )
                 NavigationBarItem(
                     selected = tab == 4,
                     onClick = { tab = 4 },
+                    icon = { Icon(Icons.Filled.Settings, null) },
+                    label = { Text("설정") },
+                )
+                NavigationBarItem(
+                    selected = tab == 5,
+                    onClick = { tab = 5 },
                     icon = { Icon(Icons.Filled.BarChart, null) },
                     label = { Text("통계") },
                 )
@@ -336,16 +344,17 @@ fun RootApp() {
                 .imePadding(),
         ) {
             when (tab) {
-                0 -> DownloadsScreen(
+                0 -> StatusScreen(
                     onCopyAddress = { addr ->
                         clipboard.setText(androidx.compose.ui.text.AnnotatedString(addr))
                         scope.launch { snackbar.showSnackbar("주소 복사됨") }
                         DebugLogger.d("UI", "주소 복사 → $addr")
                     },
                 )
-                1 -> TorrentScreen(onShowSnack = { msg -> scope.launch { snackbar.showSnackbar(msg) } })
-                2 -> FilesScreen(onShowSnack = { msg -> scope.launch { snackbar.showSnackbar(msg) } })
-                3 -> SettingsScreen(onPortChanged = {})
+                1 -> DownloadsScreen()
+                2 -> TorrentScreen(onShowSnack = { msg -> scope.launch { snackbar.showSnackbar(msg) } })
+                3 -> FilesScreen(onShowSnack = { msg -> scope.launch { snackbar.showSnackbar(msg) } })
+                4 -> SettingsScreen(onPortChanged = {})
                 else -> StatsScreen()
             }
         }

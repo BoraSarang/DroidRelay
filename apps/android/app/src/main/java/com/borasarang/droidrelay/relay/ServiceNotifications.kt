@@ -164,12 +164,12 @@ internal class ServiceNotifications(private val context: Context) {
 
     fun notify(id: Int, title: String, text: String, done: Boolean) {
         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        // 완료 알림 탭 → 보관함으로 이동 (v0.24)
+        // 완료 알림 탭 → 보관함으로 이동 (v0.24) — 탭 순서: 0상태 1다운로드 2토렌트 3보관함 4설정 5통계
         val openTab = PendingIntent.getActivity(
             context, 9000 + id,
             Intent(context, MainActivity::class.java)
                 .setAction(MainActivity.ACTION_OPEN_TAB)
-                .putExtra(MainActivity.EXTRA_TAB, 2),
+                .putExtra(MainActivity.EXTRA_TAB, 3),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         val notif = Notification.Builder(context, CHANNEL_RESULT_ID)
@@ -184,12 +184,12 @@ internal class ServiceNotifications(private val context: Context) {
 
     fun notifyTorrent(id: Int, title: String, text: String) {
         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        // 토렌트 완료 알림 탭 → 토렌트 탭으로 이동 (v0.24)
+        // 토렌트 완료 알림 탭 → 토렌트 탭으로 이동 (v0.24) — 탭 순서: 0상태 1다운로드 2토렌트 3보관함 4설정 5통계
         val openTab = PendingIntent.getActivity(
             context, 9100 + id,
             Intent(context, MainActivity::class.java)
                 .setAction(MainActivity.ACTION_OPEN_TAB)
-                .putExtra(MainActivity.EXTRA_TAB, 1),
+                .putExtra(MainActivity.EXTRA_TAB, 2),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         val notif = Notification.Builder(context, CHANNEL_TORRENT_ID)

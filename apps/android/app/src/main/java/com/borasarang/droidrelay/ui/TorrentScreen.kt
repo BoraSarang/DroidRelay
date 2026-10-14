@@ -8,6 +8,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -22,12 +23,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.ArrowDropDown
-import androidx.compose.material.icons.filled.ArrowDropUp
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Link
-import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
@@ -35,12 +33,11 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
@@ -77,10 +74,13 @@ fun TorrentScreen(onShowSnack: (String) -> Unit = {}) {
 
     var showMagnetDialog by remember { mutableStateOf(false) }
     var showDeleteDialog by remember { mutableStateOf<TorrentJob?>(null) }
-    // 토렌트 검색 (T-950)
+    // 토렌트 검색 (T-950) — 검색 서버 미설정 시 검색행 대신 설정 안내 (웹 표시 조건과 동일)
     var searchQuery by remember { mutableStateOf("") }
     var searchResults by remember { mutableStateOf<List<TorznabClient.Result>?>(null) }
     var searching by remember { mutableStateOf(false) }
+    val settingsRepo = remember { com.borasarang.droidrelay.relay.SettingsRepository.get(context) }
+    val settings by settingsRepo.settings.collectAsState(initial = null)
+    val searchEnabled = settings?.searchEnabled == true && settings?.searchUrl?.isNotBlank() == true
     val scope = rememberCoroutineScope()
 
     val filePicker = rememberLauncherForActivityResult(
@@ -126,45 +126,87 @@ fun TorrentScreen(onShowSnack: (String) -> Unit = {}) {
                 }
             }
         } else {
+            // 웹 #torrentInfo와 동일 요약줄 — 합계 속도·진행·시드/피어
+            val dlSum = torrents.sumOf { it.downloadSpeed }
+            val upSum = torrents.sumOf { it.uploadSpeed }
+            val activeCount = torrents.count {
+                it.state == TorrentState.DOWNLOADING || it.state == TorrentState.SEEDING ||
+                    it.state == TorrentState.FETCHING_METADATA
+            }
+            val seedSum = torrents.sumOf { it.seeds }
+            val peerSum = torrents.sumOf { it.peers }
             LazyColumn(
                 Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 item {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        OutlinedTextField(
-                            value = searchQuery,
-                            onValueChange = { searchQuery = it },
-                            label = { Text("토렌트 검색") },
-                            singleLine = true,
-                            shape = MaterialTheme.shapes.small,
-                            modifier = Modifier.weight(1f),
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Button(
-                            onClick = {
-                                if (searchQuery.isBlank() || searching) return@Button
-                                searching = true
-                                scope.launch(Dispatchers.IO) {
-                                    val res = runCatching { engine.search(searchQuery.trim()) }
-                                    withContext(Dispatchers.Main) {
-                                        searching = false
-                                        res.onSuccess {
-                                            searchResults = it
-                                            if (it.isEmpty()) onShowSnack("검색 결과 없음")
-                                        }.onFailure { e ->
-                                            DebugLogger.e("TorrentUI", "검색 실패", e)
-                                            onShowSnack("검색 실패: ${e.message}")
+                    if (searchEnabled) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            OutlinedTextField(
+                                value = searchQuery,
+                                onValueChange = { searchQuery = it },
+                                label = { Text("토렌트 검색") },
+                                singleLine = true,
+                                shape = MaterialTheme.shapes.small,
+                                modifier = Modifier.weight(1f),
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Button(
+                                onClick = {
+                                    if (searchQuery.isBlank() || searching) return@Button
+                                    searching = true
+                                    scope.launch(Dispatchers.IO) {
+                                        val res = runCatching { engine.search(searchQuery.trim()) }
+                                        withContext(Dispatchers.Main) {
+                                            searching = false
+                                            res.onSuccess {
+                                                searchResults = it
+                                                if (it.isEmpty()) onShowSnack("검색 결과 없음")
+                                            }.onFailure { e ->
+                                                DebugLogger.e("TorrentUI", "검색 실패", e)
+                                                onShowSnack("검색 실패: ${e.message}")
+                                            }
                                         }
                                     }
-                                }
-                            },
-                            enabled = !searching,
-                            shape = MaterialTheme.shapes.small,
+                                },
+                                enabled = !searching,
+                                shape = MaterialTheme.shapes.small,
+                            ) {
+                                Icon(Icons.Filled.Search, "검색")
+                            }
+                            Spacer(Modifier.width(8.dp))
+                            OutlinedButton(onClick = { showMagnetDialog = true }) {
+                                Icon(Icons.Filled.Link, "magnet 추가")
+                            }
+                            Spacer(Modifier.width(8.dp))
+                            OutlinedButton(onClick = { filePicker.launch(arrayOf("application/x-bittorrent")) }) {
+                                Icon(Icons.Filled.Add, "torrent 파일 추가")
+                            }
+                        }
+                    } else {
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceContainer,
+                            ),
                         ) {
-                            Icon(Icons.Filled.Search, "검색")
+                            Text(
+                                "토렌트 검색은 설정 → 토렌트 → 검색 서버에서 켜세요",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(12.dp),
+                            )
                         }
                     }
+                }
+                item {
+                    Text(
+                        "⚡다운 합계 ${fmtSpeed(dlSum)} · ▲${fmtSpeed(upSum)} · 진행 ${activeCount}건 · " +
+                            "시드 $seedSum 피어 $peerSum",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 4.dp),
+                    )
                 }
                 searchResults?.let { results ->
                     items(results) { r ->
@@ -221,8 +263,6 @@ fun TorrentScreen(onShowSnack: (String) -> Unit = {}) {
                             if (!ok) onShowSnack("재개 실패 — 앱 완전 종료 후 다시 시작하세요")
                         } },
                         onDelete = { showDeleteDialog = job },
-                        onMoveUp = { scope.launch { withContext(Dispatchers.IO) { engine.reorder(job.id, -1) } } },
-                        onMoveDown = { scope.launch { withContext(Dispatchers.IO) { engine.reorder(job.id, 1) } } },
                         onSelectFiles = { sel ->
                             scope.launch {
                                 val ok = withContext(Dispatchers.IO) { engine.setFileSelection(job.id, sel) }
@@ -237,24 +277,6 @@ fun TorrentScreen(onShowSnack: (String) -> Unit = {}) {
                     )
                 }
                 item { Spacer(Modifier.height(80.dp)) }
-            }
-        }
-
-        Column(
-            Modifier.align(Alignment.BottomEnd).padding(20.dp),
-        ) {
-            FloatingActionButton(
-                onClick = { showMagnetDialog = true },
-                containerColor = MaterialTheme.colorScheme.primaryContainer,
-            ) {
-                Icon(Icons.Filled.Link, "magnet 추가")
-            }
-            Spacer(Modifier.height(12.dp))
-            FloatingActionButton(
-                onClick = { filePicker.launch(arrayOf("application/x-bittorrent")) },
-                containerColor = MaterialTheme.colorScheme.secondaryContainer,
-            ) {
-                Icon(Icons.Filled.Add, "파일 추가")
             }
         }
     }
@@ -310,8 +332,6 @@ private fun TorrentItem(
     job: TorrentJob,
     onResume: () -> Unit,
     onDelete: () -> Unit,
-    onMoveUp: () -> Unit,
-    onMoveDown: () -> Unit,
     onSelectFiles: (Set<Int>) -> Unit,
     onSetLimit: (Long) -> Unit,
 ) {
@@ -319,145 +339,127 @@ private fun TorrentItem(
     var filesExpanded by remember(job.id) { mutableStateOf(false) }
     var showLimitDialog by remember(job.id) { mutableStateOf(false) }
 
+    // 상태+ETA 한 줄 (웹 label + 경과·남음과 동일)
+    val etaLine = if (job.state == TorrentState.DOWNLOADING && job.downloadSpeed > 0) {
+        val etaParts = mutableListOf<String>()
+        if (job.startedAt > 0) etaParts.add("${fmtDurationT((now - job.startedAt) / 1000)} 경과")
+        if (job.totalSize > 0 && job.downloadedSize < job.totalSize) {
+            etaParts.add("${fmtDurationT((job.totalSize - job.downloadedSize) / job.downloadSpeed)} 남음")
+        }
+        if (etaParts.isNotEmpty()) " · " + etaParts.joinToString(" · ") else ""
+    } else ""
+
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainer,
         ),
     ) {
-        Column(Modifier.fillMaxWidth().padding(16.dp)) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(
-                    modifier = Modifier.width(40.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        job.name,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        stateLabel(job) + etaLine,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = stateColor(job.state),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                // 무조건 시도 원칙: 멈춤 버튼 없음 — 멈추는 길은 삭제뿐.
+                // 엔진이 미완료 항목을 스스로 살려내므로 수동 재개는 보조 수단이다.
+                if (job.state == TorrentState.PAUSED || job.state == TorrentState.FAILED ||
+                    job.state == TorrentState.STALLED || job.state == TorrentState.QUEUED
                 ) {
-                    IconButton(onClick = onMoveUp, modifier = Modifier.size(40.dp)) {
-                        Icon(Icons.Filled.ArrowDropUp, "위로", modifier = Modifier.size(16.dp))
-                    }
-                    IconButton(onClick = onMoveDown, modifier = Modifier.size(40.dp)) {
-                        Icon(Icons.Filled.ArrowDropDown, "아래로", modifier = Modifier.size(16.dp))
+                    IconButton(onClick = onResume, modifier = Modifier.size(32.dp)) {
+                        Icon(Icons.Filled.PlayArrow, "재개", modifier = Modifier.size(20.dp))
                     }
                 }
-                Column(Modifier.weight(1f)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text(
-                                job.name,
-                                style = MaterialTheme.typography.bodyLarge,
-                                fontWeight = FontWeight.Medium,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                            Spacer(Modifier.height(4.dp))
-                            Text(
-                                stateLabel(job),
-                                style = MaterialTheme.typography.bodySmall,
-                                color = stateColor(job.state),
-                            )
-                            if (job.state == TorrentState.DOWNLOADING && job.downloadSpeed > 0) {
-                                val etaParts = mutableListOf<String>()
-                                if (job.startedAt > 0) {
-                                    val elapsed = (now - job.startedAt) / 1000
-                                    etaParts.add("${fmtDurationT(elapsed)} 경과")
-                                }
-                                if (job.totalSize > 0 && job.downloadedSize < job.totalSize) {
-                                    val remain = (job.totalSize - job.downloadedSize) / job.downloadSpeed
-                                    etaParts.add("${fmtDurationT(remain)} 남음")
-                                }
-                                if (etaParts.isNotEmpty()) {
-                                    Spacer(Modifier.height(2.dp))
-                                    Text(
-                                        etaParts.joinToString(" · "),
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                }
-                            }
-                        }
-                        // 무조건 시도 원칙: 멈춤 버튼 없음 — 멈추는 길은 삭제뿐.
-                        // 엔진이 미완료 항목을 스스로 살려내므로 수동 재개는 보조 수단이다.
-                        if (job.state == TorrentState.PAUSED || job.state == TorrentState.FAILED ||
-                            job.state == TorrentState.STALLED || job.state == TorrentState.QUEUED
-                        ) {
-                            IconButton(onClick = onResume) {
-                                Icon(Icons.Filled.PlayArrow, "재개")
-                            }
-                        }
-                        IconButton(onClick = onDelete) {
-                            Icon(Icons.Filled.Delete, "삭제")
-                        }
-                    }
+                IconButton(onClick = onDelete, modifier = Modifier.size(32.dp)) {
+                    Icon(Icons.Filled.Delete, "삭제", modifier = Modifier.size(20.dp))
                 }
             }
-            // torrent 개별 다운로드 제한 (T-1050)
+            // 제한 + 파일선택 한 줄 (웹 작업별 제한 select와 동일)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    "다운로드 제한",
-                    style = MaterialTheme.typography.bodySmall,
+                    "제한:",
+                    style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.outline,
                 )
-                TextButton(onClick = { showLimitDialog = true }) {
-                    Text(SpeedLimits.labelBps(job.downloadLimit), style = MaterialTheme.typography.labelMedium)
+                TextButton(
+                    onClick = { showLimitDialog = true },
+                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp),
+                ) {
+                    Text(SpeedLimits.labelBps(job.downloadLimit), style = MaterialTheme.typography.labelSmall)
+                }
+                if (job.files.isNotEmpty()) {
+                    TextButton(
+                        onClick = { filesExpanded = !filesExpanded },
+                        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp),
+                    ) {
+                        Text(
+                            "파일 ${job.files.size}개 (${job.files.count { it.selected }}개 선택)${if (filesExpanded) " ▾" else " ▸"}",
+                            style = MaterialTheme.typography.labelSmall,
+                        )
+                    }
                 }
             }
             if (job.totalSize > 0) {
-                Spacer(Modifier.height(8.dp))
                 LinearProgressIndicator(
                     progress = { job.progress },
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().height(4.dp),
                 )
-                Spacer(Modifier.height(4.dp))
+                Spacer(Modifier.height(2.dp))
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Text(
                         "${fmtSize(job.downloadedSize)} / ${fmtSize(job.totalSize)}",
-                        style = MaterialTheme.typography.bodySmall,
+                        style = MaterialTheme.typography.labelSmall,
                     )
                     Text(
-                        "${fmtSpeed(job.downloadSpeed)} ↓ / ${fmtSpeed(job.uploadSpeed)} ↑",
-                        style = MaterialTheme.typography.bodySmall,
+                        "${fmtSpeed(job.downloadSpeed)} ↓ / ${fmtSpeed(job.uploadSpeed)} ↑" +
+                            if (job.seeds > 0 || job.peers > 0) " · 시드 ${job.seeds} · 피어 ${job.peers}" else "",
+                        style = MaterialTheme.typography.labelSmall,
                     )
                 }
-                if (job.seeds > 0 || job.peers > 0) {
-                    Spacer(Modifier.height(2.dp))
-                    Text(
-                        "시드 ${job.seeds} · 피어 ${job.peers}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.outline,
-                    )
-                }
+            } else if (job.seeds > 0 || job.peers > 0) {
+                Text(
+                    "시드 ${job.seeds} · 피어 ${job.peers}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.outline,
+                )
             }
-            // 파일 선택 (T-942)
-            if (job.files.isNotEmpty()) {
-                Spacer(Modifier.height(4.dp))
-                TextButton(onClick = { filesExpanded = !filesExpanded }) {
-                    Text("파일 ${job.files.size}개 (${job.files.count { it.selected }}개 선택)")
-                }
-                if (filesExpanded) {
-                    Column {
-                        job.files.forEach { f ->
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Checkbox(
-                                    checked = f.selected,
-                                    onCheckedChange = { checked ->
-                                        onSelectFiles(
-                                            job.files.filter { if (it.index == f.index) checked else it.selected }
-                                                .map { it.index }.toSet(),
-                                        )
-                                    },
+            if (filesExpanded && job.files.isNotEmpty()) {
+                Column {
+                    job.files.forEach { f ->
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Checkbox(
+                                checked = f.selected,
+                                onCheckedChange = { checked ->
+                                    onSelectFiles(
+                                        job.files.filter { if (it.index == f.index) checked else it.selected }
+                                            .map { it.index }.toSet(),
+                                    )
+                                },
+                            )
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    f.path,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
                                 )
-                                Column(Modifier.weight(1f)) {
-                                    Text(
-                                        f.path,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        maxLines = 2,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                    Text(
-                                        fmtSize(f.size),
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.outline,
-                                    )
-                                }
+                                Text(
+                                    fmtSize(f.size),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.outline,
+                                )
                             }
                         }
                     }
