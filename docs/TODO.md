@@ -840,3 +840,16 @@ T-001~T-008 전부 완료 (커밋 7574486).
 | T-1121 | `StorageRoutes` +29행 (보관함 API), `ServiceNotifications.kt` 신규 | ✅ |
 | T-1122 | `CronParserPerfTest` flaky 수정 ("30 3 1 * *" 월간식은 7일 탐색창에 안 들어감 → 일간식으로 의도 검증) | ✅ |
 | T-1123 | 맥 디스커버리 개편 (AppModel/SettingsWindow/ServerDiscovery 등) + `DeviceListTests` 신규 | ✅ |
+
+## v0.55 (2026-10-16) — 리팩터: 웹 대시보드 분리 + 토렌트 순수 로직 추출
+
+> 배경: `WebDashboardHtml.kt` 3,041줄(CSS+HTML+JS 혼재) · `TorrentEngine.kt` 1,931줄(순수 함수 + 거대 클래스 혼재). 상세: `docs/plans/PLAN_v0.55_refactor_android-web.md`
+> 범위: **동작 불변**(순수 이동만). 거대 클래스 분해는 제외 — `PLAN_v0.54` 의 "SettingsRoutes 분할 제외" 결정 존중.
+> 검증: `./gradlew test` (46 테스트) + 대시보드 계약 테스트가 `WebAssets.dashboardHtml` **문자열을 그대로** 검사.
+> 롤백: `git tag pre-refactor-android-web`.
+
+| T-번호 | 내용 | 상태 |
+|--------|------|------|
+| T-1124 | 웹 대시보드 분리 — `WebDashboardHtml.kt` → `WebDashboardHead`(head+CSS) · `WebDashboardBody`(마크업) · `WebDashboardScript`(JS) + 조립. **출력 바이트 동일** | 🔄 |
+| T-1125 | `TorrentEngine.kt` 순수 함수 추출 — `MagnetParser.kt`(magnet 파싱·dn 정제) · `TorrentRules.kt`(판정·경로·시그니처·예외). 기존 46 테스트로 회귀 고정 | 🔄 |
+| T-1126 | 버전 올리기 — `gradle.properties` `0.50.1/36` → `0.55.0/37` (v0.54 이후 커밋들이 버전을 안 올려 두 기기가 0.50.1 로 남아 있음) | 🔄 |
