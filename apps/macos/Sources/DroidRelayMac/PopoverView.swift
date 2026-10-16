@@ -59,13 +59,14 @@ struct PopoverView: View {
                 confirmBar(c)
             }
             content
-            // **실패 배너** — 쓰기 동작이 조용히 실패할 때만 뜬다.
+            // **결과 안내 배너** — 종류에 따라 아이콘·색이 갈리고, 성공/정보는 스스로 사라진다.
             //
-            // 성공은 화면이 그대로 증거다(목록에서 사라졌고, 상태가 바뀌었다).
+            // 성공은 화면이 그대로 증거지만(목록에서 사라졌고, 상태가 바뀌었다),
             // **아무것도 안 바뀌었는데 아무 말도 없으면** 사용자는 성공을 믿게 되고,
-            // 그건 사실이 아니다. 실패만 눈에 띄게 남긴다.
-            if !model.lastResult.isEmpty {
-                resultBanner
+            // 그건 사실이 아니다. 그래서 실패는 눈에 띄게 **남기고**,
+            // 성공/정보는 잠깐 보여주고 지운다(무엇이 사라지는지는 `Notice` 가 정한다).
+            if let n = model.notice {
+                resultBanner(n)
             }
             Divider().opacity(0.5)
             stats
@@ -120,20 +121,21 @@ struct PopoverView: View {
         }
     }
 
-    /// **쓰기 실패 배너.** 닫을 수 있다 — 방치하면 "이 메시지가 아직 유효한가"
-    /// 를 알 수 없어서, 사용자가 스스로 지울 수 있게 한다.
-    private var resultBanner: some View {
+    /// **결과 안내 배너.** 아이콘·색은 종류(`Notice.Kind`)가 정한다 —
+    /// 성공에 경고 삼각형이 붙던 거짓 신호를 여기서 없앤다.
+    /// 자동 소멸은 모델(`notify`)이 타이머로 처리하고, 실패는 남아 X 로 닫는다.
+    private func resultBanner(_ n: Notice) -> some View {
         HStack(alignment: .top, spacing: 6) {
-            Image(systemName: "exclamationmark.triangle.fill")
+            Image(systemName: n.icon)
                 .font(.system(size: 10))
-                .foregroundStyle(.orange)
-            Text(model.lastResult)
+                .foregroundStyle(n.tint)
+            Text(n.text)
                 .font(.system(size: 11))
                 .foregroundStyle(.primary)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 4)
             Button {
-                model.lastResult = ""
+                model.dismissNotice()
             } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: 8, weight: .bold))
@@ -145,7 +147,7 @@ struct PopoverView: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
         .frame(width: PopoverMetrics.width)
-        .background(Color.orange.opacity(0.12))
+        .background(n.background)
     }
 
     // MARK: - 확인 막대 (삭제 컨펌)
@@ -1327,5 +1329,38 @@ struct StorageRow: View {
         .padding(.horizontal, 8)
         .padding(.vertical, 5)
         .contentShape(Rectangle())
+    }
+}
+
+// MARK: - 안내 배너 표현 (종류 → 아이콘·색)
+
+/// **`Notice.Kind` 를 화면 표현으로 옮긴다.**
+///
+/// Core 의 `Notice` 는 UI 를 모른다(순수 규칙만). 아이콘·색은 여기서 정한다.
+/// `switch` 가 **망라**라서 종류를 새로 추가하면 컴파일이 강제로 이 자리를
+/// 채우게 한다 — "성공에 경고 아이콘" 같은 거짓 신호가 다시 끼어들 틈을 없앤다.
+private extension Notice {
+    var icon: String {
+        switch kind {
+        case .success: return "checkmark.circle.fill"
+        case .info:    return "info.circle.fill"
+        case .error:   return "exclamationmark.triangle.fill"
+        }
+    }
+
+    var tint: Color {
+        switch kind {
+        case .success: return .green
+        case .info:    return .secondary
+        case .error:   return .orange
+        }
+    }
+
+    var background: Color {
+        switch kind {
+        case .success: return Color.green.opacity(0.12)
+        case .info:    return Color.secondary.opacity(0.10)
+        case .error:   return Color.orange.opacity(0.12)
+        }
     }
 }
