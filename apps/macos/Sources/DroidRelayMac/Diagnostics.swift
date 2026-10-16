@@ -1,0 +1,466 @@
+import AppKit
+import SwiftUI
+import DroidRelayCore
+import ServiceManagement
+
+/// `--watch` 로그 위치
+let agentWatchLog = NSString(string: "~/.agent-droidrelay-watch.log").expandingTildeInPath
+let popoverLog = NSString(string: "~/.agent-droidrelay-popover.log").expandingTildeInPath
+/// 화면에 실제로 그려진 뷰 계층 덤프 (`--ui-dump`)
+let uiDumpLog = NSString(string: "~/.agent-droidrelay-ui.log").expandingTildeInPath
+
+/// 로그 파일에 **덧붙인다.** `String.write(atomically:false)` 는 파일을 잘라서
+/// 마지막 1줄만 남는다(실제로 그랬다).
+func appendLog(_ msg: String, to path: String) {
+    if !FileManager.default.fileExists(atPath: path) {
+        FileManager.default.createFile(atPath: path, contents: nil)
+    }
+    guard let fh = FileHandle(forWritingAtPath: path) else { return }
+    fh.seekToEndOfFile()
+    fh.write(Data(msg.utf8))
+    try? fh.close()
+}
+/// `--diagnose` — 메뉴바 앱은 화면이 없으므로 실패 원인을 볼 수단이 이것뿐이다.
+
+/// 읽기 태스크가 모은 SSE 이벤트. 타임아웃 태스크와 결과를 공유하지 않는다.
+private actor TickBox {
+    private(set) var all: [String] = []
+    func add(_ e: [String]) { all.append(contentsOf: e) }
+}
+enum Diagnostics {
+    /// **그래프 위 속도 표시가 한 줄로 안 깨지는지** — 실측 전용 (M-26).
+    ///
+    /// ## 왜 전용 모드인가
+    ///
+    /// **"한 줄로 나온다" 는 서술이다.** 맞았는지 틀렸는지는 **높이**로 판정한다.
+    /// 줄이 하나면 12pt, 둘이면 24pt 다. → **실제로 배치해서 높이를 잰다.**
+    ///
+    /// ## 왜 계산만으로 부족한가 — M-21 에서 배운 것
+    ///
+    /// M-21 에서 `WindowPlacement.resolve` 가 **정확한 좌표 (670, 291) 를 냈고
+    /// 테스트도 100% 통과했는데 실제 창은 (0, 0) 에 있었다.**
+    ///
+    /// > **계산이 맞다 ≠ 그 계산이 화면에 간다.**
+    ///
+    /// `PopoverMetrics` 는 이 버그를 못 재현한다. **글꼴 폭을 계수로 재기 때문**이고,
+    /// 무엇보다 **SwiftUI 의 레이아웃 엔진을 한 번도 통과하지 않는다.**
+    /// `fixedSize` · `lineLimit` · `truncationMode` 가 실제로 어떻게 배분하는지는
+    /// **SwiftUI 만 안다.** → 여기서 **실제 뷰를 `NSHostingView` 에 넣고 잰다.**
+    ///
+    /// ## 무엇을 확인하나
+    ///
+    /// 1. **범례가 요구하는 실제 폭** — SwiftUI 가 스스로 말하게 한다.
+    /// 2. **그 값을 담을 때의 실제 높이** — **한 줄인지** 의 판정이다.
+    /// 3. **계산값과 실제값의 차이** — 둘이 어긋나면 Core 쪽 계수를 고쳐야 한다.
+    /// 4. **팝오버 창이 실제로 그 폭인가** — 상수가 아니라 **창에서 읽는다.**
+    @MainActor
+    static func legendCheck() async {
+        print("=== DroidRelay 그래프 범례 한 줄 진단 (M-26) ===")
+        // **사용자 스크린샷의 값을 그대로 쓴다.** 실제 서버 값으로 재면
+        // "269K" 처럼 자릿수가 짧아 **부족한 순간을 놓친다.**
+        let values: [SpeedSource: (down: String, up: String)] = [
+            .droid:  ("707K", "762K"),
+            .device: ("707K", "762K"),
+        ]
+        let axis = "1.0 MB/s · 보통 3.1 KB/s"
+        let sources: [SpeedSource] = [.droid, .device]
+
+        // ── 1. 계산값 ──
+        let 계산 = PopoverMetrics.legendRowWidth(sources: sources, values: values, axisLabel: axis)
+        print("계산 필요폭  : \(String(format: "%.1f", 계산))pt")
+        print("그래프 가용폭: \(String(format: "%.1f", PopoverMetrics.graphWidth))pt  (팝오버 \(Int(PopoverMetrics.width)) − 여백 \(Int(PopoverMetrics.graphInset))×2)")
+        print(PopoverMetrics.describe(sources: sources, values: values, axisLabel: axis))
+
+        // ── 2. 실제 SwiftUI 배치 ──
+        // **계산이 아니라 뷰를 실제로 넣는다.** 여기가 이 진단의 전부다.
+        //
+        // **`SpeedLegend` 만 따로 재는 이유** — 첫 판은 `SpeedGraph` 전체를 재고
+        // **62pt 가 나왔다.** 62 = 범례 12 + 간격 4 + 그래프 46 이므로
+        // **범례는 이미 한 줄이었는데**, "20pt 미만이어야 한 줄" 이라는 기준과
+        // 맞지 않아 **"깨진다" 고 잘못 판정했다.**
+        //
+        // → **틀린 건 판정 기준이 아니라 판정 대상이었다.** 범례만 떼어 본다.
+        let legend = SpeedLegend(
+            sources: sources,
+            droid: (down: 707_000, up: 762_000),
+            device: (down: 707_000, up: 762_000),
+            axisLabel: axis
+        )
+        // **(가) 폭을 준다** — 실제 화면과 같은 조건이어야 접히는 것도 재현된다.
+        // **높이는 준다** — 높이가 없으면 두 줄이 되어야 하는데 **잘려서 한 줄처럼 보인다.**
+        let 제한된 = NSHostingView(
+            rootView: legend.frame(width: PopoverMetrics.graphWidth, alignment: .leading)
+        )
+        // **(나) 폭을 주지 않는다** — 그러면 **필요한 만큼만** 차지한다.
+        // 이게 "SwiftUI 가 스스로 말하는 필요폭" 이다.
+        let 자유 = NSHostingView(rootView: legend)
+
+        try? await Task.sleep(for: .milliseconds(300))   // 레이아웃이 끝날 때까지 양보
+        제한된.layoutSubtreeIfNeeded()
+        자유.layoutSubtreeIfNeeded()
+
+        let 제한크기 = 제한된.fittingSize
+        let 자유폭 = 자유.fittingSize.width
+        print("실제 필요폭  : \(String(format: "%.1f", 자유폭))pt   ← 폭을 주지 않고 SwiftUI 가 낸 값")
+        print("가용폭 넣은 높이: \(String(format: "%.1f", 제한크기.height))pt   ← 이게 한 줄/두 줄의 판정값")
+        print("계산과의 차이: \(String(format: "%+.1f", 자유폭 - 계산))pt  "
+              + (자유폭 - 계산 < -2 ? "★ Core 계수가 과대 — 실제보다 넓다고 계산했다"
+                 : 자유폭 - 계산 > 8 ? "★ Core 계수가 과소 — 접힘을 놓칠 수 있다" : "일치"))
+
+        // ── 3. 한 줄인가 (이게 판정) ──
+        // 9.5pt 한 줄은 12pt 안팎, 두 줄이면 23pt 이상이다.
+        let 한줄 = 제한크기.height < 20
+        print("한 줄 여부   : \(한줄 ? "OK — 접히지 않는다" : "★ 두 줄로 깨진다")  (기준 20pt)")
+        if !한줄 {
+            print("             → 범례 `Text` 에 `lineLimit(1)`+`fixedSize` 가 없거나,")
+            print("               `PopoverMetrics.width` 가 `graphWidth` 보다 좁다.")
+        }
+        if 자유폭 > PopoverMetrics.graphWidth {
+            print("             ★ 필요폭 \(String(format: "%.1f", 자유폭))pt > 가용폭 "
+                  + "\(Int(PopoverMetrics.graphWidth))pt — 접힌다")
+        }
+
+        // ── 4. 창이 실제로 그 폭인가 (상수가 아니라 창에서 읽는다) ──
+        // **팝오버를 먼저 만들어야** `contentSize` 를 읽을 수 있다 —
+        // `install()` 은 메뉴바 항목만 만들고 팝오버는 **누를 때** 만든다.
+        let c = StatusItemController(model: AppModel())
+        c.install()
+        c.forceShowPopover()
+        try? await Task.sleep(for: .milliseconds(600))
+        print("팝오버 폭    : \(c.debugPopoverWidth)")
+        print("설정 창 폭   : \(Int(SettingsWindowController.contentSize.width))pt  "
+              + "— 팝오버가 이보다 넓으면 두 창이 같은 앱으로 읽히지 않는다")
+        print("=== 끝 ===")
+        NSApp.terminate(nil)
+    }
+
+    /// **메인 메뉴가 실제로 설치됐는지** — ⌘V 회귀를 눈이 아니라 수치로 본다.
+    ///
+    /// ## 왜 전용 모드인가
+    ///
+    /// AppKit 은 `⌘+키` 를 **메인 메뉴**의 key equivalent 로 푼다. 메뉴가 없으면
+    /// 모든 TextField 에서 ⌘C/⌘V/⌘X/⌘A/⌘Z 가 죽는데, 이건 화면으로만 보이고
+    /// 다른 진단 모드(`--diagnose`/`--title-check`/`--popover-check`)는 메뉴를
+    /// **한 번도 들여다보지 않는다.** v0.7.1 에서 같은 버그를 한 번 고쳤다가
+    /// 메뉴바 앱 재작성 때 메뉴를 잃었으므로, 다시 잃지 않도록 여기서 확인한다.
+    @MainActor
+    static func menuCheck() async {
+        print("=== DroidRelay 메인 메뉴 진단 ===")
+        guard let root = NSApp.mainMenu else {
+            print("메인 메뉴    : ★ 없음 — 모든 TextField 에서 ⌘C/⌘V/⌘X/⌘A/⌘Z 불가")
+            print("=== 끝 ===")
+            NSApp.terminate(nil); return
+        }
+        print("메인 메뉴    : 있음 (최상위 \(root.items.count)개)")
+        for top in root.items {
+            print("  ▸ \(top.submenu?.title ?? top.title)")
+            for it in top.submenu?.items ?? [] {
+                if it.isSeparatorItem { print("      —"); continue }
+                print("      \(it.title)\(combo(it))  → \(describe(it))")
+            }
+        }
+        // **핵심 판정** — 붙여넣기 항목이 responder chain 으로 가는가.
+        let all = root.items.compactMap(\.submenu).flatMap(\.items)
+        let paste = all.first { $0.action == Selector(("paste:")) }
+        print("붙여넣기 항목: " + (paste == nil
+              ? "★ 없음 — ⌘V 불가"
+              : "있음  [\(keyLabel(paste!))] → \(describe(paste!))  target=\(paste!.target == nil ? "responder chain" : "고정")"))
+        print("=== 끝 ===")
+        NSApp.terminate(nil)
+    }
+
+    /// `⌘C` 같은 단축키 라벨. 키가 없으면 빈 문자열.
+    private static func keyLabel(_ it: NSMenuItem) -> String {
+        guard !it.keyEquivalent.isEmpty else { return "" }
+        var s = "⌘"
+        if it.keyEquivalentModifierMask.contains(.shift)  { s = "⇧" + s }
+        if it.keyEquivalentModifierMask.contains(.option) { s = "⌥" + s }
+        if it.keyEquivalentModifierMask.contains(.control) { s = "⌃" + s }
+        return s + it.keyEquivalent
+    }
+
+    private static func combo(_ it: NSMenuItem) -> String {
+        let k = keyLabel(it)
+        return k.isEmpty ? "" : "  [\(k)]"
+    }
+
+    private static func describe(_ it: NSMenuItem) -> String {
+        it.action.map(NSStringFromSelector) ?? "nil"
+    }
+
+    static func run() async {
+        let i = NetworkInfo.currentInterface()
+        print("=== DroidRelay 진단 ===")
+        if let i {
+            print("인터페이스  : \(i.name)")
+            print("로컬 IP    : \(i.ipv4) / \(i.netmask) (prefix \(IPv4(i.netmask)?.prefix ?? -1))")
+            print("게이트웨이 : \(i.gateway ?? "없음")")
+            let hosts = Subnet.scanHosts(ipv4: i.ipv4, netmask: i.netmask)
+            print("스캔 대상  : \(hosts.count)개 (앞뒤 \(hosts.first ?? "-") … \(hosts.last ?? "-"))")
+        } else {
+            print("인터페이스 : 없음 (Wi-Fi 연결 확인)")
+        }
+
+        let d = ServerDiscovery()
+        let t0 = Date()
+        if let r = await d.discover() {
+            print("탐색 결과   : \(r.info.displayAddress) v\(r.info.version)")
+            print("사용 전략   : \(r.strategy.displayName)  (\(String(format: "%.0f", Date().timeIntervalSince(t0) * 1000))ms)")
+            let all = await d.discoverAll()
+            print("기기 목록   : \(all.count)대")
+            for a in all {
+                print("  - \(a.info.displayAddress) v\(a.info.version) (\(a.strategy.displayName))")
+            }
+            // **팝오버에 실제로 찍히는 문자열** (M-11) — 화면과 같은 함수를 쓴다.
+            // 화면 글자를 진단에서 따로 적으면 **화면과 진단이 서로 다른 말을 하게 된다.**
+            print("팝오버 표시 : \(DiscoveryBadge.line(strategy: r.strategy, address: r.info.displayAddress, version: r.info.version, isManual: r.strategy == .manual, deviceName: r.info.deviceName))")
+            print("빈 버전 표기 : \"\(DiscoveryBadge.line(strategy: .cached, address: r.info.displayAddress, version: "", isManual: false, deviceName: r.info.deviceName))\"  ← v 가 붙지 않아야 한다")
+            print("수동 입력 표기: \"\(DiscoveryBadge.line(strategy: .manual, address: r.info.displayAddress, version: r.info.version, isManual: true, deviceName: r.info.deviceName))\"")
+            let c = RelayClient(base: r.info.baseURL)
+            let jobs = await c.jobs()
+            print("다운로드    : \(jobs.count)건")
+            for j in jobs.prefix(5) {
+                print("  - \(j.name)  \(j.state)  \(j.progress)%  \(j.speedText)")
+            }
+            // M3 — 탭 3개가 같은 서버를 본다. 탭 데이터가 안 내려오면 그 탭은 그냥 비어 보인다.
+            // 메뉴바 앱에 화면이 없으므로 **여기서라도** 확인되어야 원인을 알 수 있다.
+            let torrents = await c.torrents()
+            print("토렌트      : \(torrents.count)건")
+            for t in torrents.prefix(5) {
+                print("  - \(t.name)  \(t.stateLabel)  \(t.percent)%  \(t.speedText)  시드\(t.seeds)/피어\(t.peers)")
+            }
+            let storage = await c.storage()
+            print("보관함      : \(storage.count)개 항목 (폴더 \(storage.filter { $0.isDirectory }.count))")
+            for e in storage.prefix(5) {
+                print("  - \(e.isDirectory ? "📁" : "📄") \(e.name)  \(e.sizeText)  \(e.modifiedText)")
+            }
+            // 로그인 항목 — **설치본에서만** 성립한다. `swift run` 컨텍스트면 .notFound 가
+            // 나오는데 그게 정답이다(경로가 안정적이지 않아 등록 대상이 될 수 없다).
+            // 스위치가 왜 안 먹는지 확인할 수단이 여기뿐이라 diagnose 에 노출한다.
+            // 속도 — 메뉴바 2줄이 실제로 이런 문자열이 된다
+            let droid = await c.droidSpeed()
+            print("Droid 속도  : ↓ \(SpeedFormat.text(droid.downBps))  ↑ \(SpeedFormat.text(droid.upBps))")
+            // 기기 = 누적 카운터. 속도는 클라이언트가 시간 차로 나눈다 (M-27).
+            //
+            // **★ 두 모드를 다 찍는다** — 하나만 찍으면 **어느 경로가 문제인지 모른다.**
+            // `external` 이 0 이면 서버가 rmnet 을 못 찾는 것이고, `all` 이 0 이면
+            // 요청 자체가 실패한 것이다. **"서버 미지원" 이라는 말은 원인을 감춘다.**
+            let 설정 = TrafficScopeSetting.load()
+            print("기기 범위 설정: \(설정.scope.rawValue) (기본 = \(TrafficScope.default.rawValue))")
+            // **설정한 모드만 먼저 찍는다** — 이것이 **실제로 화면에 나오는 값**이다.
+            if let t = try? await c.deviceTrafficChecked(scope: 설정.scope) {
+                print("기기 카운터 : rx=\(t.rxTotal) tx=\(t.txTotal)"
+                      + "  범위=\(t.scope?.rawValue ?? "없음(구버전)")  (누적 — 속도는 클라이언트가 계산)")
+            } else {
+                print("기기 카운터 : (서버 미지원 — /api/net/speed 없거나 supported=false)")
+            }
+            // **그다음 나머지 구간** — "왜 이 값인지" 를 비교하기 위해 본다. (M-28: 3구간)
+            //
+            // **이게 왜 필요한가** — 세 구간이 **서로 다른 값을 본다.**
+            // M-28 실측 (동일 구간, 세 값이 각각 다름):
+            // ```
+            // swlan0   Δrx=28,368  Δtx=60,495   ← 핫스팟 ↔ 클라이언트
+            // external Δrx=547     Δtx=443      ← 셀룰러 (거의 0)
+            // all      Δrx=25,286  Δtx=63,268   ← ≈ swlan0 합계와 일치 ✓
+            // ```
+            // **하나만 찍으면 "설정이 안 먹혔다" 는 잘못된 결론을 만든다.**
+            for s in TrafficScope.allCases where s != 설정.scope {
+                do {
+                    let t = try await c.deviceTrafficChecked(scope: s)
+                    print("  비교(\(s.rawValue)): rx=\(t.rxTotal) tx=\(t.txTotal)")
+                } catch {
+                    print("  비교(\(s.rawValue)): 실패 — \(error)")
+                }
+            }
+            // **설정과 서버가 실제로 쓴 값의 일치 여부** — 구버전 서버 대처의 근거.
+            if let t = try? await c.deviceTrafficChecked(scope: 설정.scope) {
+                if let used = t.scope, used != 설정.scope {
+                    print("범위 불일치 : 설정 '\(설정.scope.rawValue)' · 서버 '\(used.rawValue)'")
+                } else if t.scope == nil {
+                    print("범위        : 서버가 이 필드를 모른다 (구버전) — 설정이 지켜지지 않을 수 있다")
+                }
+            }
+            let st = SMAppService.mainApp.status
+            let stName = switch st {
+                case .notRegistered: "미등록"
+                case .enabled: "켜짐"
+                case .requiresApproval: "승인 필요 — 시스템 설정에서 허용하세요"
+                case .notFound: "앱 없음"
+                @unknown default: "알 수 없음"
+            }
+            print("로그인 항목  : \(stName)  [status=\(st.rawValue)]"
+                  + (LoginItem.isBundled ? "" : "  ← 번들 밖(설치본 아님) — 등록 불가"))
+            if let info = await c.serverInfo() {
+                print("저장공간    : \(RelayClient.format(bytes: info.storageFree)) 여유 / \(RelayClient.format(bytes: info.storageTotal))")
+            }
+            await Diagnostics.probeSSE(base: r.info.baseURL)
+        } else {
+            print("탐색 결과   : 실패 — 설정에서 주소를 직접 입력하세요")
+        }
+        print("=== 끝 ===")
+        await MainActor.run { NSApp.terminate(nil) }
+    }
+
+    /// 메뉴바 항목이 **실제로 무엇을 그리는지** 확인한다.
+    ///
+    /// **왜 전용 모드인가** — `--diagnose` 는 `StatusItem` 을 만들지 않는다. 그래서
+    /// "진단 출력이 정상인데 메뉴바에 아무것도 안 보인다" 는 상태가 계속 터졌고
+    /// (앱 아이콘만 보이는 문제), 눈으로 봐야만 알았다. 그 공백을 메운다.
+    /// `AppModel` 과 `StatusItemController` 가 둘 다 MainActor 격리라 본문을 통째로 격리한다.
+    @MainActor
+    static func titleCheck() async {
+        let m = AppModel(storedAddress: UserDefaults.standard.string(forKey: AppModel.serverAddressKey))
+        if let s = await m.server { _ = s }
+        // 값이 0 이면 "속도가 안 뜬다" 와 "서버에 값이 없다" 를 구분할 수 없다.
+        // 그래서 **값이 있는 것처럼 채워서** 문자열이 어떻게 조립되는지 본다.
+        m.droidSpeed = SpeedReading(downBps: 460_390, upBps: 9_626)
+        let c = StatusItemController(model: m)
+        c.install()
+        for line in c.debugLines { print("메뉴바 줄   : |\(line)|") }
+        print("배지        : \(m.badgeCount)")
+        print("열 개수     : \(m.visibleSpeedSources.count)  (설정: droid=\(m.speedSetting.showDroid) device=\(m.speedSetting.showDevice) · 기기지원=\(m.deviceSpeedAvailable))")
+        print("           → 기기가 미지원인데 켜져 있어도 **빈 열을 만들지 않는다**")
+        print("아이콘 열   : 없음 (사용자 지정 — 열마다 아이콘 두지 않음)")
+        for f in c.debugFrames { print("즉시  \(f)") }
+        // **런 루프를 실제로 돌린 뒤에 다시 잰다.** 상태 항목이 처음 붙을 때와
+        // 윈도우 서버가 레이아웃을 마친 뒤에는 두께가 다를 수 있다.
+        // "22pt 라서 2줄이 안 된다" 같은 결론을 내리기 전에 이걸 확인해야 한다.
+        for wait in [0.5, 1.5, 3.0] {
+            try? await Task.sleep(for: .seconds(wait))
+            for f in c.debugFrames { print("\(String(format: "%4.1fs", wait)) \(f)") }
+        }
+        // **실제 서버 값으로 다시** 그린다 — 앞의 값은 고정한 샘플이었다.
+        // 0 이면 "아무것도 흐르지 않는다" 와 "연결이 안 됐다" 를 구분할 수 있으니
+        // 상태 문구를 함께 찍는다.
+        print("실측 속도   : \(m.droidSpeed.downBps)↓ / \(m.droidSpeed.upBps)↑  (\(m.phaseLabel))")
+        print("실제 그리는 줄: \(c.debugLines.joined(separator: " | "))")
+
+        NSApp.terminate(nil)
+    }
+
+    /// **설정 창이 어디에 뜨는지** — 좌표를 수치로 본다.
+    ///
+    /// ## 왜 전용 모드인가
+    ///
+    /// "창이 가운데에 나온다" 는 **서술**이다. 틀렸는지 맞았는지는 좌표로 판정한다.
+    /// `--diagnose` 는 `StatusItem` 을 만들지 않고, `--title-check` 는 메뉴바 줄을 본다.
+    /// **셋 다 이 창을 건드리지 않는다.** 그래서 전용이 필요하다.
+    ///
+    /// ## 무엇을 확인하나
+    ///
+    /// 1. **실제 화면 목록** — 테스트는 1440×900 을 썼지만 이 Mac 은 3024×1964 다.
+    /// 2. **실제 창을 띄운 뒤의 좌표** — **계산값이 아니라 진짜 좌표를 읽는다.**
+    /// 3. **저장값이 없을 때** — 사용자의 요청("가운데")이 실제로 성립하는가.
+    /// 4. **저장값이 화면 밖에 있을 때** — 가운데로 복귀하는가.
+    ///
+    /// ## 왜 "실제로 띄워서" 보는가 — 이 진단이 놓쳤던 것
+    ///
+    /// 첫 판에서 이건 **계산한 좌표만** 찍었다. 계산은 (670, 291) 이었고 테스트도 통과했는데
+    /// **실제 창은 화면 왼쪽 하단(0, 0)에 떴다.**
+    ///
+    /// → **계산이 맞다 ≠ 창이 그곳에 간다.** `setFrameOrigin` 이 호출되지 않았거나,
+    /// 호출된 뒤 다른 코드가 옮겼거나 둘 중 하나다. **창을 실제로 띄우고 `w.frame` 을
+    /// 읽는 것만이 이 둘을 구분한다.**
+    @MainActor
+    static func settingsCheck() async {
+        print("=== DroidRelay 설정 창 위치 진단 ===")
+        // **주 화면이 첫째여야 한다** — `visible[0]` 이 "돌아갈 곳"으로 쓰인다.
+        var frames = NSScreen.screens.map(\.visibleFrame)
+        if let main = NSScreen.main?.visibleFrame {
+            frames.removeAll { $0 == main }
+            frames.insert(main, at: 0)
+        }
+        print("화면 수      : \(NSScreen.screens.count)")
+        for (i, f) in frames.enumerated() {
+            print("  [\(i)] \(i == 0 ? "주 화면 " : "추가     ")\(fmt(f))")
+        }
+        let savedBefore = WindowPlacement.loadOrigin()
+        print("저장된 좌표  : \(savedBefore.map { "(\(Int($0.x)), \(Int($0.y)))" } ?? "없음 — 처음 실행")")
+
+        // 실제 창을 **진짜로 띄운다** — 계산값만으로는 알 수 없다.
+        let c = SettingsWindowController(model: AppModel())
+        guard let w = c.window else { print("창 생성 실패"); NSApp.terminate(nil); return }
+        let size = w.frame.size
+        print("창 크기      : \(Int(size.width))×\(Int(size.height))")
+        print("띄우기 전    : \(fmt(w.frame))  ← 이것이 (0,0) 이면 init 이 이미 잘못됐다")
+
+        // **계산값만으로는 부족하다 — 실제로 띄워서 좌표를 읽는다.**
+        c.applyPlacement()
+        try? await Task.sleep(for: .milliseconds(400))
+        print("applyPlacement 후 : \(fmt(w.frame))  → \(w.frame.origin == WindowPlacement.centered(in: frames[0], size: w.frame.size) ? "가운데 ✓" : "저장 위치 ✓ (사용자가 옮긴 곳)")")
+
+        c.present()
+        try? await Task.sleep(for: .milliseconds(400))
+        let real = w.frame
+        let centered = WindowPlacement.centered(in: frames[0], size: real.size)
+        print("present 후 실제  : \(fmt(real))")
+        print("  기대값         : \(fmt(CGRect(origin: centered, size: real.size)))")
+        print("  → \(real.origin == centered ? "일치 ✓" : "불일치 ✗ — 창이 다른 곳으로 옮겨졌다")")
+        print("제목바 띠   : \(fmt(WindowPlacement.titleBarRect(origin: real.origin, size: real.size)))")
+        print("보이는가     : \(WindowPlacement.canGrab(real.origin, size: real.size, in: frames) ? "yes — 사용자가 찾을 수 있다" : "NO — 창을 못 찾는다")")
+
+        // **저장값을 일부러 화면 밖에 두고** 가운데로 돌아오는지 본다 — 이게 핵심 규칙.
+        let lost = CGPoint(x: frames[0].maxX + 2000, y: frames[0].maxY)
+        let rescued = WindowPlacement.resolve(saved: lost, size: real.size, visible: frames)
+        print("화면 밖 복귀 : (\(Int(lost.x)), \(Int(lost.y))) → (\(Int(rescued.x)), \(Int(rescued.y)))  → \(rescued == centered ? "가운데로 복귀 ✓" : "복귀 실패 ✗")")
+        // **저장값은 건드리지 않는다** — 진단이 사용자의 배치를 바꾸면 안 된다.
+        print("저장된 좌표  : \(WindowPlacement.loadOrigin() == savedBefore ? "변화 없음 ✓" : "바뀜 ✗ — 진단이 배치를 망가뜨렸다")")
+        print("=== 끝 ===")
+        NSApp.terminate(nil)
+    }
+
+    private static func fmt(_ r: CGRect) -> String {
+        "(\(Int(r.minX)), \(Int(r.minY)) \(Int(r.width))×\(Int(r.height)))"
+    }
+
+    /// SSE 생존 확인 — 메뉴바 앱의 실시간 갱신이 실제로 통하는지 본다.
+    ///
+    /// **주의**: v0.40 부터 서버는 상태가 **바뀔 때만** tick 을 보내고 15초 beat 으로만
+    /// 갱신한다. 아무 변화가 없으면 tick 이 올 이유가 없다. 서버가 계속 살아 있다는
+    /// 증거 자체가 "_tick 이 온다" 이므로, HTTP 200 + Content-Type 만 확인한다.
+    /// (루프를 데드라인 없이 돌리면 beat 이 계속 들어와 영영 끝나지 않는다 — 실제로 그랬다)
+    static func probeSSE(base: URL, seconds: Int = 20) async {
+        var req = URLRequest(url: base.appendingPathComponent("api/events"))
+        req.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+        req.timeoutInterval = .infinity
+        do {
+            let (bytes, resp) = try await URLSession.shared.bytes(for: req)
+            let http = resp as? HTTPURLResponse
+            let ct = http?.value(forHTTPHeaderField: "Content-Type") ?? "?"
+            print("SSE 연결      : HTTP \(http?.statusCode ?? -1) · \(ct)")
+
+            let t0 = Date()
+            // 주의: `group.next()` 로 결과를 받지 않는다 — 먼저 끝난 쪽이 반환되므로
+            // 타임아웃(20초) 이 이기고, **읽기 태스크가 모은 tick 이 통째로 버려진다.**
+            // (실제로 이 버그로 beat 을 못 잡았다) 수집은 별도 actor 에 쌓는다.
+            let box = TickBox()
+            await withTaskGroup(of: Void.self) { group in
+                group.addTask {
+                    var parser = SSEParser()
+                    do {
+                        for try await b in bytes {
+                            let got = parser.consumeByte(b)
+                            if !got.isEmpty { await box.add(got) }
+                        }
+                    } catch { }
+                }
+                group.addTask {
+                    try? await Task.sleep(for: .seconds(seconds))
+                }
+                _ = await group.next()
+                group.cancelAll()
+            }
+            let ticks = await box.all
+            let dt = String(format: "%.1f", Date().timeIntervalSince(t0))
+            if ticks.isEmpty {
+                print("SSE tick      : \(seconds)초 동안 0건 — **정상**(상태 변화 없음)")
+                print("               진행률 변경이나 beat 은 다음 갱신 때 반영됩니다")
+            } else {
+                print("SSE tick      : \(ticks.count)건 / \(dt)초  ✓ 실시간 갱신 동작")
+                for (i, t) in ticks.prefix(3).enumerated() { print("               #\(i + 1) \(t.prefix(60))") }
+            }
+        } catch {
+            print("SSE 오류      : \(error.localizedDescription) — 10초 백업 폴링으로 동작")
+        }
+    }
+}

@@ -1,5 +1,35 @@
 # Changelog
 
+## [Unreleased] — mac 메인 메뉴 복구 (⌘V) + 결과 안내 배너 (M-31, M-32)
+
+> 사용자 제보: **"맥에서 다운로드 추가할 때 ⌘V(붙여넣기)가 안 된다."**
+> 원인은 뷰가 아니라 **메인 메뉴 부재**다 — macOS 의 편집 단축키는 뷰가 아니라
+> `NSApp.mainMenu` 의 `편집` 메뉴 key equivalent 가 처리한다. 메뉴가 없으면
+> **어떤 TextField 에서도** ⌘C/⌘V/⌘X/⌘A/⌘Z 가 죽는다(코드엔 오류가 없다).
+> v0.7.1 에서 같은 버그를 고친 이력이 있는데(`CHANGELOG 0.7.1`), 이후 macOS 앱을
+> 통째로 삭제(`ebfaa27`)하고 메뉴바 앱을 처음부터 다시 쓰면서 메뉴를 다시 만들지 않아 재발했다.
+
+### Fixed [mac]
+
+- **메인 메뉴 부재로 ⌘V 붙여넣기 불가** — 씬 없이 `NSApplication` 을 직접 부팅해
+  SwiftUI 기본 메뉴가 없는데, 커스텀 메인 메뉴도 없었다. `AppMenu`(Core 명세) +
+  `MainMenu.install()`(AppKit 변환) 신설, `Boot.start()` 에서 **런루프 전에** 설치.
+  `--menu-check` 진단 추가 — 메뉴 최상위·각 항목·붙여넣기 항목(responder chain 여부)을
+  수치로 확인한다. `AppMenuTests` 신규 9건 포함 전체 mac 테스트 **335건 0 실패**
+- **결과 안내 배너 — 성공에 경고 아이콘이 붙고 영구히 남던 문제** (M-32). 이전에는
+  `lastResult: String` 하나뿐이라 성공("다운로드 3건 추가")에도 주황 경고 삼각형이 붙고
+  **X 를 누르기 전까지 사라지지 않았다**(주석은 "성공은 안 띄운다"였는데 실제로는 띄웠다).
+  → 종류를 값으로 둔 `Notice`(Core) 신설: **성공/정보는 4초 뒤 자동 소멸, 실패는 남긴다**
+  (실패가 조용히 사라지면 사용자는 성공으로 믿는다). 아이콘·색도 종류에서 파생
+  (성공=체크 초록 · 정보=ⓘ 회색 · 실패=경고 주황). `NoticeTests` 신규 5건
+
+### Changed [mac]
+
+- `main.swift` 구조 분리 — 로그 헬퍼(`appendLog`·watch/popover/ui 경로)와 `Diagnostics`
+  (검증 모드 6종)를 `Diagnostics.swift` 로 이동. `main.swift` 709 → 246줄(부팅·`AppDelegate`만).
+  동작 변화 없음(빌드·테스트·`--menu-check` 재검증)
+
+
 ## [Unreleased] — v0.54 무인 서버 안정화 (T-1120~T-1123)
 
 > 배경: 받기 404 + 파일 사라짐 (자동분류 `문서/` 이동 vs 루트-only 폴백).

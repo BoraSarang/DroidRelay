@@ -171,7 +171,7 @@ final class AppModel {
         case .purge(let name):
             Task {
                 let r = await RelayClient(base: s.baseURL).storagePurge(name: name)
-                lastResult = r.ok ? "영구 삭제 완료" : "영구 삭제 실패 — \(r.message)"
+                notify(.result(ok: r.ok, r.ok ? "영구 삭제 완료" : "영구 삭제 실패 — \(r.message)"))
                 if r.ok { await reloadTrash(s) }
                 await refresh()
             }
@@ -187,14 +187,51 @@ final class AppModel {
             // 보관함 루트로 돌아온다. 컨펌에서 확인받고 여기서 실행한다.
             Task {
                 let r = await RelayClient(base: s.baseURL).storageRestore(name: name)
-                lastResult = r.ok ? "복원 완료" : "복원 실패 — \(r.message)"
+                notify(.result(ok: r.ok, r.ok ? "복원 완료" : "복원 실패 — \(r.message)"))
                 if r.ok { await reloadTrash(s) }
                 await refresh()
             }
         }
     }
 
-    var lastResult: String = ""
+    /// **팝오버 하단 결과 안내.**
+    ///
+    /// 성공/정보는 스스로 사라지고 **실패는 남는다** — 그 규칙은 `Notice`(Core)가
+    /// 갖고, 여기서는 타이머만 붙인다. 성공 안내가 무한정 남으면 "이 안내가 아직
+    /// 유효한가" 를 알 수 없고, 실패가 사라지면 사용자는 성공으로 믿는다.
+    private(set) var notice: Notice?
+    private var noticeDismissTask: Task<Void, Never>?
+
+    /// 안내를 띄운다. `kind` 를 주지 않으면 **성공**으로 본다.
+    ///
+    /// 성공/정보면 `Notice.autoDismissSeconds` 뒤에 스스로 지운다.
+    /// 실패는 지우지 않는다 — X 를 누르거나 다음 안내가 덮어쓸 때까지 남는다.
+    func notify(_ text: String, kind: Notice.Kind = .success) {
+        noticeDismissTask?.cancel()
+        noticeDismissTask = nil
+        let n = Notice(text: text, kind: kind)
+        notice = n
+        guard n.autoDismisses else { return }
+        noticeDismissTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(Notice.autoDismissSeconds))
+            guard !Task.isCancelled else { return }
+            self?.notice = nil
+        }
+    }
+
+    /// **`Notice` 를 직접 받는 변형** — 성공/실패를 `Bool` 로 이미 아는 자리에서.
+    ///
+    /// `Notice.result(ok:_:)` 와 짝이라 텍스트와 종류가 **한 값에서** 나온다.
+    /// 둘을 따로 넘겨 "실패 문구인데 성공 아이콘" 이 되는 길을 막는다.
+    func notify(_ n: Notice) { notify(n.text, kind: n.kind) }
+
+    /// 안내를 즉시 지운다(X 버튼·재연결).
+    func dismissNotice() {
+        noticeDismissTask?.cancel()
+        noticeDismissTask = nil
+        notice = nil
+    }
+
     var storageFree: Int = 0
 
     // MARK: - 추가 입력 (다운로드 · 토렌트)
@@ -677,7 +714,7 @@ final class AppModel {
         history(for: .device).clear()
         jobs = []; torrents = []; storage = []; trash = []
         storagePath = ""
-        lastResult = ""
+        dismissNotice()
         server = target
         stored = target.displayAddress
         persistStored()
@@ -850,7 +887,7 @@ final class AppModel {
         let urls = AddInput.urls(addUrlText)
         // **빈 입력으로는 아무 요청도 가지 않는다.** 웹 1789행 alert 과 같은 조건.
         guard !urls.isEmpty else {
-            lastResult = "추가 실패 — http:// 또는 https:// 로 시작하는 주소가 없습니다"
+            notify("추가 실패 — http:// 또는 https:// 로 시작하는 주소가 없습니다", kind: .error)
             return
         }
         let raw = addUrlText
@@ -865,10 +902,10 @@ final class AppModel {
             // (사용자가 전송 도중 지우고 싶어할 수 있다. 웹도 지운다 — 1798행)
             if addUrlText == raw { addUrlText = "" }
             if ok == urls.count {
-                lastResult = "다운로드 \(ok)건 추가"
+                notify("다운로드 \(ok)건 추가")
             } else {
                 // 실패 사유를 **버리지 않는다** — 몇 건 중 몇 건, 그리고 왜.
-                lastResult = "추가 \(ok)/\(urls.count)건 · 실패 사유: \(firstErr)"
+                notify("추가 \(ok)/\(urls.count)건 · 실패 사유: \(firstErr)", kind: .error)
             }
             await refresh()
         }
@@ -882,7 +919,7 @@ final class AppModel {
         guard let s = server else { return }
         let raw = addMagnetText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !raw.isEmpty else {
-            lastResult = "추가 실패 — magnet:? 로 시작하는 링크를 입력하세요"
+            notify("추가 실패 — magnet:? 로 시작하는 링크를 입력하세요", kind: .error)
             return
         }
         let original = addMagnetText
@@ -891,7 +928,7 @@ final class AppModel {
             // **성공한 경우에만** 칸을 비운다. 실패하면 입력값을 지워서
             // 사용자가 "방금 붙여넣은 링크" 를 잃어버리게 하지 않는다.
             if r.ok, addMagnetText == original { addMagnetText = "" }
-            lastResult = r.ok ? "토렌트 추가됨" : "추가 실패 — \(r.message)"
+            notify(.result(ok: r.ok, r.ok ? "토렌트 추가됨" : "추가 실패 — \(r.message)"))
             await refresh()
         }
     }
@@ -901,7 +938,7 @@ final class AppModel {
         guard let s = server else { return }
         Task {
             let ok = await RelayClient(base: s.baseURL).control(id, action)
-            if !ok { lastResult = "\(action) 실패 — 서버가 거절했습니다" }
+            if !ok { notify("\(action) 실패 — 서버가 거절했습니다", kind: .error) }
             await refresh()
         }
     }
@@ -917,7 +954,7 @@ final class AppModel {
         guard let s = server else { return }
         Task {
             let ok = await RelayClient(base: s.baseURL).jobDelete(j.id)
-            if !ok { lastResult = "삭제 실패 — 서버가 거절했습니다" }
+            if !ok { notify("삭제 실패 — 서버가 거절했습니다", kind: .error) }
             await refresh()
         }
     }
@@ -933,7 +970,7 @@ final class AppModel {
         guard let s = server else { return }
         Task {
             let r = await RelayClient(base: s.baseURL).setJobLimit(id: id, maxDownBps: maxDownBps)
-            if !r.ok { lastResult = "속도 제한 실패 — \(r.message)" }
+            if !r.ok { notify("속도 제한 실패 — \(r.message)", kind: .error) }
             await refresh()
         }
     }
@@ -947,7 +984,7 @@ final class AppModel {
         guard let s = server else { return }
         Task {
             let ok = await RelayClient(base: s.baseURL).torrentControl(id, action)
-            if !ok { lastResult = "토렌트 \(action) 실패 (서버가 거절했습니다)" }
+            if !ok { notify("토렌트 \(action) 실패 (서버가 거절했습니다)", kind: .error) }
             await refresh()
         }
     }
@@ -957,7 +994,7 @@ final class AppModel {
         guard let s = server else { return }
         Task {
             let ok = await RelayClient(base: s.baseURL).torrentDelete(id)
-            if !ok { lastResult = "토렌트 삭제 실패 — 서버가 거절했습니다" }
+            if !ok { notify("토렌트 삭제 실패 — 서버가 거절했습니다", kind: .error) }
             await refresh()
         }
     }
@@ -973,7 +1010,7 @@ final class AppModel {
         guard let s = server else { return }
         Task {
             let r = await RelayClient(base: s.baseURL).setTorrentLimit(id: id, maxDownBps: maxDownBps)
-            if !r.ok { lastResult = "속도 제한 실패 — \(r.message)" }
+            if !r.ok { notify("속도 제한 실패 — \(r.message)", kind: .error) }
             await refresh()
         }
     }
@@ -1011,7 +1048,7 @@ final class AppModel {
     func playStream(_ entry: StorageEntry) {
         guard !entry.isDirectory else { return }
         guard let s = server, let u = RelayClient.streamURL(base: s.baseURL, path: entry.path) else {
-            lastResult = "재생 실패 — 서버 주소를 모릅니다"
+            notify("재생 실패 — 서버 주소를 모릅니다", kind: .error)
             return
         }
 
@@ -1036,7 +1073,7 @@ final class AppModel {
             Task { @MainActor in
                 if proc != nil {
                     let n = app.deletingPathExtension().lastPathComponent
-                    self.lastResult = "재생 — \(entry.name) (\(n))"
+                    self.notify("재생 — \(entry.name) (\(n))", kind: .info)
                 } else {
                     // **지정한 앱이 안 열렸으면 브라우저로 다시 시도한다.**
                     // "IINA 로 안 열려서 아무 일도 안 됐다" 로 끝내지 않는다.
@@ -1053,9 +1090,9 @@ final class AppModel {
     /// **브라우저(Launch Services 기본 처리자)로 연다** — 재생 폴백이 함께 쓴다.
     private func openInBrowser(_ u: URL, entry: StorageEntry, reason: String) {
         if NSWorkspace.shared.open(u) {
-            lastResult = "\(reason) — \(entry.name)"
+            notify("\(reason) — \(entry.name)", kind: .info)
         } else {
-            lastResult = "열기 실패 — \(entry.name)"
+            notify("열기 실패 — \(entry.name)", kind: .error)
         }
     }
 
@@ -1067,13 +1104,13 @@ final class AppModel {
     func downloadStorage(_ entry: StorageEntry) {
         guard !entry.isDirectory else { return }
         guard let s = server, let u = RelayClient.downloadURL(base: s.baseURL, path: entry.path) else {
-            lastResult = "받기 실패 — 서버 주소를 모릅니다"
+            notify("받기 실패 — 서버 주소를 모릅니다", kind: .error)
             return
         }
         if NSWorkspace.shared.open(u) {
-            lastResult = "받는 중 — \(entry.name)"
+            notify("받는 중 — \(entry.name)", kind: .info)
         } else {
-            lastResult = "받기 실패 — \(entry.name) 을 브라우저로 열지 못했습니다"
+            notify("받기 실패 — \(entry.name) 을 브라우저로 열지 못했습니다", kind: .error)
         }
     }
 
@@ -1135,7 +1172,7 @@ final class AppModel {
             case .mkdir: r = await c.storageMkdir(path: e.path, name: name)
             case .move: r = await c.storageMove(from: e.path, to: dest)
             }
-            lastResult = r.ok ? "\(e.kind.rawValue) 완료" : "\(e.kind.rawValue) 실패 — \(r.message)"
+            notify(.result(ok: r.ok, r.ok ? "\(e.kind.rawValue) 완료" : "\(e.kind.rawValue) 실패 — \(r.message)"))
             await refresh()
         }
     }
@@ -1157,7 +1194,7 @@ final class AppModel {
         guard let s = server else { return }
         Task {
             let r = await RelayClient(base: s.baseURL).storageTrash(path: entry.path)
-            lastResult = r.ok ? "휴지통으로 이동 — \(entry.name)" : "휴지통 이동 실패 — \(r.message)"
+            notify(.result(ok: r.ok, r.ok ? "휴지통으로 이동 — \(entry.name)" : "휴지통 이동 실패 — \(r.message)"))
             // 휴지통이 하나 늘었을 수 있다. 안 읽으면 "휴지통 0개" 가 그대로 남는다.
             if r.ok { await reloadTrash(s) }
             await refresh()
@@ -1330,15 +1367,15 @@ final class AppModel {
     /// 조립은 `RelayClient.fileURL(base:id:)` 로 옮겼다 — **테스트로 고정돼 있다.**
     func openJobFile(_ j: RelayClient.Job) {
         guard let s = server, let u = RelayClient.fileURL(base: s.baseURL, id: j.id) else {
-            lastResult = "받기 실패 — 서버 주소를 모릅니다"
+            notify("받기 실패 — 서버 주소를 모릅니다", kind: .error)
             return
         }
         // **열지 못했다면 말해야 한다.** `open` 은 `Bool` 을 돌려주는데
         // 무시하면 "누르는 데 실패했다" 와 "아무 일도 없었다" 가 화면에서 같다.
         if NSWorkspace.shared.open(u) {
-            lastResult = "받는 중 — \(j.name)"
+            notify("받는 중 — \(j.name)", kind: .info)
         } else {
-            lastResult = "받기 실패 — \(j.name) 을 브라우저로 열지 못했습니다"
+            notify("받기 실패 — \(j.name) 을 브라우저로 열지 못했습니다", kind: .error)
         }
     }
 }
