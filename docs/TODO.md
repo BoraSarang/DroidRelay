@@ -614,7 +614,7 @@ T-001~T-008 전부 완료 (커밋 7574486).
 
 | T-번호 | 내용 | 상태 |
 |--------|------|------|
-| T-1088 | **`BootReceiver` 이중 `finish()` 크래시** — `goAsync()` 의 `PendingResult` 는 한 번만 `finish()` 가능하다. 37행 `finally` 과 41행 `job.invokeOnCompletion` **둘 다** 실행되어 `IllegalStateException: Broadcast already finished` → 프로세스 사망. 41행은 "백업"으로 붙었으나 `invokeOnCompletion` 은 `finally` 이후 발화하므로 **백업이 아니라 중복 호출**. 41행 삭제, `finally` 만 유지 | 🔄 |
+| T-1088 | **`BootReceiver` 이중 `finish()` 크래시** — `goAsync()` 의 `PendingResult` 는 한 번만 `finish()` 가능하다. 37행 `finally` 과 41행 `job.invokeOnCompletion` **둘 다** 실행되어 `IllegalStateException: Broadcast already finished` → 프로세스 사망. 41행은 "백업"으로 붙었으나 `invokeOnCompletion` 은 `finally` 이후 발화하므로 **백업이 아니라 중복 호출**. 41행 삭제, `finally` 만 유지. **⚠ 2026-10-16 발견 — 이 작업이 브랜치(`8a8d8a3`)에만 있고 main 에 없었다**(버전이 0.50.1 → 0.55.0 로 건너뛰며 v0.51 작업이 통째로 남겨짐). 복구: `SingleFinish`(Core 없음 — android `relay/`, `AtomicBoolean` 으로 1회만 통과) + `BootReceiver` 배선 + 단위테스트 6건. 테스트 395 → **401건 0 실패** | ✅ |
 | T-1089 | **맥 설정 창 "다시 찾기" 무반응** — 탐색 자체는 **40ms 에 정상 성공**한다. 문제는 두 가지 코드 부재다: ① `SettingsWindow.swift` 에 `connectionLine`/`lastResult`/`phase` 참조 **0건** — 상태 표시가 **팝오버에만** 있고(M-22), 설정 창은 별도 `NSWindow`(M-18)이라 공유하지 않는다 ② 주소 `@State` 가 `onAppear` 에서만 채워져 `connect()` 가 `model.stored` 를 바꿔도 **칸이 갱신되지 않는다**. → `model.connectionLine` **재사용**(복사 금지) + 성공 시 주소 자동 채움 + 탐색 중 버튼 비활성 | 🔄 |
 | T-1090 | **안드로이드 "나 여기있소" UDP 발견 신호 부재** — announce/broadcast/mDNS 코드 **없음**. 발견은 전적으로 수동 스캔(게이트웨이 40ms / `/24` 0.11초). 핫스팟은 게이트웨이 하나로 끝나지만 **같은 공유기에서는 스캔에 걸린다**. → 서버 기동 중 주기 UDP 브로드캐스트 발신 + 앱 내 수동 "알리기" 버튼 · Mac `ServerDiscovery` **전략 0**(리스너 1개, 중복 등록 금지). **주기 발신이 안 되어도 기존 3단계 탐색은 그대로 동작 — 회귀 위험 0** | 🔄 |
 
