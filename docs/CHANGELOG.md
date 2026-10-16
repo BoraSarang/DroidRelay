@@ -17,6 +17,32 @@
   → `SingleFinish`(`AtomicBoolean` `compareAndSet`)로 **종료를 1회만** 통과시킨다 —
   종료 지점을 늘려도(타임아웃·취소) 중복이 나지 않는다. 단위테스트 6건.
 
+### Fixed [mac]
+
+- **설정 창 "다시 찾기" 가 아무 반응이 없었다 (T-1089)** — 사용자 보고:
+  *"설정 → 다시 찾기 했을때 찾았을때의 반응이 없네. 설정에서 주소 채워줘야 하고
+  찾았습니다 또는 실패 했습니다 등이 있어야 하는데"*. **탐색은 40ms 에 정상 성공**했다 —
+  결함은 탐색이 아니라 **결과를 말하지 않은 것**이었다. 코드에 실제로 없던 것 두 가지:
+  - **상태 표시가 아예 없었다** — `SettingsWindow.swift` 에 `connectionLine`/`phase` 참조 **0건**.
+    상태 표시(`DiscoveryBadge`, M-22)는 **팝오버에만** 있고 설정 창은 별도 `NSWindow`(M-18)라
+    그 줄을 공유하지 않았다.
+  - **주소 자동 채움이 없었다** — `address` 가 `@State` 라 `onAppear` 에서만 채워져
+    `connect()` 가 모델 값을 바꿔도 칸이 갱신되지 않았다.
+  → `SettingsDiscovery`(Core, 신규) 로 **상태·문구·주소 칸 규칙을 순수 함수**로 두고,
+  `DiscoveryStatusLine`(신규 뷰)이 그 문구를 그린다. **문구 구성은 `DiscoveryBadge` 를
+  재사용**한다(복사본 두 벌은 한쪽만 고쳐진다 — M-27).
+  - ★ **실패해도 사용자가 친 주소를 지우지 않는다** — `addressField(current:found:)` 는
+    `found == nil` 이면 `current` 를 그대로 돌려준다. 흔한 구현("탐색 끝나면 덮어쓴다")은
+    실패 시 **이유를 잃게 만든다** → 테스트로 고정.
+  - 탐색 중에는 "연결"/"다시 찾기" 버튼 비활성(중복 실행 방지).
+  - 진단 `--discovery-check` 신설 · `SettingsDiscoveryTests` 22건.
+
+**⚠ 병합 주의(2026-10-16)**: 이 커밋(`e8a84c4`)은 그새 재구성된 `main.swift`·`SettingsWindow.swift`
+와 충돌했다. `main.swift` 충돌은 브랜치가 **옛 `Diagnostics` 전체를 인라인**한 상태라
+(그 뒤 `Diagnostics.swift` 로 분리됨) 브랜치 블록을 버리고 **새 `discoveryCheck()` 만**
+`Diagnostics.swift` 로 옮겼다. `SettingsWindow.swift` 는 main 이 그새 추가한 **`deviceList`** 와
+브랜치의 **`DiscoveryStatusLine`/`canConnect`** 가 **서로 다른 기능**이라 **둘 다 살렸다**.
+
 ## [Unreleased] — mac 메뉴바 우클릭 설정 복구 + ⌘, (M-33)
 
 ### Fixed [mac]
