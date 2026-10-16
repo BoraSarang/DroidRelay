@@ -850,6 +850,6 @@ T-001~T-008 전부 완료 (커밋 7574486).
 
 | T-번호 | 내용 | 상태 |
 |--------|------|------|
-| T-1124 | 웹 대시보드 분리 — `WebDashboardHtml.kt` → `WebDashboardHead`(head+CSS) · `WebDashboardBody`(마크업) · `WebDashboardScript`(JS) + 조립. **출력 바이트 동일** | 🔄 |
-| T-1125 | `TorrentEngine.kt` 순수 함수 추출 — `MagnetParser.kt`(magnet 파싱·dn 정제) · `TorrentRules.kt`(판정·경로·시그니처·예외). 기존 46 테스트로 회귀 고정 | 🔄 |
-| T-1126 | 버전 올리기 — `gradle.properties` `0.50.1/36` → `0.55.0/37` (v0.54 이후 커밋들이 버전을 안 올려 두 기기가 0.50.1 로 남아 있음) | 🔄 |
+| T-1124 | 웹 대시보드 분리 — `WebDashboardHtml.kt` → `WebDashboardHead`(head+CSS) · `WebDashboardBody`(마크업) · `WebDashboardScript`(JS) + 조립. **출력 바이트 동일**(sha256 `cf1e740c…9389c`) | ✅ |
+| T-1125 | `TorrentEngine.kt` 순수 함수 추출 — `MagnetParser.kt`(magnet 파싱·dn 정제) · `TorrentRules.kt`(판정·경로·시그니처·예외). 기존 46 테스트로 회귀 고정. TorrentEngine 1,931 → 1,728줄 | ✅ |
+| T-1126 | 버전 올리기 — `gradle.properties` `0.50.1/36` → `0.55.0/37` (v0.54 이후 커밋들이 버전을 안 올려 두 기기가 0.50.1 로 남아 있음). 실측 `aapt` = 0.55.0/37 | ✅ |
