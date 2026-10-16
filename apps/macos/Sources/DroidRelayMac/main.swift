@@ -45,6 +45,14 @@ enum Boot {
         // Dock 아이콘 숨김. 씬이 없으므로 여기서 반드시 해줘야 한다 —
         // `applicationDidFinishLaunching` 에서 하면 첫 프레임에 Dock 아이콘이 보인다.
         app.setActivationPolicy(.accessory)
+        // ★ 메인 메뉴를 **런루프 전에** 설치한다.
+        //
+        // AppKit 은 `⌘+키` 를 메인 메뉴의 key equivalent 로 먼저 푼다. 씬 없이
+        // `NSApplication` 을 직접 부팅하면 SwiftUI 가 기본 메뉴를 만들어 주지 않으므로
+        // **없으면 모든 TextField 에서 ⌘C/⌘V/⌘X/⌘A/⌘Z 가 죽는다.**
+        // (v0.7.1 에서 같은 버그를 고쳤다가 메뉴바 앱 재작성 때 메뉴를 잃었다 —
+        //  `AppMenu`/`MainMenu` 와 `AppMenuTests` 가 재발을 막는다)
+        MainMenu.install()
         let delegate = AppDelegate()
         app.delegate = delegate
         // **전역에서 살아 있어야 한다.** 지역 변수로 두면 delegate 가 해제돼서
@@ -62,6 +70,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ n: Notification) {
         // 메뉴바 앱은 화면이 없으므로 진단 출력을 직접 낸다.
         // (NSLog 는 LSUIElement 환경에서 unified log 에 잘 안 도달한다)
+
+        // **메인 메뉴가 실제로 설치됐는지** — ⌘V 회귀를 눈이 아니라 수치로 본다.
+        // `--diagnose` 는 메뉴를 안 보고, 다른 검증 모드도 전부 메뉴를 못 본다.
+        if CommandLine.arguments.contains("--menu-check") {
+            Task { await Diagnostics.menuCheck() }
+            return
+        }
         if CommandLine.arguments.contains("--diagnose") {
             Task { await Diagnostics.run() }
             return
@@ -360,6 +375,60 @@ enum Diagnostics {
               + "— 팝오버가 이보다 넓으면 두 창이 같은 앱으로 읽히지 않는다")
         print("=== 끝 ===")
         NSApp.terminate(nil)
+    }
+
+    /// **메인 메뉴가 실제로 설치됐는지** — ⌘V 회귀를 눈이 아니라 수치로 본다.
+    ///
+    /// ## 왜 전용 모드인가
+    ///
+    /// AppKit 은 `⌘+키` 를 **메인 메뉴**의 key equivalent 로 푼다. 메뉴가 없으면
+    /// 모든 TextField 에서 ⌘C/⌘V/⌘X/⌘A/⌘Z 가 죽는데, 이건 화면으로만 보이고
+    /// 다른 진단 모드(`--diagnose`/`--title-check`/`--popover-check`)는 메뉴를
+    /// **한 번도 들여다보지 않는다.** v0.7.1 에서 같은 버그를 한 번 고쳤다가
+    /// 메뉴바 앱 재작성 때 메뉴를 잃었으므로, 다시 잃지 않도록 여기서 확인한다.
+    @MainActor
+    static func menuCheck() async {
+        print("=== DroidRelay 메인 메뉴 진단 ===")
+        guard let root = NSApp.mainMenu else {
+            print("메인 메뉴    : ★ 없음 — 모든 TextField 에서 ⌘C/⌘V/⌘X/⌘A/⌘Z 불가")
+            print("=== 끝 ===")
+            NSApp.terminate(nil); return
+        }
+        print("메인 메뉴    : 있음 (최상위 \(root.items.count)개)")
+        for top in root.items {
+            print("  ▸ \(top.submenu?.title ?? top.title)")
+            for it in top.submenu?.items ?? [] {
+                if it.isSeparatorItem { print("      —"); continue }
+                print("      \(it.title)\(combo(it))  → \(describe(it))")
+            }
+        }
+        // **핵심 판정** — 붙여넣기 항목이 responder chain 으로 가는가.
+        let all = root.items.compactMap(\.submenu).flatMap(\.items)
+        let paste = all.first { $0.action == Selector(("paste:")) }
+        print("붙여넣기 항목: " + (paste == nil
+              ? "★ 없음 — ⌘V 불가"
+              : "있음  [\(keyLabel(paste!))] → \(describe(paste!))  target=\(paste!.target == nil ? "responder chain" : "고정")"))
+        print("=== 끝 ===")
+        NSApp.terminate(nil)
+    }
+
+    /// `⌘C` 같은 단축키 라벨. 키가 없으면 빈 문자열.
+    private static func keyLabel(_ it: NSMenuItem) -> String {
+        guard !it.keyEquivalent.isEmpty else { return "" }
+        var s = "⌘"
+        if it.keyEquivalentModifierMask.contains(.shift)  { s = "⇧" + s }
+        if it.keyEquivalentModifierMask.contains(.option) { s = "⌥" + s }
+        if it.keyEquivalentModifierMask.contains(.control) { s = "⌃" + s }
+        return s + it.keyEquivalent
+    }
+
+    private static func combo(_ it: NSMenuItem) -> String {
+        let k = keyLabel(it)
+        return k.isEmpty ? "" : "  [\(k)]"
+    }
+
+    private static func describe(_ it: NSMenuItem) -> String {
+        it.action.map(NSStringFromSelector) ?? "nil"
     }
 
     static func run() async {

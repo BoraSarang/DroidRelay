@@ -1,5 +1,23 @@
 # Changelog
 
+## [Unreleased] — mac 메인 메뉴 복구 (⌘V 붙여넣기) (M-31)
+
+> 사용자 제보: **"맥에서 다운로드 추가할 때 ⌘V(붙여넣기)가 안 된다."**
+> 원인은 뷰가 아니라 **메인 메뉴 부재**다 — macOS 의 편집 단축키는 뷰가 아니라
+> `NSApp.mainMenu` 의 `편집` 메뉴 key equivalent 가 처리한다. 메뉴가 없으면
+> **어떤 TextField 에서도** ⌘C/⌘V/⌘X/⌘A/⌘Z 가 죽는다(코드엔 오류가 없다).
+> v0.7.1 에서 같은 버그를 고친 이력이 있는데(`CHANGELOG 0.7.1`), 이후 macOS 앱을
+> 통째로 삭제(`ebfaa27`)하고 메뉴바 앱을 처음부터 다시 쓰면서 메뉴를 다시 만들지 않아 재발했다.
+
+### Fixed [mac]
+
+- **메인 메뉴 부재로 ⌘V 붙여넣기 불가** — 씬 없이 `NSApplication` 을 직접 부팅해
+  SwiftUI 기본 메뉴가 없는데, 커스텀 메인 메뉴도 없었다. `AppMenu`(Core 명세) +
+  `MainMenu.install()`(AppKit 변환) 신설, `Boot.start()` 에서 **런루프 전에** 설치.
+  `--menu-check` 진단 추가 — 메뉴 최상위·각 항목·붙여넣기 항목(responder chain 여부)을
+  수치로 확인한다. `AppMenuTests` 신규 9건 포함 전체 mac 테스트 **330건 0 실패**
+
+
 ## [Unreleased] — v0.54 무인 서버 안정화 (T-1120~T-1123)
 
 > 배경: 받기 404 + 파일 사라짐 (자동분류 `문서/` 이동 vs 루트-only 폴백).
