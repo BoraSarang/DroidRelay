@@ -17,6 +17,12 @@
   `--menu-check` 진단 추가 — 메뉴 최상위·각 항목·붙여넣기 항목(responder chain 여부)을
   수치로 확인한다. `AppMenuTests` 신규 9건 포함 전체 mac 테스트 **330건 0 실패**
 
+### Changed [mac]
+
+- `main.swift` 구조 분리 — 로그 헬퍼(`appendLog`·watch/popover/ui 경로)와 `Diagnostics`
+  (검증 모드 6종)를 `Diagnostics.swift` 로 이동. `main.swift` 709 → 246줄(부팅·`AppDelegate`만).
+  동작 변화 없음(빌드·테스트·`--menu-check` 재검증)
+
 
 ## [Unreleased] — v0.54 무인 서버 안정화 (T-1120~T-1123)
 
