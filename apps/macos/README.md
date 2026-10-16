@@ -12,7 +12,7 @@ BIN=$(swift build --show-bin-path)/DroidRelayMac
 
 "$BIN"                 # 메뉴바 앱 실행 (Dock 아이콘 없음)
 "$BIN" --diagnose      # 진단 — 서버 찾기·연결·SSE 생존을 확인하고 종료
-swift test             # 순수 로직 39건
+swift test             # 순수 로직 335건
 ```
 
 ### 빌드 스크립트 (권장)
@@ -35,11 +35,35 @@ M1 개발 중 **실제 버그 5건 중 3건이 이 경로에서만 드러났다.
 
 | 타깃 | 내용 | 테스트 |
 |---|---|---|
-| `DroidRelayCore` | `ServerDiscovery` · `RelayClient` · `EventStream` · `Subnet`/`IPv4` | O (순수 로직) |
-| `DroidRelayMac` | `AppModel` · `PopoverView` · `StatusItemController` | — (AppKit 위에서만 의미가 있음) |
+| `DroidRelayCore` | `ServerDiscovery` · `RelayClient` · `EventStream` · `Subnet`/`IPv4` · `AppMenu` · `Notice` | O (순수 로직) |
+| `DroidRelayMac` | `AppModel` · `PopoverView` · `StatusItemController` · `MainMenu` · `Diagnostics` | — (AppKit 위에서만 의미가 있음) |
 
 Core/UI 를 뺀 이유는 **탐색 계산과 SSE 파서를 OS 없이 검증**하기 위해서다.
 아래 버그 5건 중 4건이 그 결과로 잡혔다.
+
+같은 이유로 **메뉴 명세(`AppMenu`)** 와 **안내 규칙(`Notice`)** 도 Core 에 있다 —
+AppKit 런타임 없이 "⌘V 가 사는가"·"실패가 남는가" 를 테스트로 고정한다.
+
+## 메인 메뉴 (⌘V 붙여넣기)
+
+macOS 의 편집 단축키(⌘C/⌘V/⌘X/⌘A/⌘Z)는 **뷰가 아니라 `NSApp.mainMenu`** 의 `편집`
+메뉴 key equivalent 가 first responder(`paste:`) 로 보낸다. 이 앱은 씬 없이
+`NSApplication` 을 직접 부팅하므로 SwiftUI 기본 메뉴가 없다 — **메뉴를 직접
+설치하지 않으면 어떤 TextField 에서도 붙여넣기가 죽는다**(코드엔 오류가 없다).
+
+- `AppMenu`(Core): 메뉴 **명세**(앱 메뉴 ⌘Q + 편집 메뉴). 테스트로 고정된다.
+- `MainMenu`(Mac): 명세를 `NSMenu` 로 옮겨 `NSApp.mainMenu` 에 설치(`Boot.start()`).
+- `--menu-check`: 메뉴·붙여넣기 항목(responder chain 여부)을 수치로 확인한다.
+
+이 버그는 **두 번 났다** — v0.7.1 에서 고쳤다가 macOS 앱을 삭제(`ebfaa27`)하고
+메뉴바 앱을 재작성할 때 재발했다. 그래서 `AppMenuTests` 로 회귀를 **빌드 시점에** 잡는다.
+
+## 결과 안내 배너
+
+쓰기 동작의 결과는 팝오버 하단 배너로 뜬다. **성공·정보는 4초 뒤 스스로 사라지고,
+실패는 남는다** — 실패가 조용히 사라지면 사용자는 성공으로 믿게 된다(무음 실패 금지).
+아이콘·색은 종류에서 파생된다: 성공=체크 초록 · 정보=ⓘ 회색 · 실패=경고 주황.
+규칙은 `Notice`(Core)에 있고 `NoticeTests` 로 고정된다.
 
 ## 서버 탐색 (계층 전략)
 
