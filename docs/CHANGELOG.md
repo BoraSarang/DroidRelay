@@ -7,6 +7,12 @@
 > v0.51 릴리스 항목이 없다. 2026-10-16 조사에서 발견 → 유효한 2건을 복구한다.
 > (T-1090 UDP announce 는 기능이고 스캔으로 대체 동작하므로 **연기 유지**)
 
+### 버전
+
+- `0.55.0/37 → 0.56.0/38` — `scripts/bump-version.sh` 로만 변경(버전 단일 진실
+  `apps/android/gradle.properties`). 맥 번들 버전도 같은 값을 쓴다(`build_and_run.sh` `APP_VERSION`).
+  복구한 두 수정이 **실기에 올라가야** 검증되므로 함께 올린다.
+
 ### Fixed [android]
 
 - **`BootReceiver` 이중 `finish()` 크래시 (T-1088)** — `goAsync()` 의 `PendingResult` 는
