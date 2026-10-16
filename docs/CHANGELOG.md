@@ -1,5 +1,45 @@
 # Changelog
 
+## [Unreleased] — mac 메뉴바 우클릭 설정 복구 + ⌘, (M-33)
+
+### Fixed [mac]
+
+- **우클릭 → `설정…` 이 동작하지 않았다** — `StatusItemController.openSettings()` 가 **스텁**이었다:
+  `NSApp.activate(ignoringOtherApps: true)` 만 하고 **창을 열지 않았다**(`showSettingsWindow()` 미호출).
+  최초 macOS 커밋 `e05d0d4`(M1) 부터 **한 번도 동작한 적이 없다.**
+  - 팝오버 안 `설정…` 행은 다른 경로(`onSettings` → `showSettingsWindow`)라 정상이었다 →
+    사용자에게는 "설정은 되는데 우클릭만 안 된다" 로 보였다.
+  - `--settings-check` 는 `SettingsWindowController` 를 **직접** 만들어 띄우므로
+    **메뉴 배선을 못 본다** — 그래서 그 진단은 계속 통과했다.
+- **`⌘,` 가 어디에서도 안 먹었다** — 앱 메뉴가 정보·종료뿐이었고, 우클릭 메뉴의 `⌘,` 는
+  **팝업 메뉴라 전역 단축키가 아니다.** → 앱 메뉴에 `설정… ⌘,` 를 관례 위치(정보 / 설정 / 종료)에 추가.
+
+### Changed [mac]
+
+- **메뉴 명세를 Core 데이터로** — `AppMenu.Action`(앱 전용 selector) + `AppMenu.Receiver`
+  (responder chain vs 명시적 target). `설정…` 은 responder chain 에 구현이 없어
+  **target 이 nil 이면 AppKit 이 항목을 비활성(회색)** 으로 만든다 →
+  `MainMenu.makeMenu(spec:target:)` 이 명세 → `NSMenu` 규칙을 **한 벌로** 유지(우클릭 메뉴도 이 함수를 쓴다).
+- 우클릭 메뉴를 `AppMenu.statusMenu` 명세로 단일화(즉석 `NSMenu()` 구성 제거) ·
+  `StatusItemController: NSObject`(ObjC target 신뢰성)
+- **죽은 코드 제거** — `clicked(_:)`: `statusItem.view` 전환 뒤 `statusItem.button == nil` 이라
+  절대 호출되지 않았고 `#selector(clicked)` 도 없었다(같은 button→view 마이그레이션의 잔재).
+- **무음 실패 제거** — `AppModel.openDashboard()` 가 서버가 없으면 조용히 `return` 했다 →
+  `Bool` 반환 + 안내(Notice, error) + 팝오버 표시.
+
+### Added [mac]
+
+- 진단 `--settings-menu-check` — 메뉴를 **실제로 눌러** 설정 창이 뜨는지 본다(스텁 회귀를 수치로 잡는다).
+- `--menu-check` 에 `설정 항목 … target=고정` 판정 추가.
+- `AppMenuTests` 8건 — 앱 메뉴 `⌘,`·명시적 target·관례 순서 / 우클릭 메뉴 항목·전역 비활성 방지 /
+  두 진입점 selector 일치.
+
+### 검증 [mac]
+
+- `swift test` **343건 0 실패** (335 → 343) · `swift build` 성공
+- 설치본(`~/Applications/DroidRelay.app`) `--settings-menu-check` →
+  `메인 메뉴 설정… [⌘,] target=있음 ✓ / target 응답 예 ✓ / 설정 창 표시 중 ✓ 460×548 → 통과`
+
 ## [Unreleased] — v0.55 리팩터: 웹 대시보드 분리 + 순수 로직 추출 (T-1124~T-1126)
 
 > 요청: **"안드로이드 앱·웹도 리팩터링."** 범위는 **동작 불변**으로 한정 — 상세: `docs/plans/PLAN_v0.55_refactor_android-web.md`.

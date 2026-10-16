@@ -165,6 +165,72 @@ enum Diagnostics {
         print("붙여넣기 항목: " + (paste == nil
               ? "★ 없음 — ⌘V 불가"
               : "있음  [\(keyLabel(paste!))] → \(describe(paste!))  target=\(paste!.target == nil ? "responder chain" : "고정")"))
+        // **앱 전용 동작은 target 이 필요하다** — nil 이면 responder chain 에
+        // 구현이 없어 AppKit 이 항목을 비활성(회색)으로 만든다. (M-33)
+        let settings = all.first { $0.action == Selector(AppMenu.Action.showSettings.rawValue) }
+        if let s = settings {
+            print("설정 항목    : 있음  [\(keyLabel(s))] → \(describe(s))"
+                  + "  target=\(s.target == nil ? "★ nil — 비활성(눌리지 않는다)" : "고정")")
+        } else {
+            print("설정 항목    : ★ 없음 — ⌘, 불가")
+        }
+        print("=== 끝 ===")
+        NSApp.terminate(nil)
+    }
+
+    /// **설정 메뉴가 실제로 창을 여는가** — 항목을 눌러 보고 판정한다.
+    ///
+    /// ## 왜 필요한가 (M-33)
+    ///
+    /// `--settings-check` 는 `SettingsWindowController` 를 **직접** 만들어
+    /// `present()` 한다 → 창 자체는 정상으로 보고된다. 그래서 **메뉴 항목이
+    /// 스텁**(앱만 활성화하고 창을 열지 않던 `openSettings`)이어도 아무 진단도
+    /// 실패하지 않았다. 사용자가 오랫동안 "우클릭 → 설정이 안 된다" 를 겪은 이유다.
+    ///
+    /// → 메뉴를 실제로 만들고, **target 이 selector 에 응답하는지** 확인한 뒤,
+    ///   **실제로 실행**해서 **창이 떴는지**까지 본다.
+    @MainActor
+    static func settingsMenuCheck() async {
+        print("=== DroidRelay 설정 메뉴 배선 진단 ===")
+        let sel = Selector(AppMenu.Action.showSettings.rawValue)
+        var failures: [String] = []
+
+        // ── 1. 메인 메뉴 — ⌘, 가 전역으로 사는 유일한 곳 ──
+        let mainItems = (NSApp.mainMenu?.items.compactMap(\.submenu).flatMap(\.items)) ?? []
+        if let it = mainItems.first(where: { $0.action == sel }) {
+            let wired = it.target != nil
+            print("메인 메뉴    : \(it.title)  [\(keyLabel(it))]  target=\(wired ? "있음 ✓" : "★ nil — 비활성")")
+            if !wired { failures.append("메인 메뉴 설정 항목에 target 이 없다") }
+        } else {
+            print("메인 메뉴    : ★ 설정 항목 없음 — ⌘, 불가")
+            failures.append("메인 메뉴에 설정 항목이 없다")
+        }
+
+        // ── 2. 우클릭 메뉴 ──
+        let m = AppModel(storedAddress: UserDefaults.standard.string(forKey: AppModel.serverAddressKey))
+        let c = StatusItemController(model: m)
+        c.install()
+        let statusMenu = c.makeStatusMenu()
+        guard let item = statusMenu.items.first(where: { $0.action == sel }) else {
+            print("우클릭 메뉴  : ★ 설정 항목 없음")
+            print("=== 끝 ===")
+            NSApp.terminate(nil); return
+        }
+        print("우클릭 메뉴  : \(item.title)  [\(keyLabel(item))]  → \(describe(item))")
+
+        // ── 3. 실제로 눌러 본다 — 스텁이면 아무 일도 일어나지 않는다 ──
+        let responds = (item.target as? NSObject)?.responds(to: sel) ?? false
+        print("target 응답  : \(responds ? "예 ✓" : "★ 아니오 — 누를 수 없다")")
+        if !responds { failures.append("우클릭 설정 항목의 target 이 selector 에 응답하지 않는다") }
+
+        NSApp.sendAction(sel, to: item.target, from: item)
+        try? await Task.sleep(for: .milliseconds(700))
+        print(c.debugSettingsWindowText)
+        if !c.debugSettingsWindowVisible { failures.append("항목을 실행했는데 설정 창이 뜨지 않았다") }
+
+        print(failures.isEmpty
+              ? "→ 통과 — 설정 항목이 실제로 창을 연다"
+              : "→ ★ 실패 — " + failures.joined(separator: " / "))
         print("=== 끝 ===")
         NSApp.terminate(nil)
     }

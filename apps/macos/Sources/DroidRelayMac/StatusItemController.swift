@@ -11,8 +11,14 @@ import SwiftUI
 /// 그 경우 `isVisible = false` 가 될 뿐 프로세스가 살아 있다.
 ///
 /// 또 `NSStatusItem` 은 **강한 참조**를 유지해야 한다. 해제되면 아이콘이 조용히 사라진다.
+///
+/// ## 왜 `NSObject` 인가 (M-33)
+///
+/// 메뉴 항목의 action 은 **ObjC selector** 다. target 이 ObjC 객체가 아니면
+/// AppKit 이 `respondsToSelector:` 를 물어볼 수 없어 항목이 **비활성**이 된다.
+/// 순수 Swift 클래스를 target 으로 걸면 "메뉴는 보이는데 눌리지도 않는다" 가 된다.
 @MainActor
-final class StatusItemController {
+final class StatusItemController: NSObject {
     private var statusItem: NSStatusItem?
     private var popover: NSPopover?
     /// **설정 창 컨트롤러 — 강한 참조로 들고 있다.**
@@ -29,7 +35,10 @@ final class StatusItemController {
     /// 메뉴바에서 이 앱을 끌 수 있을지 (아이콘 위치 예약) — 아님면 다른 앱의 것도 건드린다.
     private static let positionKey = "NSStatusItem Preferred Position com.borasarang.DroidRelayMac"
 
-    init(model: AppModel) { self.model = model }
+    init(model: AppModel) {
+        self.model = model
+        super.init()
+    }
 
     /// 현재 메뉴바에 그려진 줄 (검증용)
     private var drawnLines: [MenuBarTitle.MenuBarLine] = []
@@ -173,11 +182,12 @@ final class StatusItemController {
                    .joined(separator: "\n")
     }
 
-    @objc private func clicked(_ sender: NSStatusBarButton) {
-        let isRight = NSApp.currentEvent?.type == .rightMouseUp
-        if isRight { showMenu() } else { togglePopover() }
-    }
-
+    /// ## 없어진 것 — `clicked(_:)` (M-33)
+    ///
+    /// `NSStatusBarButton` 의 action 으로 쓰던 함수다. `statusItem.view` 로 바꾼
+    /// 뒤에는 **버튼이 없어**(`statusItem.button == nil`) 절대 호출되지 않고,
+    /// `#selector(clicked)` 도 어디에도 없었다 — button→view 마이그레이션의 잔재다.
+    /// 좌클릭/우클릭은 `MenuBarSpeedView.mouseDown`/`rightMouseDown` 이 받는다.
     private func ensurePopover() -> NSPopover {
         if let p = popover { return p }
         let p = NSPopover()
@@ -524,25 +534,64 @@ final class StatusItemController {
         togglePopover()
     }
 
-    /// 우클릭 — 시스템 표준 메뉴
+    /// 우클릭 메뉴를 **명세(`AppMenu.statusMenu`)에서** 만든다.
+    ///
+    /// 세 항목 모두 **앱이 구현**하므로 명시적 target(`self`)을 건다.
+    /// `--settings-menu-check` 가 이 메뉴를 실제로 만들어 **눌러 보고**
+    /// 설정 창이 뜨는지 확인한다(스텁 회귀를 눈이 아니라 수치로 본다).
+    func makeStatusMenu() -> NSMenu {
+        MainMenu.makeMenu(AppMenu.statusMenu, target: self)
+    }
+
+    /// 우클릭 — 시스템 표준 메뉴.
     private func showMenu() {
-        let m = NSMenu()
-        m.addItem(withTitle: "대시보드 열기", action: #selector(openDash), keyEquivalent: "").target = self
-        m.addItem(withTitle: "설정…", action: #selector(openSettings), keyEquivalent: ",").target = self
-        m.addItem(.separator())
-        m.addItem(withTitle: "DroidRelay 종료", action: #selector(quit), keyEquivalent: "q").target = self
         // **버튼이 아니라 view 로 메뉴를 연다.** `statusItem.view` 로 전환한 뒤
         // `statusItem.button` 은 nil 이라 `performClick` 이 조용히 안 된다.
         guard let v = speedView else { return }
-        m.popUp(positioning: nil, at: NSPoint(x: 0, y: v.bounds.maxY + 4), in: v)
+        makeStatusMenu().popUp(positioning: nil, at: NSPoint(x: 0, y: v.bounds.maxY + 4), in: v)
     }
 
-    @objc private func openDash() { model.openDashboard() }
-    @objc private func openSettings() { NSApp.activate(ignoringOtherApps: true) }
-    @objc private func quit() {
+    // MARK: - 메뉴 동작 (`AppMenu.Action` 이 selector 를 정한다)
+
+    /// **설정 창을 연다** — `AppMenu.Action.showSettings`.
+    ///
+    /// ## 여기가 스텁이었다 (M-33 · 회귀 기록)
+    ///
+    /// 예전 구현은 `NSApp.activate(ignoringOtherApps: true)` 만 하고
+    /// **창을 열지 않았다.** 그래서 우클릭 → `설정…` 이 최초 macOS 커밋
+    /// (`e05d0d4`, M1) 부터 **한 번도 동작한 적이 없었다.**
+    /// 팝오버 안의 `설정…` 행은 다른 경로(`onSettings` → `showSettingsWindow`)라
+    /// 정상이어서, 사용자에게는 "설정은 되는데 우클릭만 안 된다" 로 보였다.
+    @objc private func drShowSettings(_ sender: Any?) { showSettingsWindow() }
+
+    /// 대시보드 열기 — **실패를 삼키지 않는다** (M-33).
+    ///
+    /// 예전에는 `guard … else { return }` 으로 서버가 없으면 **아무 일도 일어나지
+    /// 않았다**(무음 실패 금지 위반). 이제 안내를 남기고 팝오버를 열어 보여 준다 —
+    /// 메뉴를 눌렀는데 조용하면 사용자는 앱이 고장 났다고 읽는다.
+    @objc private func drOpenDashboard(_ sender: Any?) {
+        // 안내는 `openDashboard()` 가 남긴다 — 진입점이 둘(팝오버 행 · 우클릭)이라
+        // 한 곳에 둔다. 여기서는 **안내가 보이도록** 팝오버를 연다:
+        // 우클릭 메뉴에서 누르면 팝오버가 닫혀 있어 안내가 화면에 없다.
+        if !model.openDashboard() { forceShowPopover() }
+    }
+
+    /// 종료. `terminate:` 를 쓰지 않는 이유 — 관찰 루프(`observe`)를 **먼저** 정리한다.
+    @objc private func drQuit(_ sender: Any?) {
         observe?.cancel()
         observe = nil
         NSApp.terminate(nil)
+    }
+
+    /// **설정 창이 실제로 떠 있는가** — `--settings-menu-check` 가 읽는다.
+    var debugSettingsWindowVisible: Bool { settingsWindow?.window?.isVisible == true }
+
+    var debugSettingsWindowText: String {
+        guard let w = settingsWindow?.window else {
+            return "설정 창      : ★ 없음 — 항목이 창을 열지 않았다 (스텁 회귀)"
+        }
+        return "설정 창      : \(w.isVisible ? "표시 중 ✓" : "★ 숨김 — 만들어졌지만 화면에 없다")"
+            + "  \(Int(w.frame.width))×\(Int(w.frame.height))"
     }
 }
 

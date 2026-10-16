@@ -60,6 +60,39 @@ public enum AppMenu {
         public var shift: Bool { self == .redo }
     }
 
+    /// **앱이 직접 구현하는 동작.** `rawValue` 가 그대로 ObjC selector 다.
+    ///
+    /// ## 왜 `NSApplication` 이 아니라 여기 있는가 (회귀 기록, M-33)
+    ///
+    /// `설정…` 은 **responder chain 에 구현이 없다** — `paste:` 는 필드 편집기가,
+    /// `terminate:` 는 `NSApplication` 이 갖고 있지만 설정을 여는 기본 동작은 없다.
+    /// 그래서 항목마다 **명시적 target** 이 필요하고, 그 대상(앱 델리게이트 /
+    /// 메뉴바 컨트롤러)이 아래 selector 를 구현한다.
+    ///
+    /// 이전에는 우클릭 메뉴가 `openSettings` 라는 **스텁**(앱을 활성화만 하고
+    /// 창을 열지 않았다)에 걸려 있어 `설정…` 이 **한 번도 동작한 적이 없었다**.
+    /// selector 를 데이터로 두어 테스트가 배선을 고정한다.
+    public enum Action: String, CaseIterable, Equatable, Sendable {
+        /// 설정 창을 연다. **앱 델리게이트와 메뉴바 컨트롤러가 각각 구현한다.**
+        case showSettings = "drShowSettings:"
+        /// 기본 브라우저로 서버 대시보드를 연다.
+        case openDashboard = "drOpenDashboard:"
+        /// 앱을 종료한다(관찰 루프 정리 포함 — `terminate:` 를 그냥 쓰지 않는 이유).
+        case quit = "drQuit:"
+    }
+
+    /// 이 항목의 action 을 **누가 받는가.**
+    ///
+    /// `target = nil` 이면 AppKit 은 responder chain 을 뒤지고, **끝내 못 찾으면
+    /// 그 항목을 비활성(회색)** 으로 만든다. 앱 전용 동작을 `nil` 로 두면
+    /// "메뉴가 있는데 눌리지도 않는다" 가 된다.
+    public enum Receiver: Equatable, Sendable {
+        /// responder chain(`paste:` · `terminate:` · `orderFrontStandardAboutPanel:`).
+        case responderChain
+        /// **앱이 직접 구현** — glue(AppKit 계층)가 명시적 target 을 건다.
+        case appController
+    }
+
     /// 메뉴 항목 하나. `selector.isEmpty` 면 구분선이다.
     public struct Item: Equatable, Sendable {
         public let title: String
@@ -69,13 +102,17 @@ public enum AppMenu {
         public let key: String
         public let shift: Bool
         public let option: Bool
+        /// 누가 이 action 을 받는가.
+        public let receiver: Receiver
 
-        public init(title: String, selector: String, key: String = "", shift: Bool = false, option: Bool = false) {
+        public init(title: String, selector: String, key: String = "", shift: Bool = false, option: Bool = false,
+                    receiver: Receiver = .responderChain) {
             self.title = title
             self.selector = selector
             self.key = key
             self.shift = shift
             self.option = option
+            self.receiver = receiver
         }
 
         public var isSeparator: Bool { selector.isEmpty }
@@ -109,14 +146,34 @@ public enum AppMenu {
         .command(.selectAll),
     ])
 
-    /// 앱 메뉴 — 제목은 앱 이름. ⌘Q 가 여기서 산다.
+    /// 앱 메뉴 — 제목은 앱 이름. ⌘Q 와 **⌘, (설정)** 이 여기서 산다.
+    ///
+    /// macOS 관례 위치다: 정보 → 구분선 → **설정… ⌘,** → 구분선 → 종료.
+    /// (M-33 이전에는 정보·종료뿐이라 **⌘, 가 어디에서도 안 먹었다** —
+    ///  우클릭 메뉴의 `⌘,` 는 팝업 메뉴라 전역 단축키가 아니었다.)
     public static func appMenu(appName: String) -> Menu {
         Menu(title: appName, items: [
             Item(title: "\(appName) 정보", selector: "orderFrontStandardAboutPanel:"),
             .separator,
+            Item(title: "설정…", selector: Action.showSettings.rawValue, key: ",", receiver: .appController),
+            .separator,
             Item(title: "\(appName) 종료", selector: "terminate:", key: "q"),
         ])
     }
+
+    /// **메뉴바 아이콘 우클릭 메뉴.**
+    ///
+    /// 팝오버(좌클릭)와 별개로 뜨는 짧은 메뉴다. 세 항목 모두 앱이 구현하므로
+    /// glue 가 **명시적 target**(메뉴바 컨트롤러)을 건다.
+    ///
+    /// `종료` 는 `terminate:` 를 쓰지 않고 `drQuit:` 를 쓴다 —
+    /// 컨트롤러의 관찰 루프(`observe`)를 **먼저 정리**해야 하기 때문이다.
+    public static let statusMenu = Menu(title: "DroidRelay", items: [
+        Item(title: "대시보드 열기", selector: Action.openDashboard.rawValue, receiver: .appController),
+        Item(title: "설정…", selector: Action.showSettings.rawValue, key: ",", receiver: .appController),
+        .separator,
+        Item(title: "DroidRelay 종료", selector: Action.quit.rawValue, key: "q", receiver: .appController),
+    ])
 
     /// `NSApp.mainMenu` 에 그대로 넣을 순서.
     public static func menus(appName: String) -> [Menu] {

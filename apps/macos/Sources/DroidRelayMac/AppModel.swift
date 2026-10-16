@@ -1337,9 +1337,22 @@ final class AppModel {
 
     // MARK: - 표시용
 
-        func openDashboard() {
-        guard let s = server else { return }
+    /// 대시보드를 기본 브라우저로 연다. **열었는지 돌려준다.**
+    ///
+    /// ## 왜 안내까지 여기서 하는가 (M-33)
+    ///
+    /// 예전에는 서버가 없으면 `guard … else { return }` 으로 **조용히 끝나서**
+    /// "눌렀는데 아무 일도 안 남" 이었다(무음 실패 금지 위반). 진입점이 **둘**
+    /// (팝오버 행 · 메뉴바 우클릭)이므로 안내를 **한 곳**에 둔다 —
+    /// 한쪽만 고치면 나머지 한쪽이 조용히 실패한다.
+    @discardableResult
+    func openDashboard() -> Bool {
+        guard let s = server else {
+            notify("서버에 연결되지 않아 대시보드를 열 수 없습니다 — 설정에서 주소를 확인하세요", kind: .error)
+            return false
+        }
         NSWorkspace.shared.open(s.baseURL)
+        return true
     }
 
     /// **완료 잡의 파일을 브라우저로 받는다** — 웹 1174행의 `📥 받기`.

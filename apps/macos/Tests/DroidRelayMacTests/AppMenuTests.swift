@@ -90,4 +90,74 @@ final class AppMenuTests: XCTestCase {
         XCTAssertTrue(sep.selector.isEmpty)
         XCTAssertFalse(AppMenu.Item.command(.paste).isSeparator)
     }
+
+    // MARK: - 앱 메뉴의 설정 (⌘,) — M-33
+
+    /// ★ **⌘, 가 사는 곳.** 우클릭 메뉴의 `⌘,` 는 팝업 메뉴라 **전역 단축키가 아니다.**
+    func testAppMenuHasSettingsWithCommandComma() {
+        let s = AppMenu.appMenu(appName: "DroidRelay").items
+            .first { $0.selector == AppMenu.Action.showSettings.rawValue }
+        XCTAssertNotNil(s, "앱 메뉴에 설정 항목이 없다 — ⌘, 가 어디에서도 안 먹는다")
+        XCTAssertEqual(s?.key, ",")
+        XCTAssertEqual(s?.shift, false, "⌘, 는 ⇧ 를 쓰지 않는다")
+    }
+
+    /// ★ **핵심 회귀** — `설정…` 은 responder chain 에 구현이 없다.
+    /// target 이 `nil` 이면 AppKit 이 그 항목을 **비활성(회색)** 으로 만든다 →
+    /// "메뉴는 보이는데 눌리지도 않는다".
+    func testAppMenuSettingsUsesExplicitTarget() {
+        let s = AppMenu.appMenu(appName: "DroidRelay").items
+            .first { $0.selector == AppMenu.Action.showSettings.rawValue }
+        XCTAssertEqual(s?.receiver, .appController,
+                       "설정 항목에는 명시적 target 이 필요하다 — responderChain 이면 비활성이 된다")
+    }
+
+    /// 앱 메뉴 순서는 macOS 관례 — 정보 / 구분선 / 설정 / 구분선 / 종료.
+    func testAppMenuOrderFollowsConvention() {
+        let titles = AppMenu.appMenu(appName: "DroidRelay").items.map { $0.isSeparator ? "—" : $0.title }
+        XCTAssertEqual(titles, ["DroidRelay 정보", "—", "설정…", "—", "DroidRelay 종료"])
+    }
+
+    // MARK: - 우클릭(메뉴바) 메뉴 — M-33
+
+    /// 우클릭 메뉴의 세 항목. 이 중 `설정…` 이 **스텁에 걸려** 동작하지 않았다.
+    func testStatusMenuHasDashboardSettingsQuit() {
+        let selectors = Set(AppMenu.statusMenu.items.map(\.selector))
+        XCTAssertTrue(selectors.contains(AppMenu.Action.openDashboard.rawValue), "대시보드 열기 없음")
+        XCTAssertTrue(selectors.contains(AppMenu.Action.showSettings.rawValue), "설정 없음")
+        XCTAssertTrue(selectors.contains(AppMenu.Action.quit.rawValue), "종료 없음")
+    }
+
+    /// ⚠ **팝업 메뉴에는 responder chain 이 없다.** 항목이 `.responderChain` 이면
+    /// target 이 nil 로 가 **비활성**이 된다 — 우클릭 메뉴는 전 항목이 앱 동작이어야 한다.
+    func testStatusMenuItemsAllUseExplicitTarget() {
+        for item in AppMenu.statusMenu.items where !item.isSeparator {
+            XCTAssertEqual(item.receiver, .appController, "\(item.title) 이 비활성으로 뜬다 — target 이 없다")
+        }
+    }
+
+    /// **두 진입점이 같은 selector 를 쓴다** — 한쪽만 바뀌면 "되던 설정이 안 되는" 회귀가 된다.
+    func testSettingsSelectorIsSharedBetweenMenus() {
+        let app = AppMenu.appMenu(appName: "DroidRelay").items.first { $0.title == "설정…" }?.selector
+        let status = AppMenu.statusMenu.items.first { $0.title == "설정…" }?.selector
+        XCTAssertEqual(app, AppMenu.Action.showSettings.rawValue)
+        XCTAssertEqual(status, AppMenu.Action.showSettings.rawValue)
+        XCTAssertEqual(app, status)
+    }
+
+    /// 우클릭 메뉴의 구분선 위치 — 대시보드·설정 / 구분선 / 종료.
+    func testStatusMenuSeparatorBeforeQuit() {
+        let items = AppMenu.statusMenu.items
+        XCTAssertEqual(items.firstIndex(where: \.isSeparator), 2, "구분선은 종료 직전이어야 한다")
+        XCTAssertEqual(items.last?.selector, AppMenu.Action.quit.rawValue)
+    }
+
+    /// 앱 동작 selector 는 ObjC 규칙을 따른다 — `:` 로 끝나고 비어 있지 않으며 중복이 없다.
+    func testAppActionsAreObjCSelectors() {
+        for a in AppMenu.Action.allCases {
+            XCTAssertTrue(a.rawValue.hasSuffix(":"), "\(a.rawValue) 는 ObjC action 이 아니다")
+            XCTAssertFalse(a.rawValue.contains(" "), "selector 에 공백이 있으면 안 된다: \(a.rawValue)")
+        }
+        XCTAssertEqual(Set(AppMenu.Action.allCases.map(\.rawValue)).count, AppMenu.Action.allCases.count)
+    }
 }
