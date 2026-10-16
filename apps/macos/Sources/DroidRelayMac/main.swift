@@ -34,12 +34,17 @@ enum Boot {
         // **없으면 모든 TextField 에서 ⌘C/⌘V/⌘X/⌘A/⌘Z 가 죽는다.**
         // (v0.7.1 에서 같은 버그를 고쳤다가 메뉴바 앱 재작성 때 메뉴를 잃었다 —
         //  `AppMenu`/`MainMenu` 와 `AppMenuTests` 가 재발을 막는다)
-        MainMenu.install()
+        // **델리게이트를 먼저 만든다 — 메뉴가 그걸 target 으로 쓴다.**
+        //
+        // 메뉴 명세의 앱 전용 동작(`설정… ⌘,`)은 responder chain 에 구현이 없다.
+        // 그래서 **명시적 target** 이 필요하다(`AppMenu.Receiver.appController`).
+        // target 없이 두면 AppKit 이 그 항목을 **비활성(회색)** 으로 만든다.
         let delegate = AppDelegate()
         app.delegate = delegate
         // **전역에서 살아 있어야 한다.** 지역 변수로 두면 delegate 가 해제돼서
         // 앱이 아무 응답도 안 하는 프로세스로 남는다(아무 오류 없이).
         objc_setAssociatedObject(app, "drDelegate", delegate, .OBJC_ASSOCIATION_RETAIN)
+        MainMenu.install(appController: delegate)
         return app
     }
 }
@@ -81,6 +86,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // **셋 다 이 창을 검증하지 못한다.** 전용 모드가 필요하다.
         if CommandLine.arguments.contains("--settings-check") {
             Task { await Diagnostics.settingsCheck() }
+            return
+        }
+        // **설정 메뉴가 실제로 창을 여는가** — 코드를 읽어서는 알 수 없다.
+        //
+        // `--settings-check` 는 `SettingsWindowController` 를 **직접** 만들어
+        // 띄우므로 **메뉴 배선은 못 본다.** 그래서 우클릭 메뉴의 `설정…` 이
+        // 스텁(앱만 활성화)이어도 진단이 통과했다 — 사용자가 그 버그를 겪는 동안에도.
+        // 이 모드는 메뉴 항목을 **실제로 실행**하고 창이 떴는지 본다 (M-33).
+        if CommandLine.arguments.contains("--settings-menu-check") {
+            Task { await Diagnostics.settingsMenuCheck() }
             return
         }
         // **속도 표시가 두 줄로 깨지지 않는지** — 높이로 판정한다.
@@ -240,6 +255,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 print("[DroidRelay] 서버를 찾지 못했습니다 — 설정에서 주소를 입력하세요")
             }
         }
+    }
+
+    /// **앱 메뉴의 `설정…` (⌘,)** — `AppMenu.Action.showSettings`.
+    ///
+    /// responder chain 에는 "설정을 연다" 는 기본 동작이 없다. 그래서
+    /// `MainMenu.install(appController:)` 로 **이 델리게이트가 target** 이 되고
+    /// 여기서 컨트롤러로 넘긴다.
+    ///
+    /// 컨트롤러에 직접 걸지 않는 이유: 메뉴는 **런루프 전**(`Boot.start`)에,
+    /// 컨트롤러는 `applicationDidFinishLaunching` 에서 만들어진다 — 순서가 맞지
+    /// 않는다. 델리게이트가 그 사이를 잇는다.
+    @objc func drShowSettings(_ sender: Any?) {
+        controller?.showSettingsWindow()
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ s: NSApplication) -> Bool { false }
