@@ -1,5 +1,31 @@
 # Changelog
 
+## [Unreleased] — v0.55 리팩터: 웹 대시보드 분리 + 순수 로직 추출 (T-1124~T-1126)
+
+> 요청: **"안드로이드 앱·웹도 리팩터링."** 범위는 **동작 불변**으로 한정 — 상세: `docs/plans/PLAN_v0.55_refactor_android-web.md`.
+> 롤백 지점: `git tag pre-refactor-android-web`.
+
+### Changed [web]
+
+- **대시보드 분리** — 3,041줄 단일 Kotlin 원시 문자열(`WebDashboardHtml.kt`)을 관심사별 3조각으로:
+  `WebDashboardHead`(head+CSS, 317행) · `WebDashboardBody`(마크업, 634행) · `WebDashboardScript`(JS, 2,084행) + 조립(20행).
+  **출력은 바이트 동일** — 분할 스크립트가 조립==원본을 assert(sha256 `cf1e740c…9389c`, 175,307 bytes).
+  `assets/` 로 옮기지 않은 이유: 테스트 6파일이 `WebAssets.dashboardHtml` **문자열**을 Android 프레임워크 없이 읽는다.
+
+### Changed [android]
+
+- **순수 로직 추출** — `TorrentEngine.kt` 1,931 → **1,728줄**. 상태 없는 함수를 분리:
+  `MagnetParser.kt`(125행 — magnet 정규식·`base32ToHex`·`magnetInfoHash`·`validateMagnet`·`sanitizeMagnetDn`·`sanitizeDnValue`·`dnValueUtf8Valid`) ·
+  `TorrentRules.kt`(104행 — `shouldPauseAtRatio`·`isStalledTorrent`·`stallTimedOut`·`shouldAutoResume`·`guardEffective`·`storageDirOf`·`torrentPollIntervalMs`·`persistedSignature`·`DuplicateTorrentException`·상수).
+  클래스 자체 분해는 하지 않음(Kotlin 에 partial class 없음 + `PLAN_v0.54` 의 "SettingsRoutes 분할 제외" 결정 존중).
+- **버전 올리기** — `0.50.1/36 → 0.55.0/37`. v0.54(`a6a15ec`)·탭 개편(`4bef073`)·OOM 수정(`9eb870c`) 이후 버전을 안 올려
+  **두 기기 모두 0.50.1** 로 남아 있었다(버전 문자열이 최신 코드를 반영하지 않음). `scripts/bump-version.sh` 로만 변경.
+
+### 검증 [android, web]
+
+- `./gradlew test` **395건 0 실패** · `ktlintCheck` 성공
+- `assembleDebug` → `aapt dump badging` = `versionCode='37' versionName='0.55.0'`
+
 ## [Unreleased] — mac 메인 메뉴 복구 (⌘V) + 결과 안내 배너 (M-31, M-32)
 
 > 사용자 제보: **"맥에서 다운로드 추가할 때 ⌘V(붙여넣기)가 안 된다."**
