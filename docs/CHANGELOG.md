@@ -1,5 +1,22 @@
 # Changelog
 
+## [Unreleased] — v0.56 미머지 작업 복구 (T-1088 · T-1089)
+
+> 배경: 버전이 **0.50.1 → 0.55.0 으로 건너뛰는 동안 v0.51 작업(T-1088~T-1090)이
+> 브랜치에만 남고 main 에 들어가지 않았다.** TODO 는 계속 🔄 였고 CHANGELOG 에도
+> v0.51 릴리스 항목이 없다. 2026-10-16 조사에서 발견 → 유효한 2건을 복구한다.
+> (T-1090 UDP announce 는 기능이고 스캔으로 대체 동작하므로 **연기 유지**)
+
+### Fixed [android]
+
+- **`BootReceiver` 이중 `finish()` 크래시 (T-1088)** — `goAsync()` 의 `PendingResult` 는
+  **한 번만** `finish()` 가능한데 `finally`(36행)와 `job.invokeOnCompletion`(40행)이
+  **정상 경로에서 둘 다 실행**되어 `IllegalStateException: Broadcast already finished` 로
+  프로세스가 죽었다(실측 2026-09-30). `invokeOnCompletion` 은 `finally` **이후** 발화하므로
+  "백업"이 아니라 **중복 호출**이었고, `runCatching` 으로도 못 잡는다(예외가 다른 스레드에서 남).
+  → `SingleFinish`(`AtomicBoolean` `compareAndSet`)로 **종료를 1회만** 통과시킨다 —
+  종료 지점을 늘려도(타임아웃·취소) 중복이 나지 않는다. 단위테스트 6건.
+
 ## [Unreleased] — mac 메뉴바 우클릭 설정 복구 + ⌘, (M-33)
 
 ### Fixed [mac]
