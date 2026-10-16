@@ -44,19 +44,38 @@ Core/UI 를 뺀 이유는 **탐색 계산과 SSE 파서를 OS 없이 검증**하
 같은 이유로 **메뉴 명세(`AppMenu`)** 와 **안내 규칙(`Notice`)** 도 Core 에 있다 —
 AppKit 런타임 없이 "⌘V 가 사는가"·"실패가 남는가" 를 테스트로 고정한다.
 
-## 메인 메뉴 (⌘V 붙여넣기)
+## 메인 메뉴 (`⌘V` 붙여넣기 · `⌘,` 설정)
 
-macOS 의 편집 단축키(⌘C/⌘V/⌘X/⌘A/⌘Z)는 **뷰가 아니라 `NSApp.mainMenu`** 의 `편집`
-메뉴 key equivalent 가 first responder(`paste:`) 로 보낸다. 이 앱은 씬 없이
-`NSApplication` 을 직접 부팅하므로 SwiftUI 기본 메뉴가 없다 — **메뉴를 직접
-설치하지 않으면 어떤 TextField 에서도 붙여넣기가 죽는다**(코드엔 오류가 없다).
+macOS 의 단축키는 **뷰가 아니라 `NSApp.mainMenu`** 가 처리한다. `⌘C/⌘V/⌘X/⌘A/⌘Z` 는
+`편집` 메뉴 key equivalent 가 first responder(`paste:`) 로 보내고, `⌘,` 는 앱 메뉴 항목이
+연다. 이 앱은 씬 없이 `NSApplication` 을 직접 부팅하므로 SwiftUI 가 기본 메뉴를 만들지
+않는다 — **직접 설치하지 않으면 두 단축키가 코드 오류 없이 죽는다.**
 
-- `AppMenu`(Core): 메뉴 **명세**(앱 메뉴 ⌘Q + 편집 메뉴). 테스트로 고정된다.
-- `MainMenu`(Mac): 명세를 `NSMenu` 로 옮겨 `NSApp.mainMenu` 에 설치(`Boot.start()`).
-- `--menu-check`: 메뉴·붙여넣기 항목(responder chain 여부)을 수치로 확인한다.
+- `AppMenu`(Core): 메뉴 **명세**. `Item.receiver` 가 **누가 action 을 받는가** 를 정한다.
+  - `.responderChain` — `paste:` · `terminate:` 처럼 AppKit/필드 편집기가 구현
+  - `.appController` — **앱이 직접 구현**(`drShowSettings:` 등). `target = nil` 이면
+    responder chain 에 구현이 없어 AppKit 이 **항목을 비활성(회색)으로 만든다**
+- `MainMenu`(Mac): 명세를 `NSMenu` 로 옮겨 설치한다(`Boot.start()` 런루프 전).
+  **우클릭 메뉴도 같은 함수(`makeMenu`)를 쓴다** — 규칙이 한 벌이어야 반쪽 수정이 안 생긴다.
+- `--menu-check`: 메뉴·붙여넣기·설정 항목의 `target`(responder chain/고정)을 수치로 확인한다.
 
-이 버그는 **두 번 났다** — v0.7.1 에서 고쳤다가 macOS 앱을 삭제(`ebfaa27`)하고
-메뉴바 앱을 재작성할 때 재발했다. 그래서 `AppMenuTests` 로 회귀를 **빌드 시점에** 잡는다.
+붙여넣기는 **두 번** 죽었다 — v0.7.1 에서 고쳤다가 macOS 앱을 삭제(`ebfaa27`)하고 메뉴바
+앱을 재작성할 때 재발. 그래서 `AppMenuTests` 로 회귀를 **빌드 시점에** 잡는다.
+
+## 메뉴바 우클릭 메뉴
+
+메뉴바 아이콘 **우클릭**으로 뜨는 짧은 메뉴(`AppMenu.statusMenu`):
+대시보드 열기 / 설정… ⌘, / 종료. 좌클릭은 팝오버를 연다
+(`MenuBarSpeedView.mouseDown` vs `rightMouseDown`).
+
+**팝업 메뉴에는 responder chain 이 없다** — 항목이 전부 앱이 구현하는 selector 라
+**명시적 target**(`StatusItemController`)을 건다. 이 배선이 **스텁에 걸려** `설정…` 이
+M1(`e05d0d4`) 부터 동작하지 않았다 — `openSettings()` 가 앱만 활성화하고 창을 열지 않았다.
+(팝오버 안 `설정…` 행은 다른 경로라 정상이어서 "설정은 되는데 우클릭만 안 됨" 으로 보였다)
+
+- `--settings-menu-check`: 메뉴를 **실제로 만들어 눌러 보고** 설정 창이 떴는지 본다.
+  코드를 읽는 것도, 창을 직접 띄워 보는 것(`--settings-check`)도 이 부류를 못 잡는다 —
+  그 진단은 창 컨트롤러를 직접 호출하므로 **메뉴 배선을 건너뛴다.**
 
 ## 결과 안내 배너
 
