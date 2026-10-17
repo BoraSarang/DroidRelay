@@ -561,12 +561,11 @@ object McpServer {
             return JSONArray()
         }
 
-        val files = dir.listFiles()
-        DebugLogger.d(TAG, "fileList: path=$subPath 파일=${files?.size ?: 0}개")
+        val files = StorageGuard.visibleChildren(dir)
+        DebugLogger.d(TAG, "fileList: path=$subPath 파일=${files.size}개")
         val arr = JSONArray()
-        files?.sortedWith(
-            compareByDescending<File> { it.isDirectory }.thenBy { it.name }
-        )?.forEach { f ->
+        files
+            .forEach { f ->
             arr.put(JSONObject().apply {
                 put("name", f.name)
                 put("type", if (f.isDirectory) "dir" else "file")
@@ -581,12 +580,9 @@ object McpServer {
         val path = args.optString("path", "")
         if (path.isBlank()) error("path 필요")
 
-        val dlRoot = StorageGuard.dlRoot
-        val file = File(dlRoot, path)
-        val canonical = file.canonicalFile
-        // 경로 구분자 없이 startsWith 만 쓰면 "DroidRelay.bak" 같은 접두 동명이 통과한다 (StorageGuard 와 불일치)
-        val root = StorageGuard.dlRootCanonical.path
-        if (canonical.path != root && !canonical.path.startsWith(root + File.separator)) error("경로 탈출 차단")
+        // StorageGuard 경유 — 경로 탈출(접두 동명 포함) + 숨김(.trash/.torrents) 둘 다 차단.
+        // 이전엔 File(dlRoot, path) 로 접두사만 봐서 워킹 디렉터리·휴지통 읽기가 가능했다.
+        val file = StorageGuard.storageFile(path) ?: error("경로 탈출 차단")
 
         if (!file.exists()) error("파일 없음: $path")
         if (!file.isFile) error("파일이 아님: $path")

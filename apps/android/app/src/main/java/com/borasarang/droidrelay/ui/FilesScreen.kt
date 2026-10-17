@@ -52,6 +52,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.borasarang.droidrelay.relay.DebugLogger
+import com.borasarang.droidrelay.relay.StorageGuard
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -73,10 +74,10 @@ private enum class SortMode(val label: String) {
     SIZE("용량순"),
 }
 
-/** 폴더 용량 — 재귀 합계 (.trash 제외) */
+/** 폴더 용량 — 재귀 합계. 숨김 디렉터리(.trash·.torrents) 제외 */
 private fun dirSizeOf(f: File): Long =
     if (f.isFile) f.length()
-    else f.walkTopDown().onEnter { it.name != ".trash" }.filter { it.isFile }.sumOf { it.length() }
+    else f.walkTopDown().onEnter { !StorageGuard.isHidden(it.name) }.filter { it.isFile }.sumOf { it.length() }
 
 private fun sortComparator(mode: SortMode): Comparator<StorageItem> = when (mode) {
     SortMode.DIR -> compareByDescending<StorageItem> { it.isDir }.thenBy { it.name }
@@ -142,7 +143,7 @@ private fun shareZip(context: android.content.Context, zip: File) {
     context.startActivity(android.content.Intent.createChooser(send, "폴더 ZIP 공유"))
 }
 
-private val DL_ROOT = com.borasarang.droidrelay.relay.StorageGuard.dlRoot
+private val DL_ROOT = StorageGuard.dlRoot
 
 @Composable
 fun FilesScreen(onShowSnack: (String) -> Unit = {}) {
@@ -173,7 +174,9 @@ fun FilesScreen(onShowSnack: (String) -> Unit = {}) {
             val list = withContext(Dispatchers.IO) {
                 val dir = if (path.isEmpty()) DL_ROOT else File(DL_ROOT, path)
                 if (!dir.exists()) dir.mkdirs()
-                dir.listFiles()?.map { f ->
+                // 숨김 디렉터리(.trash·.torrents)는 보관함 탭에도 노출하지 않는다.
+                // 이전엔 루트에서 이름 하드코딩으로 ".trash" 하나만 걸러 ".torrents" 가 보였다.
+                StorageGuard.visibleChildren(dir).map { f ->
                     StorageItem(
                         name = f.name,
                         isDir = f.isDirectory,
@@ -181,8 +184,7 @@ fun FilesScreen(onShowSnack: (String) -> Unit = {}) {
                         count = if (f.isDirectory) (f.listFiles()?.size ?: 0) else 0,
                         modified = f.lastModified(),
                     )
-                }?.filter { !(path.isEmpty() && it.name == ".trash") }
-                    ?.sortedWith(sortComparator(mode)) ?: emptyList()
+                }.sortedWith(sortComparator(mode))
             }
             items.clear()
             items.addAll(list)
