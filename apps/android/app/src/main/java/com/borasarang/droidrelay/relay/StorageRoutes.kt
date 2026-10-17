@@ -53,6 +53,19 @@ internal object StorageGuard {
     private val HIDDEN = listOf(TRASH_NAME, TORRENT_TMP_NAME)
     private fun canonicalOf(base: java.io.File, name: String): String = java.io.File(base, name).canonicalFile.path
 
+    /**
+     * 목록에 노출할 자식만 — 숨김 디렉터리 제외, 폴더 우선·이름순 (API·앱·MCP 공통 계약).
+     *
+     * **왜 헬퍼인가**: `/api/storage`·DAV·Janitor 는 `isHidden` 을 쓰는데 MCP `file_list`
+     * 와 앱 보관함 탭(`FilesScreen`)은 빠져 있어 루트의 `.torrents`·`.trash` 가 그대로
+     * 노출됐다(실측). 판정을 한 곳에 모아 다시 갈라지지 않게 한다.
+     */
+    fun visibleChildren(dir: java.io.File): List<java.io.File> =
+        dir.listFiles()
+            ?.filter { !isHidden(it.name) }
+            ?.sortedWith(compareByDescending<java.io.File> { it.isDirectory }.thenBy { it.name })
+            ?: emptyList()
+
     /** dlRoot 하위로 한정된 canonical File — 탈출 경로는 null */
     fun storageFile(vararg parts: String): java.io.File? {
         var f = dlRoot
@@ -187,9 +200,8 @@ internal fun Route.storageRoutes(context: Context, serverRef: RelayServer) {
             return@get
         }
         val arr = org.json.JSONArray()
-        dir.listFiles()?.sortedWith(compareByDescending<java.io.File> { it.isDirectory }.thenBy { it.name })
-            ?.filter { !StorageGuard.isHidden(it.name) }
-            ?.forEach { f ->
+        StorageGuard.visibleChildren(dir)
+            .forEach { f ->
             val obj = org.json.JSONObject()
             obj.put("name", f.name)
             obj.put("type", if (f.isDirectory) "dir" else "file")

@@ -1,5 +1,31 @@
 # Changelog
 
+## [Unreleased] — v0.57 보관함 숨김 디렉터리 노출 차단 (T-1127)
+
+> 배경: 사용자 제보 *"보관함에 `.torrents`·`.trash` 가 노출된다"*.
+> 실측(S22 = 192.168.86.49) `/mcp` `tools/call file_list` 응답:
+> `[{"name":".torrents"...},{"name":".trash"...},{"name":"AI Model"...}]`.
+> 상세: `docs/plans/PLAN_v0.57_hidden-dirs_android.md`
+
+### 버전
+
+- `0.56.0/38 → 0.57.0/39` — `scripts/bump-version.sh` 로만 변경(단일 진실
+  `apps/android/gradle.properties`). 맥 번들 버전도 같은 값을 쓴다. 수정이 **실기에
+  올라가야** 검증되므로 함께 올린다.
+
+### Fixed [android]
+
+- **보관함 숨김 디렉터리 노출 (T-1127)** — 숨김 판정(`StorageGuard.isHidden` = `.trash` + `.torrents`)을
+  쓰지 않는 표면이 두 곳 있었다. ① **MCP `file_list`/`storage_list`** 는 `dir.listFiles()` 를
+  그대로 돌려줘 루트의 두 폴더가 노출됐고, ② **앱 "보관함" 탭**(`FilesScreen`)은 루트 필터가
+  `it.name == ".trash"` 이름 하드코딩이라 `.torrents` 가 보였으며 진행 중 파일 용량까지 합산됐다.
+  → `StorageGuard.visibleChildren()`(숨김 제외 + 폴더 우선·이름순)로 판정을 한 곳에 모으고
+  `McpServer.fileList()`·`StorageRoutes GET /api/storage`·`FilesScreen` 이 공통 사용.
+  부수적으로 `McpServer.fileRead()` 가 `File(dlRoot, path)` 로 접두사만 검사하던 것을
+  `StorageGuard.storageFile(path)` 로 바꿔 **`.torrents/*.torrent`·`.trash/*` 읽기**도 차단.
+  (`/api/storage/tree`·DAV·Janitor·웹 대시보드·맥 앱은 이미 `isHidden` 을 쓰고 있어 정상이었다.)
+  계약 테스트 2건 추가. `./build_and_run.sh test android` 403건 0 실패.
+
 ## [Unreleased] — v0.56 미머지 작업 복구 (T-1088 · T-1089)
 
 > 배경: 버전이 **0.50.1 → 0.55.0 으로 건너뛰는 동안 v0.51 작업(T-1088~T-1090)이

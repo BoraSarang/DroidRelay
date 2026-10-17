@@ -206,4 +206,47 @@ class TorrentStorageMoveContractTest {
     fun `메타데이터 대입자위는 이동 대상이 아니다`() {
         assertEquals("추출 중...", METADATA_PLACEHOLDER)
     }
+
+    // ── 6. 목록 노출 계약 (숨김 디렉터리) ──
+
+    /**
+     * **왜 생겼나** — `/api/storage`·DAV·Janitor 는 `isHidden` 을 쓰는데
+     * MCP `file_list`/`storage_list` 와 앱 보관함 탭(`FilesScreen`)은 빠져 있었다.
+     * 실측(S22, 192.168.86.49) `/mcp` `tools/call file_list` 응답:
+     * `[{"name":".torrents"...},{"name":".trash"...},{"name":"AI Model"...}]`.
+     *
+     * 계약: 목록 헬퍼는 숨김 디렉터리를 **항상** 빼고, 폴더 우선·이름순으로 준다.
+     */
+    @Test
+    fun `목록 헬퍼는 숨김 디렉터리를 빼고 폴더 우선으로 준다`() {
+        val root = java.nio.file.Files.createTempDirectory("dr-visible").toFile()
+        try {
+            java.io.File(root, StorageGuard.TRASH_NAME).mkdirs()
+            java.io.File(root, StorageGuard.TORRENT_TMP_NAME).mkdirs()
+            java.io.File(root, "영화").mkdirs()
+            java.io.File(root, ".hidden-by-user").mkdirs()
+            java.io.File(root, "a.mp4").writeText("x")
+
+            val names = StorageGuard.visibleChildren(root).map { it.name }
+            assertEquals(listOf(".hidden-by-user", "영화", "a.mp4"), names)
+            assertFalse(names.contains(StorageGuard.TRASH_NAME))
+            assertFalse(names.contains(StorageGuard.TORRENT_TMP_NAME))
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
+    /** 숨김 이름은 사용자 폴더가 아니므로, 목록 헬퍼도 그 하위로 내려가지 않는다 */
+    @Test
+    fun `숨김 디렉터리 하위는 목록에서 제외된다`() {
+        val root = java.nio.file.Files.createTempDirectory("dr-visible-under").toFile()
+        try {
+            val work = java.io.File(root, StorageGuard.TORRENT_TMP_NAME).apply { mkdirs() }
+            java.io.File(work, "진행중.mp4").writeText("x")
+
+            assertEquals(emptyList<String>(), StorageGuard.visibleChildren(root).map { it.name })
+        } finally {
+            root.deleteRecursively()
+        }
+    }
 }
