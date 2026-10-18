@@ -1,5 +1,34 @@
 # Changelog
 
+## [Unreleased] — v0.58 웹 대시보드 Range 루프 다운로더 (T-1128)
+
+> 배경: 사용자 제보 *"S22 웹 보관함에서 EXAONE-3.5 18GB gguf 파일을 다운로드하는데
+> 32MB만 받고 완료로 나온다"*. 원인은 `serveFile` 의 **응답당 32MB 상한**
+> (`MAX_SERVE_SLICE`, A90 OOM 수정 `9eb870c` 에서 도입) — 브라우저 다운로드
+> 매니저는 206 슬라이스를 완료로 저장하고 `Content-Range` 의 전체 크기를 무시하며
+> 후속 Range 요청을 보내지 않는다. 자동 이어받기는 `<video>`·WebDAV 클라이언트에서만
+> 성립하므로 웹 다운로드만 32MB 로 잘렸다.
+> 상세: `docs/plans/PLAN_v0.58_range-downloader_android.md`
+
+### 버전
+
+- `0.57.0/39 → 0.58.0/40` — `scripts/bump-version.sh` 로만 변경(단일 진실
+  `apps/android/gradle.properties`).
+
+### Added [android]
+
+- **웹 대시보드 Range 루프 다운로더 (T-1128)** — `dlRange()`·`dlLoop()`: 서버 무변경으로
+  `Range: bytes=offset-` 를 반복해 32MB 슬라이스를 끝까지 이어받는다.
+  - **보안 컨텍스트(HTTPS/localhost)**: File System Access(`showSaveFilePicker` +
+    `createWritable`)로 디스크에 연속 기록 — 18GB 도 브라우저 메모리에 올리지 않는다.
+  - **HTTP LAN**: `showSaveFilePicker` 가 없어 Blob 폴백, `DL_MEM_MAX`(256MB) 가드로
+    그 이상은 명시적 실패 안내(HTTPS 켜기·맥 앱·Finder DAV 유도) — **무음 절단 금지**.
+  - 일시 오류는 같은 offset 으로 3회 재시도, 취소는 `AbortController` + `writable.abort()`.
+  - 배선: 보관함 파일 📥·잡 수신 📥 받기 2곳(인라인은 `this.href`/`this.download` 경유 —
+    DashboardInlineHandlerContractTest 지뢰 회피). **폴더 ZIP 📦 은 범위 밖** —
+    `/dl-folder` 는 요청마다 ZIP 을 재빌드하므로 슬라이스 루프가 빌드 폭주를 일으킨다.
+  - 계약 테스트 6건(`DashboardRangeDownloaderContractTest`). `test android` 410건 0 실패.
+
 ## [Unreleased] — v0.57 보관함 숨김 디렉터리 노출 차단 (T-1127)
 
 > 배경: 사용자 제보 *"보관함에 `.torrents`·`.trash` 가 노출된다"*.

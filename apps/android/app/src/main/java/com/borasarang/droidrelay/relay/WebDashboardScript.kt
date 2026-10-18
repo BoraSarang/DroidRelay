@@ -64,6 +64,115 @@ function apiPost(p,b){return fetch(p,{method:'POST',headers:{'Content-Type':'app
 function showDlToast(msg){var t=document.createElement('div');t.textContent=msg||'다운로드 요청 했습니다';t.style.cssText='position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#1a5c3a;color:#69e29b;padding:10px 20px;border-radius:8px;font-size:14px;z-index:9999;opacity:1;transition:opacity 1.5s';document.body.appendChild(t);setTimeout(function(){t.style.opacity='0'},1500);setTimeout(function(){t.remove()},3000);}
 function fmt(n){if(n==null||n<0)return '?';if(n<1048576)return (n/1024).toFixed(0)+' KB';if(n<1073741824)return (n/1048576).toFixed(1)+' MB';return (n/1073741824).toFixed(2)+' GB';}
 function spd(bps){return bps>0?(bps/1024).toFixed(0)+' KB/s':'-';}
+// ── Range 루프 다운로더 (T-1128) ─────────────────────────────────
+// serveFile 은 응답당 32MB 로 자른다(MAX_SERVE_SLICE, A90 OOM 방지). 브라우저 다운로드
+// 매니저는 이 206 을 완료로 저장해 **18GB 파일이 32MB 로 잘려 "완료"** 로 나온다(실측).
+// → 서버 무변경, 브라우저가 직접 Range 로 이어받는다.
+// 보안 컨텍스트(HTTPS/localhost)면 File System Access 로 디스크 연속 기록(메모리 무관,
+// 18GB 가능). HTTP LAN 이면 showSaveFilePicker 가 없어 Blob 폴백 — 256MB 까지만 가능
+// (그 이상은 브라우저가 파일 쓰기 저장소를 못 열어 대안 안내 — 무음 절단 금지).
+var DL_MEM_MAX=268435456;
+function dlProgressCard(name,onCancel){
+  var c=document.createElement('div');
+  var n=document.querySelectorAll('.dlbar').length;
+  c.className='dlbar';
+  c.style.cssText='position:fixed;bottom:'+(n*46)+'px;left:0;right:0;background:#12233a;color:#9ecbff;padding:10px 16px;font-size:13px;z-index:10001;display:flex;gap:12px;align-items:center;border-top:1px solid #24405f';
+  var nm=document.createElement('span');
+  nm.textContent=name||'';
+  nm.style.cssText='flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';
+  var info=document.createElement('span');
+  info.style.cssText='white-space:nowrap';
+  var btn=document.createElement('button');
+  btn.className='ghost sm';
+  btn.textContent='취소';
+  btn.onclick=onCancel;
+  c.appendChild(nm);c.appendChild(info);c.appendChild(btn);
+  document.body.appendChild(c);
+  return {
+    update:function(got,total){
+      info.textContent=fmt(got)+(total>0?' / '+fmt(total)+' ('+Math.round(got/total*100)+'%)':'');
+    },
+    done:function(ok,msg){
+      info.textContent=ok?'완료':(msg||'실패');
+      setTimeout(function(){c.remove()},ok?2000:8000);
+    }
+  };
+}
+function dlRange(url,name){
+  if(window.showSaveFilePicker&&window.isSecureContext){
+    window.showSaveFilePicker({suggestedName:name||'download'})
+      .then(function(h){return h.createWritable();})
+      .then(function(w){dlLoop(url,name,w);})
+      .catch(function(e){
+        if(e&&e.name==='AbortError')return; // 사용자가 저장 위치 선택만 취소
+        showDlToast('저장 위치 선택 실패: '+(e.message||e));
+      });
+    return;
+  }
+  dlLoop(url,name,null);
+}
+function dlLoop(url,name,writable){
+  var ctrl=new AbortController();
+  var mem=writable?null:[];
+  function abortWritable(){if(writable)writable.abort().catch(function(){});}
+  var bar=dlProgressCard(name,function(){
+    ctrl.abort();
+    abortWritable();
+    bar.done(false,'취소됨 — 받은 부분은 버려집니다');
+  });
+  var offset=0,total=0,tries=0;
+  function fail(msg){abortWritable();bar.done(false,msg);}
+  function finish(){
+    if(writable){
+      writable.close().then(function(){bar.done(true);})
+        .catch(function(e){fail('저장 실패: '+(e.message||e));});
+      return;
+    }
+    var blob=new Blob(mem,{type:'application/octet-stream'});
+    mem=null;
+    var a=document.createElement('a');
+    a.href=URL.createObjectURL(blob);
+    a.download=name||'download';
+    document.body.appendChild(a);a.click();a.remove();
+    setTimeout(function(){URL.revokeObjectURL(a.href);},10000);
+    bar.done(true);
+  }
+  function step(){
+    fetch(url,{headers:{'Range':'bytes='+offset+'-'},signal:ctrl.signal})
+      .then(function(r){
+        if(!r.ok&&r.status!==206)throw new Error('HTTP '+r.status);
+        var cr=r.headers.get('Content-Range');
+        if(cr){var m=/\/(\d+)/.exec(cr);if(m)total=parseInt(m[1],10);}
+        if(!writable&&total>DL_MEM_MAX){r.body.cancel().catch(function(){});throw new Error('TOO_BIG');}
+        var reader=r.body.getReader();
+        function pump(){
+          return reader.read().then(function(res){
+            if(res.done)return null;
+            offset+=res.value.byteLength;
+            if(!writable&&offset>DL_MEM_MAX)throw new Error('TOO_BIG');
+            bar.update(offset,total);
+            if(writable)return writable.write(res.value).then(pump);
+            mem.push(res.value);return pump();
+          });
+        }
+        return pump();
+      })
+      .then(function(){
+        if(total>0&&offset<total){tries=0;return step();} // 다음 슬라이스 이어받기
+        finish();
+      })
+      .catch(function(e){
+        if(e&&e.name==='AbortError')return; // 취소는 카드가 이미 알림
+        if(e&&e.message==='TOO_BIG'){
+          fail('이 브라우저로는 '+fmt(total)+' 파일을 디스크에 저장할 수 없습니다 — 앱 설정에서 HTTPS 켜기 또는 맥 앱·Finder(DAV)로 받기');
+          return;
+        }
+        if(++tries<=3){showDlToast('중단 — 3초 후 이어받기 재시도 ('+tries+'/3)');setTimeout(step,3000);return;}
+        fail('다운로드 실패: '+(e.message||e)+' ('+fmt(offset)+'까지 받음)');
+      });
+  }
+  step();
+}
 function label(st){return {QUEUED:'대기',RUNNING:'진행 중',PAUSED:'일시정지',STALLED:'정체',DONE:'완료',FAILED:'실패',CANCELED:'취소됨',ADDING:'추가 중',METADATA:'메타데이터',FETCHING_METADATA:'메타데이터 추출 중',DOWNLOADING:'진행 중',SEEDING:'시딩'}[st]||st;}
 function fmtDuration(sec){
   if(sec==null||sec<0||!isFinite(sec))return'';
@@ -239,7 +348,7 @@ function render(jobs){
     var err=j.errorMessage?'<div class="err">'+esc(j.errorMessage)+'</div>':'';
     var vbadge='';
     if(j.type==='video')vbadge='<span class="badge video">🎬 비디오</span>';
-    var act=j.state==='DONE'?'<a class="btn-dl" href="/file/'+j.id+'" download onclick="showDlToast()">📥 받기</a>':'';
+    var act=j.state==='DONE'?'<a class="btn-dl" href="/file/'+j.id+'" download="'+esc(j.filename)+'" onclick="event.preventDefault();dlRange(this.href,this.download)">📥 받기</a>':'';
     var pause='';
     if(j.type!=='video'&&j.state==='RUNNING')pause='<button class="ghost" onclick="act(\''+j.id+'\',\'pause\')">일시정지</button>';
     if(j.type==='video'&&j.state==='RUNNING')pause='<span class="eta" style="align-self:center">FFmpeg → 삭제로 취소</span>';
@@ -489,7 +598,7 @@ var dlBase=location.protocol+'//'+location.hostname+':'+location.port;
         +'<div class="acts">';
       if(!isDir){
         if(isPlayable(f.name))h+='<button class="ghost sm" data-play="'+esc(key)+'" data-name="'+esc(f.name)+'" onclick="event.stopPropagation();playMedia(this.dataset.play,this.dataset.name)">▶</button>';
-        h+='<a class="btn-dl" href="'+dlBase+'/dl-file/'+encodeURIComponent(key)+'" download="'+esc(f.name)+'" onclick="event.stopPropagation();showDlToast()">📥</a>';
+        h+='<a class="btn-dl" href="'+dlBase+'/dl-file/'+encodeURIComponent(key)+'" download="'+esc(f.name)+'" onclick="event.stopPropagation();event.preventDefault();dlRange(this.href,this.download)">📥</a>';
         h+='<button class="ghost sm" data-share="'+esc(key)+'" onclick="event.stopPropagation();shareFile(this.dataset.share)">🔗</button>';
       }else{
         h+='<a class="btn-dl" href="'+dlBase+'/dl-folder/'+encodeURIComponent(key)+'" download="'+esc(f.name)+'.zip" onclick="event.stopPropagation();showDlToast()">📦</a>';
