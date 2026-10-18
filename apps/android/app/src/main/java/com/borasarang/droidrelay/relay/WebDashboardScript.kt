@@ -68,10 +68,19 @@ function spd(bps){return bps>0?(bps/1024).toFixed(0)+' KB/s':'-';}
 // serveFile 은 응답당 32MB 로 자른다(MAX_SERVE_SLICE, A90 OOM 방지). 브라우저 다운로드
 // 매니저는 이 206 을 완료로 저장해 **18GB 파일이 32MB 로 잘려 "완료"** 로 나온다(실측).
 // → 서버 무변경, 브라우저가 직접 Range 로 이어받는다.
-// 보안 컨텍스트(HTTPS/localhost)면 File System Access 로 디스크 연속 기록(메모리 무관,
-// 18GB 가능). HTTP LAN 이면 showSaveFilePicker 가 없어 Blob 폴백 — 256MB 까지만 가능
-// (그 이상은 브라우저가 파일 쓰기 저장소를 못 열어 대안 안내 — 무음 절단 금지).
+// 1차: **Chromium 데스크톱(Chrome·Edge·웨일)** + 보안 컨텍스트(HTTPS/localhost)면
+//   showSaveFilePicker + createWritable 로 디스크에 연속 기록 — 메모리 무관, 18GB 가능.
+// 2차: 그 외는 Blob 폴백 — 256MB 까지만. **Safari(macOS/iOS)·Firefox·모바일 브라우저는
+//   File System Access 를 아예 지원하지 않는다**(showSaveFilePicker 는 Chromium 데스크톱
+//   전용 — MDN/caniuse). 그래서 "HTTPS 를 켜라" 는 그 브라우저들에는 처방이 아니다.
+//   그 이상은 **무음 절단 대신 대안 안내**(tooBigAdvice).
 var DL_MEM_MAX=268435456;
+// 대용량이 막혔을 때 **무엇을 하면 되는지**를 브라우저 능력에 맞춰 말한다.
+function tooBigAdvice(){
+  if(!window.showSaveFilePicker)return '이 브라우저는 대용량 디스크 저장(File System Access)을 지원하지 않습니다 — Chrome·Edge 데스크톱으로 열거나 맥 앱·Finder(DAV)로 받으세요';
+  if(!window.isSecureContext)return '앱 설정에서 HTTPS 를 켜면 이 파일도 저장할 수 있습니다(지금은 HTTP 접속)';
+  return '맥 앱·Finder(DAV)로 받으세요';
+}
 function dlProgressCard(name,onCancel){
   var c=document.createElement('div');
   var n=document.querySelectorAll('.dlbar').length;
@@ -164,7 +173,7 @@ function dlLoop(url,name,writable){
       .catch(function(e){
         if(e&&e.name==='AbortError')return; // 취소는 카드가 이미 알림
         if(e&&e.message==='TOO_BIG'){
-          fail('이 브라우저로는 '+fmt(total)+' 파일을 디스크에 저장할 수 없습니다 — 앱 설정에서 HTTPS 켜기 또는 맥 앱·Finder(DAV)로 받기');
+          fail('이 브라우저로는 '+fmt(total)+' 파일을 저장할 수 없습니다 — '+tooBigAdvice());
           return;
         }
         if(++tries<=3){showDlToast('중단 — 3초 후 이어받기 재시도 ('+tries+'/3)');setTimeout(step,3000);return;}

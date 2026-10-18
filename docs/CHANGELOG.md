@@ -19,10 +19,13 @@
 
 - **웹 대시보드 Range 루프 다운로더 (T-1128)** — `dlRange()`·`dlLoop()`: 서버 무변경으로
   `Range: bytes=offset-` 를 반복해 32MB 슬라이스를 끝까지 이어받는다.
-  - **보안 컨텍스트(HTTPS/localhost)**: File System Access(`showSaveFilePicker` +
-    `createWritable`)로 디스크에 연속 기록 — 18GB 도 브라우저 메모리에 올리지 않는다.
-  - **HTTP LAN**: `showSaveFilePicker` 가 없어 Blob 폴백, `DL_MEM_MAX`(256MB) 가드로
-    그 이상은 명시적 실패 안내(HTTPS 켜기·맥 앱·Finder DAV 유도) — **무음 절단 금지**.
+  - **보안 컨텍스트(HTTPS/localhost)** + **Chromium 데스크톱(Chrome·Edge·웨일)**:
+    File System Access(`showSaveFilePicker` + `createWritable`)로 디스크에 연속 기록 —
+    18GB 도 브라우저 메모리에 올리지 않는다. **Safari(macOS/iOS)·Firefox·모바일 브라우저는
+    이 API 를 아예 지원하지 않는다**(Chromium 데스크톱 전용) → HTTPS 를 켜도 256MB 한계다.
+  - **HTTP LAN 또는 미지원 브라우저**: `showSaveFilePicker` 가 없어 Blob 폴백,
+    `DL_MEM_MAX`(256MB) 가드로 그 이상은 **브라우저 능력에 맞는** 명시적 실패 안내
+    (`tooBigAdvice` — 미지원 브라우저에는 "HTTPS 켜기" 를 처방하지 않는다) — **무음 절단 금지**.
   - 일시 오류는 같은 offset 으로 3회 재시도, 취소는 `AbortController` + `writable.abort()`.
   - 배선: 보관함 파일 📥·잡 수신 📥 받기 2곳(인라인은 `this.href`/`this.download` 경유 —
     DashboardInlineHandlerContractTest 지뢰 회피). **폴더 ZIP 📦 은 범위 밖** —

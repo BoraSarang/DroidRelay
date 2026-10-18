@@ -20,6 +20,9 @@ import org.junit.Test
  *    다시 빌드하므로 슬라이스 루프가 걸리면 빌드가 수십~수백 번 폭주한다
  * 4. Blob 폴백 상한(DL_MEM_MAX)이 유지된다 — HTTP LAN(보안 컨텍스트 아님)에서는
  *    File System Access 가 없어 메모리 누적으로만 받으므로 대용량 가드가 필수
+ * 5. 대용량 안내 문구가 **브라우저 능력별로 갈린다** — showSaveFilePicker 는
+ *    Chromium 데스크톱 전용이라 Safari·Firefox·모바일 브라우저에 "HTTPS 켜기" 는
+ *    처방이 아니다(켜도 그대로 막힌다)
  */
 class DashboardRangeDownloaderContractTest {
 
@@ -46,6 +49,31 @@ class DashboardRangeDownloaderContractTest {
         assertTrue("var DL_MEM_MAX=" in html)
         // 가드 없이 메모리에 누적하지 않는다
         assertTrue(html.contains("throw new Error('TOO_BIG')"))
+    }
+
+    // ── 1b. 대용량 안내 문구 (브라우저 능력별) ──────────────────────
+
+    @Test
+    fun `대용량 안내가 미지원 브라우저에 HTTPS 를 처방하지 않는다`() {
+        // Safari(macOS/iOS)·Firefox·모바일 브라우저는 showSaveFilePicker 자체가 없다
+        // (Chromium 데스크톱 전용). 그 브라우저에 "HTTPS 켜기" 라고 말하면
+        // 사용자를 **무의미한 왕복**으로 보낸다 — 켜도 그대로 막힌다.
+        assertTrue(html.contains("function tooBigAdvice()"))
+        val fn = html.substringAfter("function tooBigAdvice()").substringBefore("\n}")
+        assertTrue("미지원 브라우저용 안내 없음: $fn", "Chrome·Edge 데스크톱" in fn)
+        assertTrue("HTTP(비보안 컨텍스트)용 HTTPS 처방 없음: $fn", "HTTPS 를 켜면" in fn)
+        val unsupported = fn.indexOf("!window.showSaveFilePicker")
+        val insecure = fn.indexOf("!window.isSecureContext")
+        assertTrue("미지원 판정이 있어야 한다", unsupported >= 0)
+        assertTrue("미지원 브라우저에는 HTTPS 를 처방하지 않는다(먼저 반환)", unsupported < insecure)
+    }
+
+    @Test
+    fun `대용량 실패는 안내 문구를 거쳐 말한다`() {
+        assertTrue(
+            "TOO_BIG 실패가 tooBigAdvice 를 거치지 않음",
+            "' 파일을 저장할 수 없습니다 — '+tooBigAdvice()" in html,
+        )
     }
 
     // ── 2. 배선 ────────────────────────────────────────────────
