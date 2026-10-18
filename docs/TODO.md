@@ -872,10 +872,11 @@ T-001~T-008 전부 완료 (커밋 7574486).
 
 | T-번호 | 내용 | 상태 |
 |--------|------|------|
-| T-1128 | Range 루프 다운로더 — `dlRange`/`dlLoop`(WebDashboardScript): HTTPS면 File System Access 디스크 기록(18GB 가능), HTTP LAN이면 Blob 폴백+256MB 가드+대안 안내. 배선: 보관함 파일📥·잡📥. 계약 테스트 6건 | ✅ |
+| T-1128 | Range 루프 다운로더 — `dlRange`/`dlLoop`(WebDashboardScript): **Chromium 데스크톱(Chrome·Edge·웨일)+HTTPS**면 File System Access 디스크 기록(18GB 가능), 그 외(HTTP LAN·Safari·Firefox·모바일)는 Blob 폴백+256MB 가드+**브라우저 능력별** 대안 안내(`tooBigAdvice`). 배선: 보관함 파일📥·잡📥. 계약 테스트 9건 | ✅ |
 | T-1128b | **폴더 ZIP 📦 대용량 미해결(범위 밖 기록)** — `/dl-folder` 는 요청마다 ZIP 재빌드라 슬라이스 루프 폭주 위험 → 기존 앵커 유지(32MB 한계 잔존). 해결책: ZIP 완성 후 일정 시간 캐시해 Range 재요청에 재사용 | 📝 |
 | T-1128c | **만료 공유 링크 `/s/{token}` 32MB 한계(범위 밖 기록)** — 대시보드 밖 독립 페이지라 다운로더 미적용. HTTPS+대시보드 다운로더와 동일 로직 붙이기 가능 | 📝 |
-| T-1128d | **실기 E2E 미실시** — S22·A90 모두 서버 종료 상태(연결 거부)라 >32MB 웹 다운로드 검증 보류. 기기 재기 후: HTTPS 켜고 18GB gguf 웹 다운로드 → 전체 크기 확인 + HTTP LAN 256MB 초과 경고 문구 확인 | 🔄 |
+| T-1128d | **실기 검증 — 프로토콜은 완료, 브라우저 클릭은 보류** — 2026-10-18 S22(0.58.0/40): HTTPS(8443) 활성화 후 대시보드 200 · `content-range: bytes 0-0/19343747520` · `dlRange`/`tooBigAdvice` 실림 확인, 18GB 로 Range 전량 이어받기 → **기기 원본 md5 일치**. **브라우저에서 📥 직접 클릭하는 E2E 는 사용자 판단으로 보류**(자동 환경 브라우저 도구는 LAN 접속 불가). HTTPS 는 켜 둔 상태 | 🔄 |
+| T-1128e | **모바일·Safari 웹 대용량은 구조적 한계** — `showSaveFilePicker`(File System Access)는 **Chromium 데스크톱 전용**(MDN/caniuse)이라 iOS·Android 브라우저는 HTTPS 여도 256MB 가드에 막힌다. 그 경우의 대안은 맥 앱 `받기`(T-1129)·Finder DAV. 안내 문구는 브라우저 능력별(`tooBigAdvice`)로 이미 갈라 두었다 | 📝 |
 
 ### 같은 뿌리 — macOS 맥 앱 `받기` 32MB 절단 (T-1129, 2026-10-18 발견)
 
@@ -886,6 +887,6 @@ T-001~T-008 전부 완료 (커밋 7574486).
 | T-번호 | 내용 | 상태 |
 |--------|------|------|
 | T-1129 | 맥 앱 네이티브 Range 이어받기 — `RangeDownload`(Core): `Content-Range` 전체 크기 필수, `.part` 조립, 같은 offset 재시도 3회, 취소 시 `.part` 보존, 이름 `(1)` 회피, `~/Downloads` 저장. 좌우: 저장 중 진행률%+취소. 테스트 22건 | ✅ |
-| T-1129b | **맥 앱 실기 E2E 미실시** — 실기에서 18GB gguf `받기` → 자동검증(RangeDownloadTests)은 있으나 **실제 브라우저/네트워크 경로 확인 필요**. 보관함 폴더 32MB 파일로 먼저 | 🔄 |
+| T-1129b | **맥 앱 실기 E2E 미실시(설치·실행은 완료)** — 2026-10-18 `debug macos` 로 빌드·설치(`~/Applications/DroidRelay.app`)·실행까지 했고 자동검증(`RangeDownloadTests` 22건)은 있으나 **실 네트워크에서 18GB `받기` 클릭 검증은 사용자 판단으로 보류**. 다음: 보관함에서 54MB 급 파일(>32MB) 먼저 → 크기 일치 확인 → 18GB | 🔄 |
 | T-1129c | **Doze 정지(실측 기록)** — 2026-10-18 S22: 18GB 이어받기 중 화면이 꺼져 Doze 로 들어가자 2.7GB 지점에서 전송 정지(오프셋 고정), 화면을 켜자 같은 offset 재요청으로 이어짐. 클라이언트 재시도로 버텼으나 **서버측 대책**(서빙 중 Wi-Fi/partial wake lock) 검토 가치 | 📝 |
 | T-1129d | **HTTP LAN 웹 256MB 가드 실측 확인** — HTTPS 미사용 시 256MB 초과 파일이 "무음 절단" 아닌 **명시 실패 문구**인지 브라우저에서 확인 필요 | 🔄 |
