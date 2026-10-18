@@ -1137,17 +1137,24 @@ final class AppModel {
     /// ▶ 가 없는 형식(`mkv` `avi` `m4v` `dmg` …)에도 **항상** 이게 있다.
     /// 내려받으면 로컬 파일이 되고 그때는 **사용자 기본 프로그램(IINA) 이 열게 된다.**
     /// 이 경로가 없으면 ▶ 가 없는 줄은 아무 방법도 없어서 막다른 길이 된다.
+    ///
+    /// ## 왜 브라우저에 안 넘기는가 (T-1129, 2026-10-18 실측)
+    ///
+    /// 서버 `serveFile` 은 **응답 하나를 32MB 로 자른다**(`MAX_SERVE_SLICE` — A90 OOM
+    /// 수정에서 도입). 그런데 브라우저 다운로드 매니저는 그 206 슬라이스를
+    /// **"완료" 로 저장하고** `Content-Range` 의 전체 크기를 무시한 채 후속 `Range`
+    /// 요청을 보내지 않는다. 그래서 18GB gguf 가 **32MB 로** 저장되고 화면에는
+    /// "완료" 가 떴다(사용자 제보 → 원인 확인).
+    ///
+    /// → 이제 앱이 직접 `Range: bytes=offset-` 를 반복해 끝까지 받는다.
+    /// `.part` 에 받고 **전체 크기를 확인한 뒤에만** 완성 이름으로 바꾼다.
     func downloadStorage(_ entry: StorageEntry) {
         guard !entry.isDirectory else { return }
         guard let s = server, let u = RelayClient.downloadURL(base: s.baseURL, path: entry.path) else {
             notify("받기 실패 — 서버 주소를 모릅니다", kind: .error)
             return
         }
-        if NSWorkspace.shared.open(u) {
-            notify("받는 중 — \(entry.name)", kind: .info)
-        } else {
-            notify("받기 실패 — \(entry.name) 을 브라우저로 열지 못했습니다", kind: .error)
-        }
+        startDownload(url: u, key: DownloadKey.storage(entry.path), name: entry.name)
     }
 
     /// **한 단계 위로.** 루트면 아무 일도 없다.
@@ -1414,17 +1421,121 @@ final class AppModel {
     /// 클릭으로 확인하지 않으면 **절대 못 찾는 버그**였다.
     ///
     /// 조립은 `RelayClient.fileURL(base:id:)` 로 옮겼다 — **테스트로 고정돼 있다.**
+    ///
+    /// ## 브라우저에 넘기지 않는다 (T-1129)
+    ///
+    /// 웹 1174행은 `/file/{id}` 를 브라우저가 직접 내려받는 링크로 준다. 맥 앱도
+    /// 그랬는데, **31MB 넘는 파일은 32MB 에서 잘렸다**(서버가 응답당 32MB 로 자르고
+    /// 브라우저는 이어받지 않는다). 이제 앱이 직접 받는다 — 보관함 `받기` 와 같은 경로다.
     func openJobFile(_ j: RelayClient.Job) {
         guard let s = server, let u = RelayClient.fileURL(base: s.baseURL, id: j.id) else {
             notify("받기 실패 — 서버 주소를 모릅니다", kind: .error)
             return
         }
-        // **열지 못했다면 말해야 한다.** `open` 은 `Bool` 을 돌려주는데
-        // 무시하면 "누르는 데 실패했다" 와 "아무 일도 없었다" 가 화면에서 같다.
-        if NSWorkspace.shared.open(u) {
-            notify("받는 중 — \(j.name)", kind: .info)
-        } else {
-            notify("받기 실패 — \(j.name) 을 브라우저로 열지 못했습니다", kind: .error)
-        }
+        startDownload(url: u, key: DownloadKey.job(j.id), name: j.name)
     }
+
+    // MARK: - 받기 (Range 이어받기 · T-1129)
+
+    /// **진행 중인 내려받기** — 키는 보관함 경로 또는 `job:{id}`.
+    ///
+    /// 목록 행이 이 값을 보고 `받기` 대신 진행률과 취소를 보여준다.
+    /// 18GB 는 20분이 걸린다 — 그동안 화면이 조용하면 사용자는 멈춘 줄 안다.
+    private(set) var downloads: [String: DownloadProgress] = [:]
+
+    /// 진행 중인 작업 핸들 — **취소**가 이것을 잡는다.
+    @ObservationIgnored private var downloadTasks: [String: Task<Void, Never>] = [:]
+
+    /// **받는 폴더** — 표준 `~/Downloads`.
+    var downloadsFolder: URL {
+        FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
+            ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Downloads")
+    }
+
+    /// 보관함 줄이 보여줄 진행률.
+    func storageDownload(_ entry: StorageEntry) -> DownloadProgress? {
+        downloads[DownloadKey.storage(entry.path)]
+    }
+
+    /// 잡 줄이 보여줄 진행률.
+    func jobDownload(_ j: RelayClient.Job) -> DownloadProgress? {
+        downloads[DownloadKey.job(j.id)]
+    }
+
+    func cancelStorageDownload(_ entry: StorageEntry) {
+        cancelDownload(key: DownloadKey.storage(entry.path))
+    }
+
+    func cancelJobDownload(_ j: RelayClient.Job) {
+        cancelDownload(key: DownloadKey.job(j.id))
+    }
+
+    /// **내려받기를 시작한다.**
+    ///
+    /// - 이미 같은 파일을 받는 중이면 아무 일도 하지 않는다(중복 요청 금지).
+    ///   취소는 행의 `취소` 버튼이 맡는다 — 같은 버튼이 "시작"과 "취소" 를 겸하면
+    ///   두 번 누른 사용자가 **모르고 취소**하게 된다.
+    /// - 실패해도 `.part` 는 남는다. 다시 누르면 **그 지점부터** 이어받는다.
+    /// - 완료되면 `~/Downloads` 의 **경로를 안내에 남긴다.** Finder 를 강제로 띄우지 않는다
+    ///   (포커스 스틸 금지 — 사용자가 다른 일을 하고 있을 수 있다).
+    func startDownload(url: URL, key: String, name: String) {
+        guard downloadTasks[key] == nil else { return }
+        let folder = downloadsFolder
+        downloads[key] = DownloadProgress(received: 0, total: nil)
+        notify("받는 중 — \(name)", kind: .info)
+
+        let task = Task { [weak self] in
+            do {
+                let file = try await RangeDownload.download(
+                    url: url,
+                    into: folder,
+                    fileName: name,
+                    progress: { received, total in
+                        Task { @MainActor in
+                            self?.downloads[key] = DownloadProgress(received: received, total: total)
+                        }
+                    },
+                    onRetry: { attempt in
+                        Task { @MainActor in
+                            self?.notify("받기 재시도 \(attempt)회 — \(name) · 연결이 끊겨 같은 지점에서 다시 시도합니다", kind: .info)
+                        }
+                    }
+                )
+                let size = (try? FileManager.default.attributesOfItem(atPath: file.path)[.size] as? NSNumber)?.int64Value ?? 0
+                self?.finishDownload(key: key)
+                self?.notify(
+                    "받기 완료 — \(name) · \(RelayClient.format(bytes: Int(size))) · \(file.deletingLastPathComponent().path)",
+                    kind: .success
+                )
+            } catch {
+                let cancelled = DownloadError.isCancellation(error)
+                self?.finishDownload(key: key)
+                if cancelled {
+                    // 취소는 실패가 아니다 — 받은 조각은 남아 있다.
+                    self?.notify("받기 취소 — \(name) · 받은 조각은 보존했습니다(다시 누르면 이어받습니다)", kind: .info)
+                } else {
+                    self?.notify("받기 실패 — \(name): \(error.localizedDescription)", kind: .error)
+                }
+            }
+        }
+        downloadTasks[key] = task
+    }
+
+    /// **받기를 취소한다.** `.part` 는 지우지 않는다 — 그게 이어받기의 근거다.
+    func cancelDownload(key: String) {
+        downloadTasks[key]?.cancel()
+    }
+
+    private func finishDownload(key: String) {
+        downloads[key] = nil
+        downloadTasks[key] = nil
+    }
+}
+
+/// **내려받기 키** — 목록 키(보관함 경로 / 잡 id)를 한 곳에서 만든다.
+///
+/// 보관함과 잡이 같은 파일 이름을 가질 수 있어 **접두사로 구분**한다.
+enum DownloadKey {
+    static func job(_ id: String) -> String { "job:\(id)" }
+    static func storage(_ path: String) -> String { path }
 }

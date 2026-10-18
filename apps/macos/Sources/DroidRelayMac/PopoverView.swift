@@ -450,7 +450,9 @@ struct PopoverView: View {
                                onAction: { act in model.control(j.id, act) },
                                onDelete: { model.askJobDelete(j) },
                                onDownload: { model.openJobFile(j) },
-                               onLimit: { bps in model.jobLimit(j.id, bps) })
+                               onLimit: { bps in model.jobLimit(j.id, bps) },
+                               download: model.jobDownload(j),
+                               onCancelDownload: { model.cancelJobDownload(j) })
                     }
                 }
                 .padding(5)
@@ -557,7 +559,9 @@ struct PopoverView: View {
                                    onDownload: { model.downloadStorage(e) },
                                    onRename: { model.askConfirm(.init(kind: .rename(e))) },
                                    onMove: { model.askConfirm(.init(kind: .move(e))) },
-                                   onTrash: { model.askStorageTrash(e) })
+                                   onTrash: { model.askStorageTrash(e) },
+                                   download: model.storageDownload(e),
+                                   onCancelDownload: { model.cancelStorageDownload(e) })
                     }
                 }
                 .padding(5)
@@ -871,10 +875,14 @@ struct JobRow: View {
     /// `POST /api/jobs/{id}/{action}` 이지만 삭제는 `DELETE /api/jobs/{id}` 다.
     /// 같은 클로저로 보내면 서버가 400 으로 거절한다(실측).
     var onDelete: () -> Void = {}
-    /// **받기 — `GET /file/{id}` 를 브라우저로 연다** (웹 1174행)
+    /// **받기 — `GET /file/{id}`** (웹 1174행). 앱이 직접 Range 로 받는다(T-1129).
     var onDownload: () -> Void = {}
     /// **속도 제한 — `POST /api/jobs/{id}/limit`** (B/s 값)
     var onLimit: (Int) -> Void = { _ in }
+    /// **받는 중이면 진행률** — 있으면 `📥 받기` 대신 진행률과 취소가 보인다.
+    var download: DownloadProgress? = nil
+    /// **받기 취소** — `.part` 는 남아 다시 누르면 이어받는다.
+    var onCancelDownload: () -> Void = {}
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -936,7 +944,11 @@ struct JobRow: View {
                 // `DONE` 밖에서 누르면 서버가 400 "아직 완료되지 않았습니다" 다
                 // (JobRoutes 240행) → **누를 수 있는데 안 되는 버튼**이 된다.
                 if ActionRules.jobDownloadable(job.state) {
-                    small("📥 받기", .primary) { onDownload() }
+                    if let p = download {
+                        DownloadBadge(progress: p, onCancel: onCancelDownload)
+                    } else {
+                        small("📥 받기", .primary) { onDownload() }
+                    }
                 }
                 ForEach(actions, id: \.self) { a in
                     if a == .videoNotice {
@@ -1151,6 +1163,40 @@ struct TorrentRow: View {
     }
 }
 
+/// **받는 중 표시 — 진행률 + 취소.**
+///
+/// ## 왜 행에 진행률을 두는가
+///
+/// 실측(2026-10-18): 보관함의 18GB gguf 를 받는 데만 20분이 넘는다. 그동안 화면이
+/// 조용하면 사용자는 **멈춘 줄 알고 다시 누르고**, 다시 누르면 받던 것을 포기한다.
+/// 진행률이 있으면 "느린 것" 과 "멈춘 것" 이 구분된다.
+///
+/// ## 왜 취소가 필요한가
+///
+/// 잘못 눌렀을 때 되돌릴 방법이 없으면(20분 짜리 전송) 사용자는 앱을 강제 종료한다.
+/// 취소는 `.part` 를 남기므로 **다시 누르면 그 지점부터** 이어받는다 — 손해가 없다.
+struct DownloadBadge: View {
+    let progress: DownloadProgress
+    let onCancel: () -> Void
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Text(progress.percentText)
+                .font(.system(size: 10.5, weight: .semibold))
+                .monospacedDigit()
+                .foregroundStyle(.cyan)
+                .help(progress.rowText)
+            Button(action: onCancel) {
+                Text("취소")
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .help("받기 취소 — 받은 조각은 남아 다시 누르면 이어받습니다")
+        }
+    }
+}
+
 /// 보관함 한 줄.
 ///
 /// **행을 누르면 폴더면 내려가고, 오른쪽 메뉴에서 조작한다.**
@@ -1174,6 +1220,10 @@ struct StorageRow: View {
     let onRename: () -> Void
     let onMove: () -> Void
     let onTrash: () -> Void
+    /// **받는 중이면 진행률** — 있으면 `받기` 대신 진행률과 취소가 보인다.
+    var download: DownloadProgress? = nil
+    /// **받기 취소** — `.part` 는 남아 다시 누르면 이어받는다.
+    var onCancelDownload: () -> Void = {}
 
     /// **▶ 가 뜰 파일인가** — `mp4`·`mp3` 만 (IINA 우선, 없으면 브라우저).
     private var playable: Bool { ActionRules.isStreamPlayable(entry.name) }
@@ -1202,6 +1252,28 @@ struct StorageRow: View {
 
     /// **재생되는 파일은 영화 아이콘** — ▶ 가 있는 줄임을 모양도로 알린다.
     private var mediaIcon: String { playable ? "play.rectangle.fill" : "doc.fill" }
+
+    /// **받기 버튼 또는 진행률** — 받는 중이면 진행률과 취소가 자리를 대신한다.
+    ///
+    /// ## 왜 `받기` 를 지우나
+    ///
+    /// 받는 중에 `받기` 가 그대로 보이면 사용자는 **또 누른다**(아무 일도 안 일어난다).
+    /// 그 자리를 진행률이 차지해야 "지금 받고 있다" 가 화면의 사실이 된다.
+    /// 18GB 는 20분이 걸린다 — 그동안 아무 표시가 없으면 멈춘 줄 안다.
+    @ViewBuilder
+    private var downloadControl: some View {
+        if let p = download {
+            DownloadBadge(progress: p, onCancel: onCancelDownload)
+        } else {
+            Button(action: onDownload) {
+                Text("받기")
+                    .font(.system(size: 10.5, weight: .medium))
+                    .foregroundStyle(Color.accentColor)
+            }
+            .buttonStyle(.plain)
+            .help("Mac 으로 내려받기")
+        }
+    }
 
     var body: some View {
         HStack(spacing: 7) {
@@ -1270,26 +1342,14 @@ struct StorageRow: View {
                 // 잘 되는 파일만 못 받는 셈이다.
                 //
                 // → **재생과 받기를 나란히 둔다.** 둘 다 "가져오기" 라 같은 급의 동작이다.
-                Button(action: onDownload) {
-                    Text("받기")
-                        .font(.system(size: 10.5, weight: .medium))
-                        .foregroundStyle(Color.accentColor)
-                }
-                .buttonStyle(.plain)
-                .help("Mac 으로 내려받기")
+                downloadControl
             } else {
                 // **재생 못 하는 형식은 ▶ 대신 받기만 둔다.**
                 //
                 // 내려받으면 로컬 파일이 되고 **사용자 기본 프로그램(IINA) 이 열어 준다.**
                 // 막다른 길이 없도록 — ▶ 는 진짜 재생되는 파일에만.
                 // (`m4v` `mov` `webm` 도 여기 걸린다. 재생은 되지만 ▶ 는 두지 않는다.)
-                Button(action: onDownload) {
-                    Text("받기")
-                        .font(.system(size: 10.5, weight: .medium))
-                        .foregroundStyle(Color.accentColor)
-                }
-                .buttonStyle(.plain)
-                .help("Mac 으로 내려받기")
+                downloadControl
             }
 
             Menu {
