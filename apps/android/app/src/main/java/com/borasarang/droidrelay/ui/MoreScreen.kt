@@ -88,11 +88,13 @@ fun MoreScreen(
                 Spacer(Modifier.size(14.dp))
                 Column(Modifier.weight(1f)) {
                     Text("DroidRelay", style = MaterialTheme.typography.titleLarge)
-                    Text(
-                        if (version.isBlank()) "릴레이 콘솔" else "v$version · 릴레이 콘솔",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = cs.onPrimaryContainer.copy(alpha = 0.72f),
-                    )
+                    if (version.isNotBlank()) {
+                        Text(
+                            "v$version",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = cs.onPrimaryContainer.copy(alpha = 0.72f),
+                        )
+                    }
                 }
             }
         }

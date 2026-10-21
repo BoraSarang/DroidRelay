@@ -37,6 +37,24 @@
 - **모바일 가로 넘침 수정** — `#panel-dl` 입력행의 `flex-basis:100%!important` 를 `auto!important` 로 좁혀
   추가 버튼이 화면 밖으로 밀리지 않게.
 
+### Fixed [android] — S22 실기 피드백
+
+- **라이트 테마 시스템 바 아이콘** — 앱 테마가 시스템과 다를 때(예: 시스템 다크 + 앱 라이트)
+  상태바·내비바 아이콘이 흰색으로 남아 보이지 않던 문제. `DroidRelayTheme` 에서 실제 스킴에 맞춰
+  `WindowCompat.getInsetsController(...).isAppearanceLightStatusBars/NavigationBars` 를 갱신.
+- **진행 바 끝 점(stop indicator) 제거** — M3 `LinearProgressIndicator` 의 점이 4~8dp 얇은 바에서
+  떠 있는 것처럼 보였다. 공용 `DrProgressBar`(트랙+채움)로 교체 — 홈·받기·토렌트·보관함.
+- **보관함 루트 중복 제목** — 상단바 "보관함" 과 브레드크럼 "보관함" 이 겹치던 것을 경로가 있을 때만
+  표시하도록 정리.
+- **더보기 카드 부제** — "릴레이 콘솔" 문구 제거, `v0.59.0` 만 표시.
+
+### Verified on device (S22)
+
+- SM-S901N 에 `adb install -r` — 디버그 서명 동일(데이터 보존, `firstInstallTime` 유지), `0.59.0/41`.
+- 라이트/다크 전환, 5탭 이동, 통계·설정 보조 화면 + 뒤로가기, 테마 시스템 복귀 확인.
+- 서버 시작 후 `http://192.168.86.49:3000/` **200**, 새 토큰(`--accent:#006B56`)·레일 CSS 서빙 확인.
+  (10분 유휴 자동 정지는 기존 설계 동작)
+
 ### Verified
 
 - `:app:compileDebugKotlin` 성공(경고 4: 기존 deprecated 3 + `LocalClipboardManager`).
