@@ -15,25 +15,27 @@ internal object WebDashboardHead {
 <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16.png">
 <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
 <link rel="manifest" href="/site.webmanifest">
-<meta name="theme-color" content="#0A1428">
+<meta name="theme-color" content="#F6FBF7">
 <title>DroidRelay</title>
 <style>
-  :root{color-scheme:dark;
-    --bg:#070B07;--surface:#0C130C;--surface2:#131C13;--track:#1C2A1C;--line:#223A22;--line2:#2E5230;
-    --text:#E9FFE9;--muted:#93B795;--dim:#4E6B50;--accent:#39FF14;--on-accent:#061206;--accent2:#00E5FF;
-    --accentbg:#0F3311;--ok:#39FF14;--okbg:#0E2F12;--err:#FF5470;--danger:#3A0F18;--warn:#FFE14D;
-    --sel:#122A12;--glow:rgba(57,255,20,.28)}
-  body[data-theme=navy]{--bg:#0A1428;--surface:#101E3A;--surface2:#12203D;--track:#1B2B4D;--line:#22345A;
-    --line2:#2A3B5C;--text:#E6EEF8;--muted:#8FA3BF;--dim:#55688C;--accent:#2F80ED;--on-accent:#FFFFFF;
-    --accent2:#8FD8FF;--accentbg:#123A63;--ok:#69E29B;--okbg:#12402F;--err:#FF8A93;--danger:#40191C;
-    --warn:#FFD59E;--sel:#122A4D;--glow:transparent}
-  body[data-theme=midnight]{--bg:#050508;--surface:#0D0D14;--surface2:#15151F;--track:#1E1E2A;--line:#26263A;
-    --line2:#34345A;--text:#F2EDFF;--muted:#9D94C0;--dim:#5E5578;--accent:#B537F2;--on-accent:#FFFFFF;
-    --accent2:#E879F9;--accentbg:#2A1245;--ok:#4ADE80;--okbg:#0B2E1D;--err:#FB7185;--danger:#3A0F16;
-    --warn:#FBBF24;--sel:#1D1030;--glow:rgba(181,55,242,.22)}
+  /* ── v0.59 DroidRelay 토큰 (라이트 기본 · 다크는 data-theme) ──
+     시드 #006B56. 이름은 기존 대시보드 변수(--bg/--surface/--accent…)를 유지해
+     마크업·스크립트 계약을 건드리지 않는다. 단일 출처: docs/mockups/redesign-v059/README.md */
+  :root{color-scheme:light;
+    --bg:#F6FBF7;--surface:#FFFFFF;--surface2:#F0F5F0;--track:#DEE4DE;--line:#BFC9C3;--line2:#A9B5AF;
+    --text:#171D1A;--muted:#3F4945;--dim:#6F7974;--accent:#006B56;--on-accent:#FFFFFF;--accent2:#006B56;
+    --accentbg:#7FF8D8;--ok:#006B56;--okbg:#CCE8DF;--err:#BA1A1A;--danger:#FFDAD6;--warn:#7C5800;
+    --sel:#EAEFEA;--glow:transparent}
+  body[data-theme=dark]{color-scheme:dark;
+    --bg:#0E1513;--surface:#171D1B;--surface2:#1B211F;--track:#303634;--line:#3F4945;--line2:#4A544F;
+    --text:#DDE4DF;--muted:#BFC9C3;--dim:#89938E;--accent:#62DCBE;--on-accent:#00382D;--accent2:#62DCBE;
+    --accentbg:#005141;--ok:#62DCBE;--okbg:#005141;--err:#FFB4AB;--danger:#93000A;--warn:#F5BF48;
+    --sel:#252B29;--glow:transparent}
   body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 -apple-system,'Malgun Gothic',sans-serif}
-  .wrap{max-width:1080px;margin:0 auto;padding:20px;min-width:480px}
-  h1{font-size:20px;margin:0}
+  .wrap{max-width:1180px;margin:0 auto;padding:20px;display:grid;grid-template-columns:168px minmax(0,1fr);
+        gap:8px 22px;align-items:start}
+  .wrap>.hd{grid-column:1/-1}
+  h1{font-size:22px;margin:0;letter-spacing:-.02em;font-weight:700}
   .hd{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:14px}
   /* margin-left:auto — v0.41: 모바일에서 .hd 가 줄바꿈되면 두 번째 줄에 .hd-acts 혼자
      남고 space-between 은 한 줄짜리 flex line 을 오른쪽으로 밀지 않는다(좌측 정렬).
@@ -53,11 +55,6 @@ internal object WebDashboardHead {
   .fill{background:linear-gradient(90deg,var(--accent),var(--accent2),var(--accent));background-size:200% 100%;
     animation:flow 2.5s linear infinite}
   @keyframes flow{to{background-position:-200% 0}}
-  body[data-theme=toxic] h1{text-shadow:0 0 18px var(--glow)}
-  body[data-theme=midnight] h1{text-shadow:0 0 18px var(--glow)}
-  body[data-theme=toxic] .card,body[data-theme=toxic] .file-row{box-shadow:0 0 14px rgba(57,255,20,.12)}
-  body[data-theme=midnight] .card,body[data-theme=midnight] .file-row{box-shadow:0 0 16px var(--glow)}
-  body[data-theme=toxic] .tab.active,body[data-theme=midnight] .tab.active{box-shadow:0 0 14px var(--glow)}
   .info{display:flex;align-items:center;justify-content:space-between;gap:14px;color:var(--muted);font-size:12px;background:var(--surface);border:1px solid var(--line);
         border-radius:12px;padding:10px 14px;margin-bottom:16px}
   .info-left{display:flex;align-items:center;gap:16px;flex:1;min-width:0;white-space:nowrap;overflow:hidden}
@@ -137,11 +134,12 @@ internal object WebDashboardHead {
   .empty{color:var(--dim);text-align:center;padding:26px 0}
   .speed{color:var(--accent2);font-weight:600}
   .eta{color:var(--muted);font-size:12px}
-  .tabs{display:flex;gap:4px;margin-bottom:16px}
-  .tab{flex:1;padding:10px;border-radius:10px;border:1px solid var(--line2);background:var(--surface);color:var(--muted);text-align:center;
-       font-weight:600;font-size:14px;cursor:pointer;transition:all .15s}
-  .tab.active{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
-  .panel{display:none}.panel.active{display:block}
+  .tabs{grid-column:1;grid-row:2;display:flex;flex-direction:column;gap:4px;margin:0;position:sticky;top:20px}
+  .tab{padding:11px 14px;border-radius:14px;border:1px solid transparent;background:transparent;color:var(--muted);text-align:left;
+       font-weight:600;font-size:14px;cursor:pointer;transition:background .15s,color .15s}
+  .tab:hover{background:var(--surface2)}
+  .tab.active{background:var(--accentbg);border-color:transparent;color:var(--text)}
+  .panel{display:none;grid-column:2;grid-row:2;min-width:0}.panel.active{display:block}
   .file-icon{font-size:20px;margin-right:8px;flex-shrink:0}
   .file-thumb{width:40px;height:40px;object-fit:cover;border-radius:8px;margin-right:8px;flex:none;background:var(--bg)}
   .file-meta{color:var(--muted);font-size:12px;margin-top:2px}
@@ -296,9 +294,12 @@ internal object WebDashboardHead {
     .row input,.row-torrent input{flex:1 1 100%!important;min-width:0}
     .row-torrent button{flex:1}
     #panel-dl>.row{flex-wrap:nowrap}
-    #panel-dl>.row input{flex:1 1 auto;min-width:0}
+    #panel-dl>.row input{flex:1 1 auto!important;min-width:0}
     .row button{flex-shrink:0}
-    .tabs .tab{padding:9px 2px;font-size:13px}
+    .tabs{position:fixed;left:0;right:0;bottom:0;z-index:55;flex-direction:row;gap:0;
+      background:var(--surface);border-top:1px solid var(--line);padding:6px 8px calc(6px + env(safe-area-inset-bottom));top:auto}
+    .tab{flex:1;text-align:center;padding:10px 4px;font-size:12.5px;border-radius:12px}
+    .wrap{display:block;padding-bottom:92px}
     .hd{flex-wrap:wrap;margin-bottom:12px}
     #btnRefresh{padding:12px 16px;min-height:44px}
     #btnInfoMenu{padding:12px 16px;min-height:44px;min-width:44px}

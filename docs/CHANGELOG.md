@@ -1,5 +1,51 @@
 # Changelog
 
+## [Unreleased] — v0.59 DroidRelay 리디자인 (android + web, T-1130~T-1135)
+
+> 배경: *"안드로이드 디자인 스킬로 최신 방법으로 리디자인, 다크/라이트 지원 목업. 웹도 같이"* →
+> 사용자 확정 4건: **딥 파인 시드 유지 · 하단 내비 6→5 · 웹 테마 라이트/다크 통합 · 라인 아이콘**.
+> 단일 출처: `docs/mockups/redesign-v059/` (토큰 표·목업) · 계획: `docs/plans/PLAN_v0.59_redesign_android-web.md`.
+> **동작 불변** — 화면 이동·이벤트·웹 문자열 계약(`ID`/`switchTab`/`panel-*`) 유지.
+
+### 버전
+
+- `0.58.0/40` 유지 — 릴리스 시 `scripts/bump-version.sh` 로만 올린다(아직 bump 안 함).
+
+### Changed [android]
+
+- **M3 토큰 교체** — Light `primary #006B56` / `primaryContainer #7FF8D8` / surface `#F6FBF7`,
+  Dark `primary #62DCBE` / surface `#0E1513`. `secondary`(세이지)·`tertiary`(앰버) 포함 전체 역할 토큰.
+- **타이포** — 숫자(속도·용량·진행률) `fontFeatureSettings="tnum"`, 디스플레이/타이틀 웨이트 상향,
+  Shapes 6/10/16/18/28dp.
+- **`dynamicColor` 기본 OFF** — 기기 벽지 색이 브랜드를 덮지 않게. 설정 스위치는 유지(OS 동적 색상 선택 가능).
+- **하단 내비 6→5** — `홈 · 받기 · 토렌트 · 보관함 · 더보기`. 통계·설정은 `더보기`에서 진입하는
+  보조 화면(상단 뒤로가기 + 시스템 Back). 알림/위젯의 기존 인덱스는 그대로 수용:
+  `4 → 설정`, `5 → 통계` 로 매핑.
+- **`MoreScreen` 신설** — 브랜드 카드 + 통계/설정/디버그 로그 진입.
+- **아이콘 라인 통일** — `Icons.Filled.*` → `Icons.Outlined.*` / `Icons.AutoMirrored.Outlined.*`.
+- **화면 다듬기** — 홈 서버 카드를 `primaryContainer` 히어로로, 받기 작업 카드는 `surfaceContainerLow`+외곽선
+  (진행 중만 primary 테두리)과 8dp 진행바+% 숫자, 토렌트는 3분할 요약(↓/↑/시드·피어), 보관함은 저장공간
+  헤더(여유/전체+게이지).
+
+### Changed [web]
+
+- **테마 3종(Toxic/Midnight/Navy) → 라이트/다크/시스템** — `:root` 라이트 기본, `body[data-theme=dark]` 다크.
+  기존 변수명(`--bg/--surface/--accent…`)은 유지하고 값만 M3 로 매핑(마크업·스크립트 계약 불변).
+- **상단 탭 → 좌측 레일** — `.wrap` 을 2열 그리드로(레일 168px), 640px 이하에서는 **하단 내비**로 전환.
+- **`setTheme(system|light|dark)`** — `matchMedia('(prefers-color-scheme: dark)')` 구독으로 시스템 변경 즉시 반영,
+  `localStorage.dr_theme` 저장, `meta[theme-color]` 동기화. 기존 저장값(`toxic` 등)은 `system` 으로 폴백.
+- **모바일 가로 넘침 수정** — `#panel-dl` 입력행의 `flex-basis:100%!important` 를 `auto!important` 로 좁혀
+  추가 버튼이 화면 밖으로 밀리지 않게.
+
+### Verified
+
+- `:app:compileDebugKotlin` 성공(경고 4: 기존 deprecated 3 + `LocalClipboardManager`).
+- `:app:testDebugUnitTest` **412건 / 0 실패** — 대시보드 계약 6종 포함.
+- 웹: 헤드리스 Chrome 1280 라이트/다크, 500(≤640 모바일 내비) 캡처 확인. 390 실브라우저는 미실시.
+- `:app:lintDebug` — **기존 8오류**(`NetworkType.kt`·`SignalMonitor.kt`·`DownloadEngine.kt`, 이번에 건드리지 않은 파일)로
+  실패. 이번 변경에서 새 오류 없음.
+- 남음: S22 실기 라이트/다크 스크린샷, 390px 실브라우저, 버전 bump/PR.
+
 ## [Unreleased] — v0.58 Range 이어받기: 웹 대시보드 + 맥 앱 (T-1128, T-1129)
 
 > 배경: 사용자 제보 *"S22 웹 보관함에서 EXAONE-3.5 18GB gguf 파일을 다운로드하는데

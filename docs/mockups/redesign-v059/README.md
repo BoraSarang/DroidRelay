@@ -1,4 +1,4 @@
-# DroidRelay 리디자인 목업 — v0.59 "Relay Console"
+# DroidRelay 리디자인 목업 — v0.59
 
 디자인 합의용 목업입니다. 구현 코드가 아니라 **토큰·구조·화면**을 확정하기 위한 문서입니다.
 
@@ -18,7 +18,7 @@ open docs/mockups/redesign-v059/web.html
 
 ## 방향
 
-**"Relay Console"** — 다운로드 릴레이를 계측기(instrument)처럼 보여준다.
+**DroidRelay** — 다운로드 릴레이를 계측기(instrument)처럼 보여준다.
 
 - **시드**: 딥 파인 `#006B56` (신호·중계). 다크에서는 민트 `#62DCBE` 로 밝아진다.
 - **숫자 우선**: 처리량·진행률·남은 시간은 `tabular-nums` + `wdth 92` 로 고정폭. 값이 바뀌어도 폭이 흔들리지 않는다.

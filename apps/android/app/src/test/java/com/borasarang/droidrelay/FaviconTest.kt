@@ -55,7 +55,9 @@ class FaviconTest {
         assertTrue(html.contains("""sizes="16x16" href="/favicon-16.png""""))
         assertTrue(html.contains("""rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png""""))
         assertTrue(html.contains("""rel="manifest" href="/site.webmanifest""""))
-        assertTrue(html.contains("""name="theme-color" content="#0A1428""""))
+        // v0.59: 기본 테마가 라이트로 바뀌어 초기 theme-color 도 라이트 surface 다.
+        // (다크는 WebDashboardScript.applyTheme 이 #0E1513 으로 갱신한다)
+        assertTrue(html.contains("""name="theme-color" content="#F6FBF7""""))
     }
 
     @Test

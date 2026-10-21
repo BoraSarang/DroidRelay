@@ -8,6 +8,7 @@ package com.borasarang.droidrelay.relay
 internal object WebDashboardBody {
     val content: String by lazy {
         """</style></head><body>
+<script>try{var t=localStorage.getItem('dr_theme')||'system';var d=t==='dark'||(t==='system'&&window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches);if(d)document.body.dataset.theme='dark';}catch(e){}</script>
 <div class="wrap">
   <div class="hd"><h1>📡 DroidRelay</h1><div class="hd-acts">
     <button id="btnInfoMenu" class="ghost" onclick="toggleInfoMenu()" title="서버 상태 · 통계 (S)" aria-haspopup="true" aria-expanded="false" aria-controls="infoMenu">📊<i class="mm-dot" id="infoMenuDot" hidden></i></button>
@@ -44,7 +45,7 @@ internal object WebDashboardBody {
       </div>
     </div>
   </div>
-    <button id="btnRefresh" class="ghost" onclick="manualRefresh()" title="새로고침 (R)">⟳</button><select id="themeSel" onchange="setTheme(this.value)" title="테마"><option value="toxic">⚡ Toxic</option><option value="midnight">🌌 Midnight</option><option value="navy">🌊 Navy</option></select></div></div>
+    <button id="btnRefresh" class="ghost" onclick="manualRefresh()" title="새로고침 (R)">⟳</button><select id="themeSel" onchange="setTheme(this.value)" title="테마"><option value="system">⚙ 시스템</option><option value="light">☀ 라이트</option><option value="dark">🌙 다크</option></select></div></div>
 
   <div class="tabs">
     <div class="tab active" onclick="switchTab('dl')">다운로드</div>
