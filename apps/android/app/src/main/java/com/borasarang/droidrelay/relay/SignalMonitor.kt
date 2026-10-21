@@ -1,5 +1,6 @@
 package com.borasarang.droidrelay.relay
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
@@ -40,21 +41,24 @@ class SignalMonitor(private val context: Context) {
         val carrier = runCatching { tm.networkOperatorName?.takeIf { it.isNotBlank() } }
             .getOrNull()
             ?: runCatching { tm.simOperatorName?.takeIf { it.isNotBlank() } }.getOrNull()
-        val rat = runCatching { ratName(tm.dataNetworkType) }.getOrNull()
-            ?: cellularFallback()
+        // READ_PHONE_STATE 는 의도적으로 요청하지 않는다 — 권한이 없으면 SecurityException 이고
+        // 아래 helper 가 null 로 축소한다(게이트는 null 을 fail-open 으로 처리).
+        val rat = ratOrNull(tm) ?: cellularFallback()
         var rsrp: Int? = null
         var rsrq: Int? = null
         var sinr: Int? = null
-        runCatching {
-            tm.signalStrength?.cellSignalStrengths?.forEach {
-                when (it) {
-                    is CellSignalStrengthLte -> {
-                        rsrp = it.rsrp.takeIfValid()
-                        rsrq = it.rsrq.takeIfValid()
-                        sinr = it.rssnr.takeIfValid()
-                    }
-                    is CellSignalStrengthNr -> {
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        // SignalStrength#getCellSignalStrengths 는 API 29+, CellSignalStrengthNr 도 API 29+.
+        // minSdk 26 이므로 하위 기기에서는 신호 상세 없이 carrier/RAT 만 남긴다.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            runCatching {
+                tm.signalStrength?.cellSignalStrengths?.forEach {
+                    when (it) {
+                        is CellSignalStrengthLte -> {
+                            rsrp = it.rsrp.takeIfValid()
+                            rsrq = it.rsrq.takeIfValid()
+                            sinr = it.rssnr.takeIfValid()
+                        }
+                        is CellSignalStrengthNr -> {
                             rsrp = it.ssRsrp.takeIfValid() ?: rsrp
                             rsrq = it.ssRsrq.takeIfValid() ?: rsrq
                             sinr = it.ssSinr.takeIfValid() ?: sinr
@@ -68,6 +72,15 @@ class SignalMonitor(private val context: Context) {
 
     private fun Int.takeIfValid(): Int? =
         if (this == Int.MAX_VALUE || this == Int.MIN_VALUE) null else this
+
+    /** 권한 미허용 시 null — READ_PHONE_STATE 는 의도적으로 요청하지 않는다 */
+    @SuppressLint("MissingPermission")
+    private fun ratOrNull(tm: TelephonyManager): String? =
+        try {
+            ratName(tm.dataNetworkType)
+        } catch (_: SecurityException) {
+            null
+        }
 
     private fun ratName(type: Int): String? = when (type) {
         TelephonyManager.NETWORK_TYPE_LTE -> "LTE"

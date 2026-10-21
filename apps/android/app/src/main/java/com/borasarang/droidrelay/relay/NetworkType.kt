@@ -1,5 +1,6 @@
 package com.borasarang.droidrelay.relay
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.Network
@@ -32,7 +33,12 @@ fun currentNetworkType(context: Context): NetworkType {
     return NetworkType.UNKNOWN
 }
 
-/** 셀룰러 세대 판정 — 통신사 서비스 binder 호출이 여기 한 곳에만 남는다 */
+/** 셀룰러 세대 판정 — 통신사 서비스 binder 호출이 여기 한 곳에만 남는다
+ *
+ * READ_PHONE_STATE 는 **의도적으로 요청하지 않는다**(전화 권한 없이도 앱이 동작해야 함).
+ * 권한이 없으면 두 호출 모두 SecurityException 이고, 아래 try/catch 가 LTE 로 축소한다.
+ */
+@SuppressLint("MissingPermission")
 private fun cellularType(context: Context): NetworkType {
     val tm = context.getSystemService(Context.TELEPHONY_SERVICE) as? TelephonyManager ?: return NetworkType.LTE
     return try {

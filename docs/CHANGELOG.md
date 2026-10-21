@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased] — v0.59 DroidRelay 리디자인 (android + web, T-1130~T-1142)
+## [Unreleased] — v0.59 DroidRelay 리디자인 (android + web, T-1130~T-1143)
 
 > 배경: *"안드로이드 디자인 스킬로 최신 방법으로 리디자인, 다크/라이트 지원 목업. 웹도 같이"* →
 > 사용자 확정 4건: **딥 파인 시드 유지 · 하단 내비 6→5 · 웹 테마 라이트/다크 통합 · 라인 아이콘**.
@@ -85,6 +85,17 @@
   첫 `"""`를 찾지 못해 실패했다. 세 파일의 raw string 을 `WebDashboardHtml` 과 같은 순서(Head + `\n` +
   Body + `\n` + Script)로 이어붙이도록 수정. `verify_dashboard_info_menu.js` **35/35 통과**.
 
+### Fixed [android] — lint 8오류 (T-1143)
+
+- **`SignalMonitor` API 29 가드** — `signalStrength.cellSignalStrengths`·`CellSignalStrengthNr` 는 API 29+
+  인데 minSdk 26 에서 무조건 호출했다. 하위 기기에서는 신호 상세를 건너뛰고 carrier/RAT 만 남긴다
+  (기존에는 `NoSuchMethodError`/`NoClassDefFoundError` 가 `runCatching` 에 삼켜져 **LTE 상세까지 통째로 유실**).
+- **`DownloadEngine.publishToDownloads` API 29 가드** — `MediaStore.Downloads` 는 API 29+.
+  하위 기기에서는 게시를 건너뛰고 앱 전용 원본을 유지한다(기존에는 `NoSuchFieldError` 로 완료 경로가 깨질 수 있었다).
+- **`READ_PHONE_STATE` 미요청 유지** — `NetworkType`·`SignalMonitor` 의 통신사 호출은 권한 없이
+  `SecurityException` → LTE/null 축소가 계약이다. 의도를 주석과 `@SuppressLint("MissingPermission")` 로 고정.
+- `:app:lintDebug` **0 errors / 72 warnings** (경고는 기존 항목).
+
 ### Verified
 
 - `:app:compileDebugKotlin` 성공(경고는 기존 deprecated·nullable 경고뿐, 새 오류 없음).
@@ -92,8 +103,7 @@
 - 웹: 헤드리스 Chrome 1280 라이트/다크, 500(≤640 모바일 내비) 캡처 확인. **390×844 실브라우저(Chromium 155)
   라이트/다크 — `scrollWidth=390`, 가로 오버플로 0, 하단 내비 `position:fixed` 확인**
   (캡처는 로컬 `docs/screenshots/web-v059/`, 저장소 제외).
-- `:app:lintDebug` — **기존 8오류**(`NetworkType.kt`·`SignalMonitor.kt`·`DownloadEngine.kt`, 이번에 건드리지 않은 파일)로
-  실패. 이번 변경에서 새 오류 없음.
+- `:app:lintDebug` — **0 errors / 72 warnings** (경고는 기존 `MANAGE_EXTERNAL_STORAGE` 정책 등, 새 오류 없음).
 - S22 실기(0.59.0/41): 홈 스파크라인 카드 · 받기 칩 4종+`URL 추가` FAB·다이얼로그 · 통계 히어로/30일/4지표/월예상 ·
   설정 기기 카드·그룹 · 검색 꺼진 토렌트 탭에서 검색 UI 미노출 확인.
 - 남음: 라이트 테마에서 2차 폴리시 육안 확인(토큰 공유라 구조 동일) — 사용자 확인 항목.
