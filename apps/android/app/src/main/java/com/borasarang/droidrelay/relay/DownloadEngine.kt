@@ -2,6 +2,7 @@ package com.borasarang.droidrelay.relay
 
 import android.content.ContentValues
 import android.content.Context
+import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
 import java.io.File
@@ -537,6 +538,12 @@ class DownloadEngine(
     private fun rafLength(f: File): Long = f.length()
 
     internal fun publishToDownloads(file: File, jobId: String): Boolean {
+        // MediaStore.Downloads 는 API 29+. 하위 기기에서는 앱 전용 원본을 그대로 유지한다
+        // (공용 Downloads 게시를 시도하면 NoSuchFieldError 로 완료 경로가 깨진다).
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            DebugLogger.w(TAG, "MediaStore.Downloads 미지원(API ${Build.VERSION.SDK_INT}) → 앱 전용 원본 유지 id=$jobId")
+            return false
+        }
         var uri: android.net.Uri? = null
         return try {
             val values = ContentValues().apply {
