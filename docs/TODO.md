@@ -910,6 +910,7 @@ T-001~T-008 전부 완료 (커밋 7574486).
 | T-1138 | 통계 재구성 — 이번 달 전송량 히어로 + 최근 30일 막대(색 범례) + 핵심 4지표 2×2(최고 속도·일평균·완료·실패) + 월 예상 진행 카드. 기존 하이라이트·기록 상세는 `자세히` 접이식으로 보존 | ✅ |
 | T-1139 | 설정 그룹 — 상단 기기 카드(모델·버전·Android) + `디자인 · 전송 · 토렌트 · 원격 접속 · 고급` 그룹 라벨. 섹션 자체 제목과 겹치는 그룹 라벨 생략 | ✅ |
 | T-1140 | 토렌트 검색 끔 상태 — 검색행뿐 아니라 "설정에서 켜세요" 안내 카드까지 숨김(검색 UI 전체 미노출). 웹 대시보드는 기존부터 `tsearchSection` 숨김이라 변경 없음 | ✅ |
-| T-1141 | **라이트 테마 2차 폴리시 육안 확인** — S22 앱 테마를 라이트로 전환해 홈 스파크라인·받기 칩/FAB·통계 히어로/30일 막대·설정 기기 카드/그룹의 대비·간격 확인. 토큰 공유라 구조는 다크와 동일 | 🔄 |
+| T-1141 | **라이트 테마 2차 폴리시 육안 확인** — S22 앱 테마를 라이트로 전환해 홈 스파크라인·받기 칩/FAB·통계 히어로/30일 막대·설정 기기 카드/그룹의 대비·간격 확인. 토큰 공유라 구조는 다크와 동일. **2026-10-21 S22 라이트에서 홈·받기·통계·설정·보관함·토렌트 6화면 확인 — 이상 없음** | ✅ |
 | T-1142 | **웹 HTML 추출 스크립트 복구** — `scripts/extract_dashboard_html.js` 가 Head/Body/Script 3조각 분리 이후 첫 `"""`를 못 찾아 실패. 3파일을 `WebDashboardHtml` 과 같은 순서로 이어붙이도록 수정, `verify_dashboard_info_menu.js` 35/35 통과 | ✅ |
 | T-1143 | **lint 8오류 정리** — `SignalMonitor` API 29 가드(`cellSignalStrengths`·`CellSignalStrengthNr`)로 하위 기기 신호 상세 유실 방지 · `DownloadEngine.publishToDownloads` API 29 가드(하위 기기는 앱 원본 유지) · `READ_PHONE_STATE` 미요청 계약을 주석+`@SuppressLint("MissingPermission")` 로 고정. `lintDebug` **0 errors / 72 warnings**, 테스트 424/0 | ✅ |
+| T-1144 | **32MB 조각 이어받기 실기 검증·수정** — 자체 서버 `serveFile` 32MB 상한 때문에 앱이 206 조각을 받으면 `Content-Length`(조각 크기)를 전체로 오인해 **32MB 에서 DONE**. `Content-Range` `/총량` 파싱(`parseContentRangeTotal`) + 조각 후 같은 실행에서 다음 Range 즉시 요청(`Outcome.NEXT_RANGE`, 시도 횟수 미소모, 빈 조각은 재시도 경로) + 조각별 트래픽 집계. `DownloadRangeTest` 3건. **S22 실기**: 80MB → 수정 전 32MB DONE 재현, 수정 후 83,886,080B DONE·md5 일치, 오늘 전송량 +80MB. 테스트 **427/0** | ✅ |

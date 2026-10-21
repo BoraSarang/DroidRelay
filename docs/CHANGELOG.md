@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased] — v0.59 DroidRelay 리디자인 (android + web, T-1130~T-1143)
+## [Unreleased] — v0.59 DroidRelay 리디자인 (android + web, T-1130~T-1144)
 
 > 배경: *"안드로이드 디자인 스킬로 최신 방법으로 리디자인, 다크/라이트 지원 목업. 웹도 같이"* →
 > 사용자 확정 4건: **딥 파인 시드 유지 · 하단 내비 6→5 · 웹 테마 라이트/다크 통합 · 라인 아이콘**.
@@ -45,6 +45,20 @@
 - **토렌트 검색 안내 카드 제거** — 검색을 끄면 검색행뿐 아니라 "설정에서 켜세요" 안내 카드까지 남아 있었다.
   사용자 지시("검색은 안 쓴다 · 끄면 안 보이게")에 따라 **비활성 시 검색 UI 전체를 숨긴다**. 웹 대시보드는
   이미 `tsearchSection` 을 숨기고 있어 변경 없음.
+
+### Fixed [android] — 32MB 조각 이어받기 (T-1144)
+
+- **조각을 전체 크기로 오인하던 문제** — 자체 서버 `serveFile` 은 A90 OOM 방지를 위해 응답당 **32MB** 로 자른다
+  (`MAX_SERVE_SLICE`). 앱이 `Range: bytes=n-` 로 이어받을 때 `Content-Length` 는 **조각 크기**인데, 기존 코드는
+  이를 전체 크기로 계산해 **32MB 에서 "완료"** 로 끝났다(80MB 파일 → 32MB 저장, 진행률 100%).
+- **`Content-Range` 총량 파싱** — `parseContentRangeTotal()` 로 `bytes 0-33554431/83886080` 의 `/총량` 을 읽어
+  `totalBytes`·진행률을 전체 기준으로 계산한다. 헤더가 없거나 `*`·0 이하·비숫자면 기존 `Content-Length` 폴백.
+- **같은 실행에서 다음 조각 즉시 요청** — 조각을 다 받았는데 전체보다 작으면 `Outcome.NEXT_RANGE` 로
+  재시도 대기(최대 30초)·시도 횟수 소모 **없이** 곧바로 다음 Range 를 보낸다. 빈 조각이 반복되면(진행 0)
+  무한 루프 대신 기존 재시도 경로로 넘긴다.
+- **조각별 트래픽 집계** — 마지막 조각만 세면 통계가 32MB 로 줄어들므로, 조각마다 실수신 바이트를
+  `TrafficLedger.addDownHttp` 에 더한다.
+- 테스트 `DownloadRangeTest` 3건(총량 파싱 · 누락/`*` · 0 이하/비숫자).
 
 ### Changed [web]
 
@@ -99,7 +113,11 @@
 ### Verified
 
 - `:app:compileDebugKotlin` 성공(경고는 기존 deprecated·nullable 경고뿐, 새 오류 없음).
-- `:app:testDebugUnitTest` **424건 / 0 실패** — 대시보드 계약 6종 + `DownloadFilterTest` 7건 · `SpeedSeriesTest` 5건 신규.
+- `:app:testDebugUnitTest` **427건 / 0 실패** — 대시보드 계약 6종 + `DownloadFilterTest` 7건 · `SpeedSeriesTest` 5건 · `DownloadRangeTest` 3건 신규.
+- **S22 실기 T-1144**: 수정 전 빌드에서 80MB 파일이 **32MB 에서 DONE**(job `downloadedBytes=33554432`) 재현 →
+  수정 후 같은 URL 이 **83,886,080B DONE**, 원본과 **md5 일치**(`c4cc9214…`), 오늘 전송량 32.0→112.0MB(+80MB) 확인.
+- **S22 라이트 테마(T-1141)**: 홈·받기·통계·설정·보관함·토렌트 6화면 육안 — 칩/FAB·히어로 카드·30일 막대·
+  기기 카드·그룹 라벨 대비·간격 이상 없음.
 - 웹: 헤드리스 Chrome 1280 라이트/다크, 500(≤640 모바일 내비) 캡처 확인. **390×844 실브라우저(Chromium 155)
   라이트/다크 — `scrollWidth=390`, 가로 오버플로 0, 하단 내비 `position:fixed` 확인**
   (캡처는 로컬 `docs/screenshots/web-v059/`, 저장소 제외).

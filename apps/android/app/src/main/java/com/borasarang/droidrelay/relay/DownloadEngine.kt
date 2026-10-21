@@ -298,6 +298,12 @@ class DownloadEngine(
                     val after = JobsRepository.get(id)?.state
                     if (after == JobState.CANCELED || after == JobState.PAUSED) return
                 }
+                Outcome.NEXT_RANGE -> {
+                    // 서버 조각(예: 32MB) 이어받기 — 실패가 아니므로 시도 횟수·대기 없음.
+                    val st = JobsRepository.get(id)?.state
+                    if (st == JobState.CANCELED || st == JobState.PAUSED) return
+                    attempt--
+                }
             }
         }
         val lastReason = failureReasons.remove(id)
@@ -313,7 +319,7 @@ class DownloadEngine(
         DebugLogger.e(TAG, "최종 실패 id=$id")
     }
 
-    private enum class Outcome { COMPLETED, CANCELED, PAUSED, RETRY }
+    private enum class Outcome { COMPLETED, CANCELED, PAUSED, RETRY, NEXT_RANGE }
 
     private suspend fun runOnce(id: String): Outcome = withContext(Dispatchers.IO) {
         // withContext 전환 후 스레드가 달라질 수 있어 여기서도 1회 적용 (마스크 캐시됨)
@@ -374,7 +380,10 @@ class DownloadEngine(
                 val contentLen = res.body?.contentLength() ?: -1L
                 val resumed = start > 0 && res.code == 206
                 val offset = if (resumed) start else 0L
-                val total = if (contentLen > 0) contentLen + (if (resumed) start else 0L) else -1L
+                // 서버가 32MB 슬라이스(206)만 줄 때 Content-Length 는 조각 크기다.
+                // 전체 크기는 Content-Range 의 "/총량" 에서 읽어야 한다 (T-1144).
+                val rangeTotal = parseContentRangeTotal(res.header("Content-Range"))
+                val total = rangeTotal ?: if (contentLen > 0) contentLen + offset else -1L
                 DebugLogger.i(
                     TAG,
                     "전송 개시 id=$id mode=${if (resumed) "이어받기" else "신규"} 오프셋=${fmt(offset)} 총량=${if (total > 0) fmt(total) else "?"}",
@@ -469,8 +478,30 @@ class DownloadEngine(
                     }
                 }
 
+                // 서버가 조각만 보냈으면 같은 실행 안에서 다음 Range 를 즉시 요청한다.
+                // (재시도 대기 30초를 붙이면 대용량이 조각 수만큼 느려진다)
+                val received = rafLength(partial)
+                if (total > 0 && received < total) {
+                    if (received <= offset) {
+                        // 빈 조각 반복 → 이어받기 루프 대신 정상 재시도 경로로
+                        failureReasons[id] = "서버가 빈 조각을 반환"
+                        DebugLogger.w(TAG, "빈 슬라이스 ${fmt(received)}/${fmt(total)} → 재시도 id=$id")
+                        return@withContext Outcome.RETRY
+                    }
+                    DebugLogger.i(TAG, "슬라이스 완료 ${fmt(received)}/${fmt(total)} → 이어받기 id=$id")
+                    // 조각마다 실수신 바이트를 집계 (마지막 조각만 세면 통계가 크게 준다)
+                    TrafficLedger.addDownHttp((received - offset).coerceAtLeast(0))
+                    JobsRepository.update(id) { j ->
+                        j.copy(
+                            downloadedBytes = received,
+                            progress = (received.toFloat() / total).coerceIn(0f, 1f),
+                        )
+                    }
+                    return@withContext Outcome.NEXT_RANGE
+                }
+
                 val elapsed = (System.currentTimeMillis() - t0).coerceAtLeast(1)
-                val finalSize = rafLength(partial)
+                val finalSize = received
                 val done = File(workDir, job.filename)
                 if (done.exists()) done.delete()
                 if (!partial.renameTo(done)) {
@@ -583,7 +614,11 @@ class DownloadEngine(
         else -> String.format("%.2fGB", n / 1_073_741_824.0)
     }
 
+    /** `Content-Range: bytes 0-33554431/83886080` → 83886080 (없으면 null) */
     companion object {
+        internal fun parseContentRangeTotal(header: String?): Long? =
+            header?.substringAfterLast('/')?.trim()?.toLongOrNull()?.takeIf { it > 0 }
+
         // 64KB → 256KB: syscall 횟수 1/4, 대용량 처리량 향상 (모바일 메모리 부담은 미미)
         private const val BUFFER_SIZE = 256 * 1024
         private const val PUBLISH_BUFFER_SIZE = 512 * 1024
