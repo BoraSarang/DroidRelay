@@ -226,9 +226,10 @@ fun FilesScreen(onShowSnack: (String) -> Unit = {}) {
                         )
                     }
                     Spacer(Modifier.height(7.dp))
-                    androidx.compose.material3.LinearProgressIndicator(
-                        progress = { ((totalBytes - freeBytes).toFloat() / totalBytes).coerceIn(0f, 1f) },
-                        modifier = Modifier.fillMaxWidth().height(5.dp),
+                    DrProgressBar(
+                        progress = (totalBytes - freeBytes).toFloat() / totalBytes,
+                        modifier = Modifier.fillMaxWidth(),
+                        height = 5.dp,
                         color = cs.primary,
                         trackColor = cs.surfaceContainerHighest,
                     )
@@ -236,34 +237,34 @@ fun FilesScreen(onShowSnack: (String) -> Unit = {}) {
             }
         }
 
-        // 상단 브레드크럼
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            if (currentPath.value.isNotEmpty()) {
+        // 상단 브레드크럼 — 루트에서는 상단바 제목과 중복이라 숨긴다
+        if (currentPath.value.isNotEmpty()) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 IconButton(onClick = {
                     currentPath.value = currentPath.value.substringBeforeLast('/')
                 }) {
                     Icon(Icons.AutoMirrored.Outlined.ArrowBack, "뒤로")
                 }
-            }
-            val parts = currentPath.value.split('/').filter { it.isNotEmpty() }
-            Text(
-                "보관함",
-                fontWeight = FontWeight.SemiBold,
-                color = cs.onSurface,
-                modifier = Modifier.clickable { currentPath.value = "" },
-            )
-            parts.forEachIndexed { idx, part ->
-                Text(" / ", color = cs.onSurfaceVariant)
+                val parts = currentPath.value.split('/').filter { it.isNotEmpty() }
                 Text(
-                    part,
-                    color = cs.primary,
-                    modifier = Modifier.clickable {
-                        currentPath.value = parts.take(idx + 1).joinToString("/")
-                    },
+                    "보관함",
+                    fontWeight = FontWeight.SemiBold,
+                    color = cs.onSurface,
+                    modifier = Modifier.clickable { currentPath.value = "" },
                 )
+                parts.forEachIndexed { idx, part ->
+                    Text(" / ", color = cs.onSurfaceVariant)
+                    Text(
+                        part,
+                        color = cs.primary,
+                        modifier = Modifier.clickable {
+                            currentPath.value = parts.take(idx + 1).joinToString("/")
+                        },
+                    )
+                }
             }
         }
 

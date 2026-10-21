@@ -29,7 +29,6 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -273,9 +272,10 @@ private fun ServerCard(httpPort: Int, httpsPort: Int, onCopyAddress: (String) ->
                     style = MaterialTheme.typography.labelSmall,
                 )
                 Spacer(Modifier.height(4.dp))
-                LinearProgressIndicator(
-                    progress = { usedRatio },
-                    modifier = Modifier.fillMaxWidth().height(6.dp),
+                DrProgressBar(
+                    progress = usedRatio,
+                    modifier = Modifier.fillMaxWidth(),
+                    height = 6.dp,
                     trackColor = cs.onPrimaryContainer.copy(alpha = 0.18f),
                     color = cs.primary,
                 )

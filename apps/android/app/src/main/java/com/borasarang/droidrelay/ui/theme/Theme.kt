@@ -1,5 +1,6 @@
 package com.borasarang.droidrelay.ui.theme
 
+import android.app.Activity
 import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -9,12 +10,15 @@ import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.view.WindowCompat
 import com.borasarang.droidrelay.relay.ThemeMode
 
 // ── v0.59 "DroidRelay" 토큰 ─────────────────────────────────
@@ -155,6 +159,18 @@ fun DroidRelayTheme(
         ThemeMode.DARK -> true
     }
     val context = LocalContext.current
+    // v0.59: 앱 테마가 시스템과 다를 수 있다(예: 시스템 다크 + 앱 라이트).
+    // enableEdgeToEdge() 기본값은 시스템 다크 여부만 보므로, 실제 스킴에 맞춰 아이콘 명암을 다시 지정.
+    val view = LocalView.current
+    if (!view.isInEditMode) {
+        SideEffect {
+            val window = (view.context as? Activity)?.window ?: return@SideEffect
+            WindowCompat.getInsetsController(window, view).apply {
+                isAppearanceLightStatusBars = !darkTheme
+                isAppearanceLightNavigationBars = !darkTheme
+            }
+        }
+    }
 
     val colorScheme = when {
         dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S ->

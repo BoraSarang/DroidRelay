@@ -45,7 +45,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -512,9 +511,10 @@ private fun JobCard(job: Job) {
             if (job.state in listOf(JobState.RUNNING, JobState.DONE, JobState.PAUSED)) {
                 Spacer(Modifier.height(8.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    LinearProgressIndicator(
-                        progress = { job.progress },
-                        modifier = Modifier.weight(1f).height(8.dp),
+                    DrProgressBar(
+                        progress = job.progress,
+                        modifier = Modifier.weight(1f),
+                        height = 8.dp,
                         color = cs.primary,
                         trackColor = cs.surfaceContainerHighest,
                     )
