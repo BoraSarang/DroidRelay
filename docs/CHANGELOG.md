@@ -1,14 +1,15 @@
 # Changelog
 
-## [Unreleased] — v0.58 웹 대시보드 Range 루프 다운로더 (T-1128)
+## [Unreleased] — v0.58 Range 이어받기: 웹 대시보드 + 맥 앱 (T-1128, T-1129)
 
 > 배경: 사용자 제보 *"S22 웹 보관함에서 EXAONE-3.5 18GB gguf 파일을 다운로드하는데
 > 32MB만 받고 완료로 나온다"*. 원인은 `serveFile` 의 **응답당 32MB 상한**
 > (`MAX_SERVE_SLICE`, A90 OOM 수정 `9eb870c` 에서 도입) — 브라우저 다운로드
 > 매니저는 206 슬라이스를 완료로 저장하고 `Content-Range` 의 전체 크기를 무시하며
 > 후속 Range 요청을 보내지 않는다. 자동 이어받기는 `<video>`·WebDAV 클라이언트에서만
-> 성립하므로 웹 다운로드만 32MB 로 잘렸다.
-> 상세: `docs/plans/PLAN_v0.58_range-downloader_android.md`
+> 성립하므로 저장(attachment)은 32MB 로 잘렸다.
+> **맥 앱도 같은 고장**이었다 — `받기` 가 브라우저에 위임하고 있었다(T-1129).
+> 상세: `docs/plans/PLAN_v0.58_range-downloader_android.md`, `docs/plans/PLAN_v0.58_macos-native-download.md`
 
 ### 버전
 
@@ -31,6 +32,27 @@
     DashboardInlineHandlerContractTest 지뢰 회피). **폴더 ZIP 📦 은 범위 밖** —
     `/dl-folder` 는 요청마다 ZIP 을 재빌드하므로 슬라이스 루프가 빌드 폭주를 일으킨다.
   - 계약 테스트 6건(`DashboardRangeDownloaderContractTest`). `test android` 410건 0 실패.
+
+### Added [macos]
+
+- **맥 앱 네이티브 Range 이어받기 (T-1129)** — `DroidRelayCore/RangeDownload.swift`.
+  `받기` 가 브라우저에 URL 을 넘기던 것을 **앱이 직접 받도록** 바꿨다(같은 32MB 절단의 원인).
+  - `ContentRange` 파싱 + **전체 크기 검증** — 전체와 다르면 완성 이름으로 바꾸지 않는다(무음 절단 금지).
+  - `.part` 조립 → 이어받기 시작점 = 남은 `.part` 크기. 18GB 도 메모리 32MB 안에서 받는다
+    (`URLSession.download(for:)` 임시 파일 → 4MB 씩 붙이고 **조각마다 임시 파일 삭제**).
+  - **같은 offset 재시도 3회** — 실측 근거: 18GB 이어받기 중 폰 화면이 꺼져 Doze 로 들어가자
+    2.7GB 지점에서 전송이 멈췄고, 화면을 켜자 같은 지점부터 이어졌다(T-1129c).
+  - 요청 지점과 다른 응답은 **거절**(조용한 어긋남 방지), `Range` 미지원 서버는 자르지 않고 **실패**.
+  - 이름 `(1)` 회피(덮어쓰지 않음)·경로 문자 무력화, 저장 위치 표준 `~/Downloads`, 취소 시 `.part` 보존.
+  - UI: 받는 중이면 `받기` 대신 **진행률% + 취소**(`DownloadBadge`) — 보관함·잡 두 목록.
+  - 테스트 `RangeDownloadTests` 22건. `test macos` 387건 0 실패 · `swift build -c release` 성공.
+
+### 실측 (2026-10-18, S22 = 192.168.86.49, 0.58.0/40)
+
+- 기기 설치·서버 기동(HTTP 3000) 후 `Range: bytes=offset-` 3슬라이스(96MB) 이어받기 →
+  기기 원본과 **md5 일치**(`611c617334074ba124851e46577af1f6`).
+- `Content-Range: bytes 0-0/19343747520` — EXAONE-3.5-32B gguf 는 **18.01 GiB**.
+- **Doze 정지**: 화면 꺼짐 시 전송이 2.7GB 지점에서 정지(오프셋 고정), 화면을 켜자 이어짐 → T-1129c.
 
 ## [Unreleased] — v0.57 보관함 숨김 디렉터리 노출 차단 (T-1127)
 
