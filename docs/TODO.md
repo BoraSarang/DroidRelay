@@ -863,3 +863,16 @@ T-001~T-008 전부 완료 (커밋 7574486).
 | T-번호 | 내용 | 상태 |
 |--------|------|------|
 | T-1127 | 숨김 노출 차단 — `StorageGuard.visibleChildren()` 신설(공통 판정) · `McpServer.fileList()`(=`file_list`·`storage_list`)·`fileRead()`(숨김+canonical) · `StorageRoutes GET /api/storage` · `FilesScreen` 목록·`dirSizeOf` 배선 · 계약 테스트 2건(`TorrentStorageMoveContractTest`) | ✅ |
+
+## v0.58 (2026-10-18) — 웹 대시보드 Range 루프 다운로더
+
+> 배경: 사용자 제보 — "S22 웹 보관함에서 EXAONE-3.5 18GB gguf 파일을 다운로드하는데 **32MB만 받고 완료**".
+> 원인: `serveFile` 응답당 32MB 상한(`MAX_SERVE_SLICE`, A90 OOM 수정 `9eb870c`) + 브라우저 다운로드 매니저는 206을 완료로 저장하고 후속 Range 요청 안 보냄.
+> 상세: `docs/plans/PLAN_v0.58_range-downloader_android.md`
+
+| T-번호 | 내용 | 상태 |
+|--------|------|------|
+| T-1128 | Range 루프 다운로더 — `dlRange`/`dlLoop`(WebDashboardScript): HTTPS면 File System Access 디스크 기록(18GB 가능), HTTP LAN이면 Blob 폴백+256MB 가드+대안 안내. 배선: 보관함 파일📥·잡📥. 계약 테스트 6건 | ✅ |
+| T-1128b | **폴더 ZIP 📦 대용량 미해결(범위 밖 기록)** — `/dl-folder` 는 요청마다 ZIP 재빌드라 슬라이스 루프 폭주 위험 → 기존 앵커 유지(32MB 한계 잔존). 해결책: ZIP 완성 후 일정 시간 캐시해 Range 재요청에 재사용 | 📝 |
+| T-1128c | **만료 공유 링크 `/s/{token}` 32MB 한계(범위 밖 기록)** — 대시보드 밖 독립 페이지라 다운로더 미적용. HTTPS+대시보드 다운로더와 동일 로직 붙이기 가능 | 📝 |
+| T-1128d | **실기 E2E 미실시** — S22·A90 모두 서버 종료 상태(연결 거부)라 >32MB 웹 다운로드 검증 보류. 기기 재기 후: HTTPS 켜고 18GB gguf 웹 다운로드 → 전체 크기 확인 + HTTP LAN 256MB 초과 경고 문구 확인 | 🔄 |
