@@ -7,6 +7,7 @@ import android.graphics.Bitmap
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -24,6 +25,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -35,16 +37,22 @@ import androidx.compose.material3.Text
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
@@ -52,10 +60,15 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.borasarang.droidrelay.relay.DebugLogger
+import com.borasarang.droidrelay.relay.JobState
+import com.borasarang.droidrelay.relay.JobsRepository
 import com.borasarang.droidrelay.relay.RelayApp
 import com.borasarang.droidrelay.relay.RelayService
 import com.borasarang.droidrelay.relay.SettingsConstraints
 import com.borasarang.droidrelay.relay.SettingsRepository
+import com.borasarang.droidrelay.relay.TorrentRepository
+import com.borasarang.droidrelay.relay.TorrentState
+import com.borasarang.droidrelay.relay.TrafficLedger
 import com.borasarang.droidrelay.relay.currentNetworkType
 import com.borasarang.droidrelay.relay.lanAddress
 import com.borasarang.droidrelay.relay.networkTypeFlow
@@ -82,6 +95,7 @@ fun StatusScreen(onCopyAddress: (String) -> Unit) {
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             item { ServerCard(httpPort, httpsPort, onCopyAddress, qr, onQrClick = { qrFull = true }) }
+            item { LiveCard() }
             item { Spacer(Modifier.height(24.dp)) }
         }
 
@@ -127,6 +141,144 @@ fun StatusScreen(onCopyAddress: (String) -> Unit) {
                     }
                 }
             }
+        }
+    }
+}
+
+/** 홈의 "지금 흐르는 것" — 1초 표본(최근 60초) 스파크라인 + 대기/완료/오늘 요약 */
+@Composable
+private fun LiveCard() {
+    val jobs by JobsRepository.jobs.collectAsState()
+    val torrents by TorrentRepository.torrents.collectAsState()
+    val series = remember { SpeedSeries(60) }
+    var tick by remember { mutableLongStateOf(0L) }
+    val cs = MaterialTheme.colorScheme
+
+    val httpDown = jobs.filter { it.state == JobState.RUNNING }.sumOf { it.speedBps }
+    val torrentDown = torrents.sumOf { it.downloadSpeed }
+    val torrentUp = torrents.sumOf { it.uploadSpeed }
+    val down = httpDown + torrentDown
+    val activeJobs = jobs.count { it.state == JobState.RUNNING }
+    val activeTorrents = torrents.count {
+        it.state == TorrentState.DOWNLOADING || it.state == TorrentState.SEEDING ||
+            it.state == TorrentState.FETCHING_METADATA
+    }
+    val pending = jobs.count { it.state == JobState.QUEUED || it.state == JobState.PAUSED } +
+        torrents.count { it.state == TorrentState.QUEUED || it.state == TorrentState.PAUSED || it.state == TorrentState.STALLED }
+    // 5초마다만 원장 조회 (매초 400일 순회 방지)
+    val summary = remember(tick / 5) { TrafficLedger.summary() }
+    val done = summary.total.doneTotal()
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            val jd = JobsRepository.jobs.value.filter { it.state == JobState.RUNNING }.sumOf { it.speedBps }
+            val td = TorrentRepository.torrents.value.sumOf { it.downloadSpeed }
+            val tu = TorrentRepository.torrents.value.sumOf { it.uploadSpeed }
+            series.push(jd + td, tu)
+            tick++
+            kotlinx.coroutines.delay(1000)
+        }
+    }
+
+    Card(
+        colors = CardDefaults.cardColors(containerColor = cs.surfaceContainerLow),
+        shape = MaterialTheme.shapes.large,
+    ) {
+        Column(Modifier.fillMaxWidth().padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("지금 흐르는 것", style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
+                Spacer(Modifier.weight(1f))
+                Text(
+                    "활성 ${activeJobs + activeTorrents}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = cs.onSecondaryContainer,
+                    modifier = Modifier
+                        .background(cs.secondaryContainer, RoundedCornerShape(9.dp))
+                        .padding(horizontal = 8.dp, vertical = 3.dp),
+                )
+            }
+            Spacer(Modifier.height(8.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("내려받기", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+                    Text(
+                        fmtSpeed(down),
+                        style = MaterialTheme.typography.displaySmall,
+                        color = cs.primary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                Box(Modifier.width(1.dp).height(38.dp).background(cs.outlineVariant.copy(alpha = 0.6f)))
+                Spacer(Modifier.width(16.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("올리기", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+                    Text(
+                        fmtSpeed(torrentUp),
+                        style = MaterialTheme.typography.titleLarge,
+                        color = cs.tertiary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+            Spacer(Modifier.height(10.dp))
+            SpeedSparkline(
+                down = series.downPoints(),
+                up = series.upPoints(),
+                peak = maxOf(series.peak(), down, torrentUp),
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "대기 $pending · 완료 $done · 오늘 ${fmtBytes(summary.today.downTotal())}",
+                style = MaterialTheme.typography.labelSmall,
+                color = cs.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+/** 최근 표본을 그대로 선으로 — 피크를 100%로 정규화, 다운로드는 영역 채움 */
+@Composable
+private fun SpeedSparkline(down: List<Long>, up: List<Long>, peak: Long) {
+    val cs = MaterialTheme.colorScheme
+    val gridColor = cs.outlineVariant.copy(alpha = 0.45f)
+    val downColor = cs.primary
+    val upColor = cs.tertiary
+    Canvas(Modifier.fillMaxWidth().height(46.dp)) {
+        val h = size.height
+        val w = size.width
+        for (i in 1..2) {
+            val y = h * i / 3f
+            drawLine(gridColor, Offset(0f, y), Offset(w, y), strokeWidth = 1f)
+        }
+        val maxV = peak.coerceAtLeast(1L).toFloat()
+
+        fun buildPath(points: List<Long>): Path {
+            val p = Path()
+            if (points.isEmpty()) return p
+            val step = if (points.size <= 1) w else w / (points.size - 1)
+            points.forEachIndexed { i, v ->
+                val x = step * i
+                val y = h - (v / maxV).coerceIn(0f, 1f) * (h - 2f)
+                if (i == 0) p.moveTo(x, y) else p.lineTo(x, y)
+            }
+            return p
+        }
+
+        val downPath = buildPath(down)
+        if (down.size > 1) {
+            val area = Path().apply {
+                addPath(downPath)
+                lineTo(w, h)
+                lineTo(0f, h)
+                close()
+            }
+            drawPath(area, downColor.copy(alpha = 0.12f))
+        }
+        drawPath(downPath, downColor, style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round))
+        if (up.any { it > 0 }) {
+            drawPath(buildPath(up), upColor.copy(alpha = 0.9f), style = Stroke(width = 1.2.dp.toPx(), cap = StrokeCap.Round))
         }
     }
 }

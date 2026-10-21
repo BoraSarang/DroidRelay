@@ -11,6 +11,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -26,6 +27,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.ArrowDropDown
@@ -43,6 +45,8 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -98,22 +102,26 @@ import org.json.JSONObject
 @Composable
 fun DownloadsScreen() {
     val jobs by JobsRepository.jobs.collectAsState()
+    var filter by remember { mutableStateOf(DownloadFilter.ALL) }
+    var addOpen by remember { mutableStateOf(false) }
+    val visible = remember(jobs, filter) { DownloadFilterCalc.apply(jobs, filter) }
 
-    LazyColumn(
-        modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        item { AddRow() }
+    Box(Modifier.fillMaxSize()) {
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            item { FilterChipRow(jobs, filter) { filter = it } }
             item { VideoAddRow(onDlStarted = { }) }
             item {
                 Text(
-                    "작업 목록 (${jobs.size})",
+                    if (filter == DownloadFilter.ALL) "작업 목록 (${jobs.size})" else "작업 목록 (${visible.size}/${jobs.size})",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.labelMedium,
                     modifier = Modifier.padding(top = 8.dp),
                 )
             }
-            if (jobs.isEmpty()) {
+            if (visible.isEmpty()) {
                 item {
                     Column(
                         Modifier.fillMaxWidth().padding(vertical = 40.dp),
@@ -127,68 +135,121 @@ fun DownloadsScreen() {
                         )
                         Spacer(Modifier.height(8.dp))
                         Text(
-                            "다운로드한 작업이 없습니다",
+                            if (jobs.isEmpty()) "다운로드한 작업이 없습니다" else "이 필터에 작업이 없습니다",
                             color = MaterialTheme.colorScheme.outline,
                             style = MaterialTheme.typography.bodyMedium,
                         )
+                        if (jobs.isEmpty()) {
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                "오른쪽 아래 URL 추가로 시작하세요",
+                                color = MaterialTheme.colorScheme.outline,
+                                style = MaterialTheme.typography.labelSmall,
+                            )
+                        }
                     }
                 }
             } else {
-                items(jobs, key = { it.id }) { JobCard(it) }
+                items(visible, key = { it.id }) { JobCard(it) }
             }
-            item { Spacer(Modifier.height(24.dp)) }
+            // FAB 에 가리지 않도록 하단 여백 (56dp + 여백)
+            item { Spacer(Modifier.height(96.dp)) }
+        }
+
+        ExtendedFloatingActionButton(
+            onClick = { addOpen = true },
+            icon = { Icon(Icons.Outlined.Add, null) },
+            text = { Text("URL 추가") },
+            modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
+        )
+    }
+
+    if (addOpen) AddUrlDialog(onDismiss = { addOpen = false })
+}
+
+/** 받기 탭 필터 칩 — 전체/받는 중/대기/완료 (+실패는 있을 때만) */
+@Composable
+private fun FilterChipRow(jobs: List<Job>, selected: DownloadFilter, onSelect: (DownloadFilter) -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        DownloadFilterCalc.chips(jobs).forEach { f ->
+            FilterChip(
+                selected = f == selected,
+                onClick = { onSelect(f) },
+                label = { Text("${f.label} ${DownloadFilterCalc.count(jobs, f)}") },
+                shape = MaterialTheme.shapes.small,
+            )
+        }
     }
 }
 
+/** URL 추가 다이얼로그 — 기존 인라인 입력행을 FAB 뒤로 옮긴 것 (동작 동일) */
 @Composable
-private fun AddRow() {
+private fun AddUrlDialog(onDismiss: () -> Unit) {
     var text by remember { mutableStateOf("") }
     var dupWarn by remember { mutableStateOf(false) }
     val engine = RelayApp.get(LocalContext.current)
     val cs = MaterialTheme.colorScheme
 
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        OutlinedTextField(
-            value = text,
-            onValueChange = { text = it },
-            placeholder = { Text("https:// 다운로드 URL", fontSize = 13.sp, color = cs.onSurfaceVariant) },
-            singleLine = true,
-            shape = MaterialTheme.shapes.small,
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = cs.primary,
-                unfocusedBorderColor = cs.outlineVariant,
-                focusedTextColor = cs.onSurface,
-                unfocusedTextColor = cs.onSurface,
-                cursorColor = cs.primary,
-            ),
-            modifier = Modifier.weight(1f),
-        )
-        Spacer(Modifier.width(8.dp))
-        Button(onClick = {
-            if (text.isNotBlank()) {
-                DebugLogger.i("UI", "추가 클릭 url=${text.trim()}")
-                if (JobsRepository.findDuplicateUrl(text.trim()) != null) {
-                    dupWarn = true
-                    DebugLogger.i("UI", "중복 URL 추가 시도 → 안내")
-                } else {
-                    dupWarn = false
-                    engine.enqueue(text.trim())
-                    text = ""
+    fun submit() {
+        val url = text.trim()
+        if (url.isBlank()) return
+        DebugLogger.i("UI", "추가 클릭 url=$url")
+        if (JobsRepository.findDuplicateUrl(url) != null) {
+            dupWarn = true
+            DebugLogger.i("UI", "중복 URL 추가 시도 → 안내")
+            return
+        }
+        engine.enqueue(url)
+        onDismiss()
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("URL 추가") },
+        text = {
+            Column {
+                OutlinedTextField(
+                    value = text,
+                    onValueChange = {
+                        text = it
+                        dupWarn = false
+                    },
+                    placeholder = { Text("https:// 다운로드 URL", fontSize = 13.sp, color = cs.onSurfaceVariant) },
+                    singleLine = true,
+                    shape = MaterialTheme.shapes.small,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = cs.primary,
+                        unfocusedBorderColor = cs.outlineVariant,
+                        focusedTextColor = cs.onSurface,
+                        unfocusedTextColor = cs.onSurface,
+                        cursorColor = cs.primary,
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                if (dupWarn) {
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "이미 등록된 다운로드입니다",
+                        color = cs.error,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
                 }
             }
-        }, shape = MaterialTheme.shapes.small) {
-            Icon(Icons.Outlined.Add, null, modifier = Modifier.size(18.dp))
-            Spacer(Modifier.width(6.dp))
-            Text("추가")
-        }
-    }
-    if (dupWarn) {
-        Text(
-            "이미 등록된 다운로드입니다",
-            color = MaterialTheme.colorScheme.error,
-            style = MaterialTheme.typography.bodySmall,
-        )
-    }
+        },
+        confirmButton = {
+            TextButton(onClick = { submit() }, enabled = text.isNotBlank()) {
+                Icon(Icons.Outlined.Add, null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("추가")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("취소") }
+        },
+    )
 }
 
 /** 🎬 비디오 — 동영상(mp4)/스트림(m3u8/mpd) URL 분석 → 해상도·파일명 선택 → 다운로드 */
@@ -608,7 +669,7 @@ private fun stateLabel(j: Job): String {
     }
 }
 
-private fun fmtSpeed(bps: Long): String = when {
+internal fun fmtSpeed(bps: Long): String = when {
     bps >= 1_073_741_824 -> String.format("%.2f GB/s", bps / 1_073_741_824.0)
     bps >= 1_048_576 -> String.format("%.1f MB/s", bps / 1_048_576.0)
     else -> "${bps / 1024} KB/s"
