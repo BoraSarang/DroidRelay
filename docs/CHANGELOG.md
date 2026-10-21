@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased] — v0.59 DroidRelay 리디자인 (android + web, T-1130~T-1140)
+## [Unreleased] — v0.59 DroidRelay 리디자인 (android + web, T-1130~T-1142)
 
 > 배경: *"안드로이드 디자인 스킬로 최신 방법으로 리디자인, 다크/라이트 지원 목업. 웹도 같이"* →
 > 사용자 확정 4건: **딥 파인 시드 유지 · 하단 내비 6→5 · 웹 테마 라이트/다크 통합 · 라인 아이콘**.
@@ -79,16 +79,24 @@
 - 서버 시작 후 `http://192.168.86.49:3000/` **200**, 새 토큰(`--accent:#006B56`)·레일 CSS 서빙 확인.
   (10분 유휴 자동 정지는 기존 설계 동작)
 
+### Fixed [tooling]
+
+- **`scripts/extract_dashboard_html.js` 복구** — 대시보드가 `Head`·`Body`·`Script` 3조각으로 분리된 뒤
+  첫 `"""`를 찾지 못해 실패했다. 세 파일의 raw string 을 `WebDashboardHtml` 과 같은 순서(Head + `\n` +
+  Body + `\n` + Script)로 이어붙이도록 수정. `verify_dashboard_info_menu.js` **35/35 통과**.
+
 ### Verified
 
 - `:app:compileDebugKotlin` 성공(경고는 기존 deprecated·nullable 경고뿐, 새 오류 없음).
 - `:app:testDebugUnitTest` **424건 / 0 실패** — 대시보드 계약 6종 + `DownloadFilterTest` 7건 · `SpeedSeriesTest` 5건 신규.
-- 웹: 헤드리스 Chrome 1280 라이트/다크, 500(≤640 모바일 내비) 캡처 확인. 390 실브라우저는 미실시.
+- 웹: 헤드리스 Chrome 1280 라이트/다크, 500(≤640 모바일 내비) 캡처 확인. **390×844 실브라우저(Chromium 155)
+  라이트/다크 — `scrollWidth=390`, 가로 오버플로 0, 하단 내비 `position:fixed` 확인**
+  (캡처는 로컬 `docs/screenshots/web-v059/`, 저장소 제외).
 - `:app:lintDebug` — **기존 8오류**(`NetworkType.kt`·`SignalMonitor.kt`·`DownloadEngine.kt`, 이번에 건드리지 않은 파일)로
   실패. 이번 변경에서 새 오류 없음.
 - S22 실기(0.59.0/41): 홈 스파크라인 카드 · 받기 칩 4종+`URL 추가` FAB·다이얼로그 · 통계 히어로/30일/4지표/월예상 ·
   설정 기기 카드·그룹 · 검색 꺼진 토렌트 탭에서 검색 UI 미노출 확인.
-- 남음: 390px 실브라우저, 라이트 테마에서 2차 폴리시 육안 확인(토큰 공유라 구조 동일).
+- 남음: 라이트 테마에서 2차 폴리시 육안 확인(토큰 공유라 구조 동일) — 사용자 확인 항목.
 
 ## [Unreleased] — v0.58 Range 이어받기: 웹 대시보드 + 맥 앱 (T-1128, T-1129)
 
