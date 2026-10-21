@@ -33,6 +33,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -65,6 +66,9 @@ import com.borasarang.droidrelay.relay.TorrentJob
 import com.borasarang.droidrelay.relay.TorrentRepository
 import com.borasarang.droidrelay.relay.TorrentState
 
+/** 일부 파일 관리자는 .torrent 를 octet-stream 으로 노출한다. */
+private val TORRENT_MIME_TYPES = arrayOf("application/x-bittorrent", "application/octet-stream")
+
 @Composable
 fun TorrentScreen(onShowSnack: (String) -> Unit = {}) {
     val context = LocalContext.current
@@ -72,6 +76,7 @@ fun TorrentScreen(onShowSnack: (String) -> Unit = {}) {
     val torrents by TorrentRepository.torrents.collectAsState()
 
     var showMagnetDialog by remember { mutableStateOf(false) }
+    var showAddDialog by remember { mutableStateOf(false) }
     var showDeleteDialog by remember { mutableStateOf<TorrentJob?>(null) }
     // 토렌트 검색 (T-950) — 검색 서버 미설정 시 검색행 대신 설정 안내 (웹 표시 조건과 동일)
     var searchQuery by remember { mutableStateOf("") }
@@ -122,6 +127,19 @@ fun TorrentScreen(onShowSnack: (String) -> Unit = {}) {
                     Text("Torrent가 없습니다", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.outline)
                     Spacer(Modifier.height(8.dp))
                     Text("magnet 링크 또는 .torrent 파일을 추가하세요", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline)
+                    Spacer(Modifier.height(20.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(onClick = { showMagnetDialog = true }) {
+                            Icon(Icons.Outlined.Link, null)
+                            Spacer(Modifier.width(8.dp))
+                            Text("magnet")
+                        }
+                        OutlinedButton(onClick = { filePicker.launch(TORRENT_MIME_TYPES) }) {
+                            Icon(Icons.Outlined.Add, null)
+                            Spacer(Modifier.width(8.dp))
+                            Text(".torrent")
+                        }
+                    }
                 }
             }
         } else {
@@ -175,14 +193,6 @@ fun TorrentScreen(onShowSnack: (String) -> Unit = {}) {
                                 shape = MaterialTheme.shapes.small,
                             ) {
                                 Icon(Icons.Outlined.Search, "검색")
-                            }
-                            Spacer(Modifier.width(8.dp))
-                            OutlinedButton(onClick = { showMagnetDialog = true }) {
-                                Icon(Icons.Outlined.Link, "magnet 추가")
-                            }
-                            Spacer(Modifier.width(8.dp))
-                            OutlinedButton(onClick = { filePicker.launch(arrayOf("application/x-bittorrent")) }) {
-                                Icon(Icons.Outlined.Add, "torrent 파일 추가")
                             }
                         }
                     } else {
@@ -281,6 +291,30 @@ fun TorrentScreen(onShowSnack: (String) -> Unit = {}) {
                 item { Spacer(Modifier.height(80.dp)) }
             }
         }
+
+        // 목록이 있을 때만 FAB — 빈 화면은 중앙의 magnet/.torrent 버튼이 추가 동선
+        if (torrents.isNotEmpty()) {
+            ExtendedFloatingActionButton(
+                onClick = { showAddDialog = true },
+                icon = { Icon(Icons.Outlined.Add, null) },
+                text = { Text("추가") },
+                modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
+            )
+        }
+    }
+
+    if (showAddDialog) {
+        AddTorrentDialog(
+            onDismiss = { showAddDialog = false },
+            onMagnet = {
+                showAddDialog = false
+                showMagnetDialog = true
+            },
+            onFile = {
+                showAddDialog = false
+                filePicker.launch(TORRENT_MIME_TYPES)
+            },
+        )
     }
 
     if (showMagnetDialog) {
@@ -511,6 +545,35 @@ private fun TorrentItem(
             },
         )
     }
+}
+
+@Composable
+private fun AddTorrentDialog(
+    onDismiss: () -> Unit,
+    onMagnet: () -> Unit,
+    onFile: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("토렌트 추가") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = onMagnet, modifier = Modifier.fillMaxWidth()) {
+                    Icon(Icons.Outlined.Link, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("magnet 링크")
+                }
+                OutlinedButton(onClick = onFile, modifier = Modifier.fillMaxWidth()) {
+                    Icon(Icons.Outlined.Add, null)
+                    Spacer(Modifier.width(8.dp))
+                    Text(".torrent 파일")
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("닫기") }
+        },
+    )
 }
 
 @Composable
