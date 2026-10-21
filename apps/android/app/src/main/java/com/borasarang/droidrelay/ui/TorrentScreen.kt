@@ -159,8 +159,9 @@ fun TorrentScreen(onShowSnack: (String) -> Unit = {}) {
                 item {
                     TorrentSummary(dlSum, upSum, seedSum, peerSum, activeCount, torrents.size)
                 }
-                item {
-                    if (searchEnabled) {
+                // 검색을 끄면 검색행·안내 카드 모두 숨긴다 (사용자 요청 — 설정에서 끈 기능은 화면에 남기지 않음)
+                if (searchEnabled) {
+                    item {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             OutlinedTextField(
                                 value = searchQuery,
@@ -195,25 +196,11 @@ fun TorrentScreen(onShowSnack: (String) -> Unit = {}) {
                                 Icon(Icons.Outlined.Search, "검색")
                             }
                         }
-                    } else {
-                        Card(
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = CardDefaults.cardColors(
-                                containerColor = MaterialTheme.colorScheme.surfaceContainer,
-                            ),
-                        ) {
-                            Text(
-                                "토렌트 검색은 설정 → 토렌트 → 검색 서버에서 켜세요",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(12.dp),
-                            )
-                        }
                     }
                 }
                 item {
                     Text(
-                        "⚡다운 합계 ${fmtSpeed(dlSum)} · ▲${fmtSpeed(upSum)} · 진행 ${activeCount}건 · " +
+                        "⚡다운 합계 ${fmtSpeedT(dlSum)} · ▲${fmtSpeedT(upSum)} · 진행 ${activeCount}건 · " +
                             "시드 $seedSum 피어 $peerSum",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -468,7 +455,7 @@ private fun TorrentItem(
                         if (idleHold) {
                             if (job.seeds > 0 || job.peers > 0) "시드 ${job.seeds} · 피어 ${job.peers}" else "대기 중"
                         } else {
-                            "${fmtSpeed(job.downloadSpeed)} ↓ / ${fmtSpeed(job.uploadSpeed)} ↑" +
+                            "${fmtSpeedT(job.downloadSpeed)} ↓ / ${fmtSpeedT(job.uploadSpeed)} ↑" +
                                 if (job.seeds > 0 || job.peers > 0) " · 시드 ${job.seeds} · 피어 ${job.peers}" else ""
                         },
                         style = MaterialTheme.typography.labelSmall,
@@ -638,8 +625,8 @@ private fun TorrentSummary(
             )
             Spacer(Modifier.height(6.dp))
             Row(Modifier.fillMaxWidth()) {
-                SummaryCell("내려받기", fmtSpeed(downBps), Modifier.weight(1f))
-                SummaryCell("올리기", fmtSpeed(upBps), Modifier.weight(1f))
+                SummaryCell("내려받기", fmtSpeedT(downBps), Modifier.weight(1f))
+                SummaryCell("올리기", fmtSpeedT(upBps), Modifier.weight(1f))
                 SummaryCell("시드 / 피어", "$seeds / $peers", Modifier.weight(1f))
             }
         }
@@ -694,7 +681,7 @@ private fun fmtSize(n: Long): String = when {
     else -> String.format("%.2fGB", n / 1_073_741_824.0)
 }
 
-private fun fmtSpeed(bps: Long): String = when {
+private fun fmtSpeedT(bps: Long): String = when {
     bps < 1_024 -> "${bps}B/s"
     bps < 1_048_576 -> "${bps / 1024}KB/s"
     else -> String.format("%.1fMB/s", bps / 1_048_576.0)
