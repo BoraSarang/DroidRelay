@@ -34,7 +34,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.outlined.Close
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -123,7 +123,7 @@ fun StatusScreen(onCopyAddress: (String) -> Unit) {
                             onClick = { qrFull = false },
                             modifier = Modifier.align(Alignment.TopEnd),
                         ) {
-                            Icon(Icons.Filled.Close, contentDescription = "닫기", tint = cs.onSurfaceVariant)
+                            Icon(Icons.Outlined.Close, contentDescription = "닫기", tint = cs.onSurfaceVariant)
                         }
                     }
                 }
@@ -154,7 +154,8 @@ private fun ServerCard(httpPort: Int, httpsPort: Int, onCopyAddress: (String) ->
         }.getOrNull()
     }
 
-    Card(colors = CardDefaults.cardColors(containerColor = cs.surfaceContainerHigh), shape = MaterialTheme.shapes.large) {
+    // v0.59: 홈의 시그니처 — primary-container 히어로 카드 (시드 딥 파인)
+    Card(colors = CardDefaults.cardColors(containerColor = cs.primaryContainer), shape = MaterialTheme.shapes.large) {
         Column(Modifier.fillMaxWidth().padding(16.dp)) {
             // 실행 상태 (T-1014, v0.36 HTTPS 개별 표시 + 시작/정지)
             val httpsPart = if (serverState.httpsEnabled) " · HTTPS ${serverState.httpsPort}" else " · HTTPS 끔"
@@ -172,7 +173,7 @@ private fun ServerCard(httpPort: Int, httpsPort: Int, onCopyAddress: (String) ->
                         serverState.running -> "HTTP ${serverState.port}$httpsPart 실행 중"
                         else -> "HTTP ${serverState.port}$httpsPart 대기 중"
                     },
-                    color = dotColor,
+                    color = if (serverState.error != null) cs.error else cs.onPrimaryContainer,
                     style = MaterialTheme.typography.labelMedium,
                     modifier = Modifier.weight(1f),
                 )
@@ -194,7 +195,7 @@ private fun ServerCard(httpPort: Int, httpsPort: Int, onCopyAddress: (String) ->
                     Text("테더링 기기 접속 주소", color = cs.onSurfaceVariant, style = MaterialTheme.typography.labelMedium)
                     Text(
                         httpAddr.ifEmpty { "LAN 주소 탐지 중..." },
-                        color = cs.primary,
+                        color = cs.onPrimaryContainer,
                         fontWeight = FontWeight.Bold,
                         style = MaterialTheme.typography.titleMedium.copy(textDecoration = TextDecoration.Underline),
                         maxLines = 1,
@@ -203,7 +204,7 @@ private fun ServerCard(httpPort: Int, httpsPort: Int, onCopyAddress: (String) ->
                     )
                     Text(
                         httpsAddr,
-                        color = cs.primary,
+                        color = cs.onPrimaryContainer,
                         fontWeight = FontWeight.Bold,
                         style = MaterialTheme.typography.titleMedium.copy(textDecoration = TextDecoration.Underline),
                         maxLines = 1,
@@ -213,7 +214,7 @@ private fun ServerCard(httpPort: Int, httpsPort: Int, onCopyAddress: (String) ->
                     if (!serverState.httpsEnabled) {
                         Text(
                             "HTTPS 끔 (설정에서 사용 가능)",
-                            color = cs.onSurfaceVariant,
+                            color = cs.onPrimaryContainer.copy(alpha = 0.65f),
                             style = MaterialTheme.typography.labelSmall,
                         )
                     }
@@ -221,7 +222,7 @@ private fun ServerCard(httpPort: Int, httpsPort: Int, onCopyAddress: (String) ->
                     val nt = netType
                     Text(
                         "${nt.icon} 네트워크: ${nt.label}",
-                        color = if (nt.label == "오프라인") cs.error else cs.onSurfaceVariant,
+                        color = if (nt.label == "오프라인") cs.error else cs.onPrimaryContainer.copy(alpha = 0.72f),
                         style = MaterialTheme.typography.labelSmall,
                     )
                     Spacer(Modifier.height(8.dp))
@@ -268,14 +269,15 @@ private fun ServerCard(httpPort: Int, httpsPort: Int, onCopyAddress: (String) ->
                 val usedRatio = ((storage.second - storage.first).toFloat() / storage.second).coerceIn(0f, 1f)
                 Text(
                     "저장공간 여유 ${fmtBytes(storage.first)} / ${fmtBytes(storage.second)}",
-                    color = cs.onSurfaceVariant,
+                    color = cs.onPrimaryContainer.copy(alpha = 0.75f),
                     style = MaterialTheme.typography.labelSmall,
                 )
                 Spacer(Modifier.height(4.dp))
                 LinearProgressIndicator(
                     progress = { usedRatio },
                     modifier = Modifier.fillMaxWidth().height(6.dp),
-                    trackColor = cs.surfaceVariant,
+                    trackColor = cs.onPrimaryContainer.copy(alpha = 0.18f),
+                    color = cs.primary,
                 )
             }
         }

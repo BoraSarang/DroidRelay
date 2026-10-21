@@ -27,16 +27,16 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.ArrowDropDown
-import androidx.compose.material.icons.filled.ArrowDropUp
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Download
-import androidx.compose.material.icons.filled.ExpandLess
-import androidx.compose.material.icons.filled.ExpandMore
-import androidx.compose.material.icons.filled.Pause
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.VideoLibrary
+import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.ArrowDropDown
+import androidx.compose.material.icons.outlined.ArrowDropUp
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.Download
+import androidx.compose.material.icons.outlined.ExpandLess
+import androidx.compose.material.icons.outlined.ExpandMore
+import androidx.compose.material.icons.outlined.Pause
+import androidx.compose.material.icons.outlined.PlayArrow
+import androidx.compose.material.icons.outlined.VideoLibrary
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -121,7 +121,7 @@ fun DownloadsScreen() {
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
                         Icon(
-                            Icons.Filled.Download,
+                            Icons.Outlined.Download,
                             contentDescription = null,
                             modifier = Modifier.size(40.dp),
                             tint = MaterialTheme.colorScheme.outline,
@@ -178,7 +178,9 @@ private fun AddRow() {
                 }
             }
         }, shape = MaterialTheme.shapes.small) {
-            Icon(Icons.Filled.Add, "추가")
+            Icon(Icons.Outlined.Add, null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(6.dp))
+            Text("추가")
         }
     }
     if (dupWarn) {
@@ -258,7 +260,10 @@ private fun VideoAddRow(onDlStarted: () -> Unit) {
         }
     }
 
-    Card(colors = CardDefaults.cardColors(containerColor = cs.surfaceContainerHigh), shape = MaterialTheme.shapes.medium) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = cs.surfaceContainerHigh),
+        shape = MaterialTheme.shapes.medium,
+    ) {
         Column(Modifier.fillMaxWidth().padding(14.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable { expanded = !expanded }) {
                 Column(Modifier.weight(1f)) {
@@ -266,7 +271,7 @@ private fun VideoAddRow(onDlStarted: () -> Unit) {
             Text("스트림 주소(m3u8/mpd) 또는 스트리밍 웹페이지", color = cs.onSurfaceVariant, style = MaterialTheme.typography.labelSmall)
                 }
                 IconButton(onClick = { expanded = !expanded }, modifier = Modifier.size(32.dp)) {
-                    Icon(if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore, if (expanded) "접기" else "펼치기")
+                    Icon(if (expanded) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore, if (expanded) "접기" else "펼치기")
                 }
             }
             if (expanded) {
@@ -405,7 +410,17 @@ private fun JobCard(job: Job) {
     val cs = MaterialTheme.colorScheme
     val now = System.currentTimeMillis()
 
-    Card(colors = CardDefaults.cardColors(containerColor = cs.surfaceContainerHigh), shape = MaterialTheme.shapes.medium) {
+    // v0.59: 진행 중인 작업만 톤을 올리고 외곽선을 primary 로 (계측기 톤)
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = if (job.state == JobState.RUNNING) cs.surfaceContainer else cs.surfaceContainerLow,
+        ),
+        border = androidx.compose.foundation.BorderStroke(
+            1.dp,
+            if (job.state == JobState.RUNNING) cs.primary.copy(alpha = 0.32f) else cs.outlineVariant.copy(alpha = 0.7f),
+        ),
+        shape = MaterialTheme.shapes.large,
+    ) {
         Column(Modifier.fillMaxWidth().padding(14.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 // 좌측 순서 변경 화살표 (고정폭)
@@ -417,13 +432,13 @@ private fun JobCard(job: Job) {
                         onClick = { engine.reorder(job.id, -1) },
                         modifier = Modifier.size(40.dp),
                     ) {
-                        Icon(Icons.Filled.ArrowDropUp, "위로", tint = cs.onSurfaceVariant, modifier = Modifier.size(16.dp))
+                        Icon(Icons.Outlined.ArrowDropUp, "위로", tint = cs.onSurfaceVariant, modifier = Modifier.size(16.dp))
                     }
                     IconButton(
                         onClick = { engine.reorder(job.id, 1) },
                         modifier = Modifier.size(40.dp),
                     ) {
-                        Icon(Icons.Filled.ArrowDropDown, "아래로", tint = cs.onSurfaceVariant, modifier = Modifier.size(16.dp))
+                        Icon(Icons.Outlined.ArrowDropDown, "아래로", tint = cs.onSurfaceVariant, modifier = Modifier.size(16.dp))
                     }
                 }
                 // 콘텐츠 + 액션
@@ -432,7 +447,7 @@ private fun JobCard(job: Job) {
                         Column(Modifier.weight(1f)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 if (job.type == "video") {
-                                    Icon(Icons.Filled.VideoLibrary, null, tint = cs.primary, modifier = Modifier.size(16.dp))
+                                    Icon(Icons.Outlined.VideoLibrary, null, tint = cs.primary, modifier = Modifier.size(16.dp))
                                     Spacer(Modifier.width(4.dp))
                                 }
                                 Text(
@@ -463,7 +478,7 @@ private fun JobCard(job: Job) {
                             JobState.RUNNING -> IconButton(onClick = {
                                 DebugLogger.i("UI", "일시정지 버튼 id=${job.id}")
                                 engine.pause(job.id)
-                            }) { Icon(Icons.Filled.Pause, "일시정지", tint = cs.onSurfaceVariant) }
+                            }) { Icon(Icons.Outlined.Pause, "일시정지", tint = cs.onSurfaceVariant) }
                             JobState.PAUSED, JobState.FAILED -> IconButton(onClick = {
                                 if (job.type == "video") {
                                     // video 잡은 DownloadEngine 미소관 — 원본 url로 재분석+재다운로드 (부분 재개 불가)
@@ -484,23 +499,32 @@ private fun JobCard(job: Job) {
                                     DebugLogger.i("UI", "재개 버튼 id=${job.id}")
                                     engine.resume(job.id)
                                 }
-                            }) { Icon(Icons.Filled.PlayArrow, if (job.type == "video") "재시도" else "재개", tint = cs.primary) }
+                            }) { Icon(Icons.Outlined.PlayArrow, if (job.type == "video") "재시도" else "재개", tint = cs.primary) }
                             else -> IconButton(onClick = {
                                 DebugLogger.i("UI", "삭제 버튼 id=${job.id}")
                                 engine.cancel(job.id)
                                 JobsRepository.remove(job.id)
-                            }) { Icon(Icons.Filled.Close, "삭제", tint = cs.onSurfaceVariant) }
+                            }) { Icon(Icons.Outlined.Close, "삭제", tint = cs.onSurfaceVariant) }
                         }
                     }
                 }
             }
             if (job.state in listOf(JobState.RUNNING, JobState.DONE, JobState.PAUSED)) {
-                LinearProgressIndicator(
-                    progress = { job.progress },
-                    modifier = Modifier.fillMaxWidth().height(7.dp),
-                    color = cs.primary,
-                    trackColor = cs.surfaceVariant,
-                )
+                Spacer(Modifier.height(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    LinearProgressIndicator(
+                        progress = { job.progress },
+                        modifier = Modifier.weight(1f).height(8.dp),
+                        color = cs.primary,
+                        trackColor = cs.surfaceContainerHighest,
+                    )
+                    Spacer(Modifier.width(10.dp))
+                    Text(
+                        "${(job.progress * 100).toInt()}%",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = if (job.state == JobState.RUNNING) cs.primary else cs.onSurfaceVariant,
+                    )
+                }
             }
             if (job.type != "video" && job.state != JobState.DONE && job.state != JobState.CANCELED) {
                 TaskLimitRow(job)
@@ -567,7 +591,7 @@ private fun stateLabel(j: Job): String {
     val badge = when (j.state) {
         JobState.QUEUED -> "대기"
         JobState.RUNNING -> {
-            val sp = if (j.speedBps > 0) " · ${j.speedBps / 1024}KB/s" else ""
+            val sp = if (j.speedBps > 0) " · ${fmtSpeed(j.speedBps)}" else ""
             "진행 중 ${"%.0f".format(j.progress * 100)}%$sp"
         }
         JobState.PAUSED -> "일시정지"
@@ -582,6 +606,12 @@ private fun stateLabel(j: Job): String {
             if (j.totalBytes > 0) append(" / ${fmtBytes(j.totalBytes)}")
         }
     }
+}
+
+private fun fmtSpeed(bps: Long): String = when {
+    bps >= 1_073_741_824 -> String.format("%.2f GB/s", bps / 1_073_741_824.0)
+    bps >= 1_048_576 -> String.format("%.1f MB/s", bps / 1_048_576.0)
+    else -> "${bps / 1024} KB/s"
 }
 
 internal fun fmtBytes(n: Long): String = when {

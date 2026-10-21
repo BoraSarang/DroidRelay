@@ -1,0 +1,866 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DroidRelay 리디자인 목업 v0.59 — Android (Light / Dark)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Roboto+Flex:opsz,wdth,wght@8..144,75..125,300..800&family=Noto+Sans+KR:wght@300..800&display=swap" rel="stylesheet">
+<style>
+  /* ── 목업 페이지 (앱 토큰 아님) ───────────────────────────── */
+  :root{
+    --page-bg:#060a09; --page-fg:#e7f0eb; --page-dim:#8ea39a; --page-line:#1d2a25;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{
+    margin:0; padding:36px 28px 96px; background:
+      radial-gradient(1200px 600px at 20% -10%, #0f2b23 0%, transparent 60%),
+      radial-gradient(900px 500px at 90% 0%, #1a2a1f 0%, transparent 55%),
+      var(--page-bg);
+    color:var(--page-fg);
+    font-family:"Roboto Flex","Noto Sans KR","Pretendard","Apple SD Gothic Neo",sans-serif;
+    font-variation-settings:"wdth" 100;
+  }
+  .page{max-width:1360px;margin:0 auto}
+  .page-head{border-bottom:1px solid var(--page-line);padding-bottom:22px;margin-bottom:34px}
+  .eyebrow{display:flex;align-items:center;gap:10px;font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:#6fe3c1;font-weight:600}
+  .eyebrow .mark{width:22px;height:22px;border-radius:7px;background:#006b56;display:grid;place-items:center;color:#7ff8d8;font-size:12px}
+  h1{font-size:clamp(28px,3.4vw,42px);line-height:1.1;letter-spacing:-.03em;font-weight:680;margin:14px 0 10px;font-variation-settings:"wdth" 92}
+  .lede{color:var(--page-dim);font-size:14px;line-height:1.75;max-width:78ch;margin:0}
+  .lede b{color:#c8e8dc;font-weight:600}
+  .section-head{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;margin:56px 0 20px}
+  .section-head h2{font-size:20px;letter-spacing:-.01em;margin:0;font-weight:650}
+  .section-head h2 span{color:var(--page-dim);font-weight:400;font-size:13px;margin-left:10px}
+  .section-head .hint{color:var(--page-dim);font-size:12px}
+  .grid{display:grid;grid-template-columns:repeat(3,minmax(0,390px));gap:30px 34px;justify-content:start}
+  @media (max-width:1300px){.grid{grid-template-columns:repeat(2,minmax(0,390px))}}
+  @media (max-width:880px){.grid{grid-template-columns:minmax(0,390px)}}
+  .slot{display:flex;flex-direction:column;gap:10px}
+  .cap{display:flex;align-items:center;justify-content:space-between;font-size:12px;color:var(--page-dim);padding:0 6px}
+  .cap b{color:#cfe4da;font-weight:600;font-size:12.5px}
+  .cap .tag{font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;border:1px solid var(--page-line);border-radius:999px;padding:3px 8px;color:#7d948a}
+
+  /* ── 기기 프레임 ─────────────────────────────────────────── */
+  .device{
+    width:390px;height:844px;padding:9px;border-radius:50px;background:linear-gradient(160deg,#202824,#0c1210 60%);
+    border:1px solid #26332d;box-shadow:0 40px 70px -30px rgba(0,0,0,.9), inset 0 1px 0 rgba(255,255,255,.05);
+    position:relative;flex-shrink:0;
+  }
+  .screen{
+    width:372px;height:826px;border-radius:41px;overflow:hidden;position:relative;
+    display:flex;flex-direction:column;background:var(--surface);color:var(--on-surface);
+    font-size:14px;line-height:1.45;font-variation-settings:"wdth" 100;
+  }
+  .screen::after{ /* 펀치홀 */
+    content:"";position:absolute;top:11px;left:50%;transform:translateX(-50%);
+    width:11px;height:11px;border-radius:50%;background:#050807;box-shadow:0 0 0 3px rgba(0,0,0,.35);z-index:9;
+  }
+
+  /* ── Material 3 토큰: LIGHT ──────────────────────────────── */
+  .screen.light{
+    color-scheme:light;
+    --primary:#006b56; --on-primary:#ffffff;
+    --primary-container:#7ff8d8; --on-primary-container:#00201a;
+    --secondary:#4a635c; --on-secondary:#ffffff;
+    --secondary-container:#cce8df; --on-secondary-container:#06201a;
+    --tertiary:#7c5800; --on-tertiary:#ffffff;
+    --tertiary-container:#ffdf9e; --on-tertiary-container:#261a00;
+    --error:#ba1a1a; --on-error:#ffffff;
+    --error-container:#ffdad6; --on-error-container:#410002;
+    --surface:#f6fbf7; --on-surface:#171d1a;
+    --surface-variant:#dbe5df; --on-surface-variant:#3f4945;
+    --outline:#6f7974; --outline-variant:#bfc9c3;
+    --surface-container-lowest:#ffffff;
+    --surface-container-low:#f0f5f0;
+    --surface-container:#eaeFEA; --surface-container-high:#e4eae4;
+    --surface-container-highest:#dee4de;
+    --surface-dim:#d6dbd7; --surface-bright:#f6fbf7;
+    --inverse-surface:#2b322e; --inverse-on-surface:#ecf1ec; --inverse-primary:#62dcbe;
+    --hairline:rgba(23,29,26,.07);
+    --glow:rgba(0,107,86,.16);
+  }
+  /* ── Material 3 토큰: DARK ───────────────────────────────── */
+  .screen.dark{
+    color-scheme:dark;
+    --primary:#62dcbe; --on-primary:#00382d;
+    --primary-container:#005141; --on-primary-container:#80f8d9;
+    --secondary:#b1ccc3; --on-secondary:#1c352f;
+    --secondary-container:#334b44; --on-secondary-container:#cce8df;
+    --tertiary:#f5bf48; --on-tertiary:#412d00;
+    --tertiary-container:#5d4200; --on-tertiary-container:#ffdf9e;
+    --error:#ffb4ab; --on-error:#690005;
+    --error-container:#93000a; --on-error-container:#ffdad6;
+    --surface:#0e1513; --on-surface:#dde4df;
+    --surface-variant:#3f4945; --on-surface-variant:#bfc9c3;
+    --outline:#89938e; --outline-variant:#3f4945;
+    --surface-container-lowest:#090f0d;
+    --surface-container-low:#171d1b;
+    --surface-container:#1b211f; --surface-container-high:#252b29;
+    --surface-container-highest:#303634;
+    --surface-dim:#0e1513; --surface-bright:#343b38;
+    --inverse-surface:#dde4df; --inverse-on-surface:#2b322e; --inverse-primary:#006b56;
+    --hairline:rgba(221,228,223,.07);
+    --glow:rgba(98,220,190,.16);
+  }
+
+  /* ── 공통 타입 / 요소 ────────────────────────────────────── */
+  .screen .num{font-variant-numeric:tabular-nums;font-feature-settings:"tnum";font-variation-settings:"wdth" 92}
+  .sb{display:flex;align-items:center;justify-content:space-between;padding:13px 24px 5px;font-size:12px;letter-spacing:.01em;color:var(--on-surface);opacity:.92}
+  .sb .right{display:flex;align-items:center;gap:6px}
+  .sb .ic{width:14px;height:14px}
+  .app{flex:1;display:flex;flex-direction:column;min-height:0}
+
+  .topbar{display:flex;align-items:flex-start;gap:12px;padding:10px 20px 10px}
+  .topbar.compact{align-items:center;padding-top:6px}
+  .tb-text{flex:1;min-width:0}
+  .tb-kicker{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--on-surface-variant);font-weight:600;margin-bottom:2px}
+  .tb-title{font-size:26px;line-height:1.2;font-weight:700;letter-spacing:-.02em;font-variation-settings:"wdth" 95;margin:0}
+  .topbar.compact .tb-title{font-size:21px}
+  .tb-actions{display:flex;gap:4px;align-items:center;padding-top:2px}
+
+  .body{flex:1;overflow:hidden;padding:0 16px;position:relative}
+  .body::after{content:"";position:absolute;left:0;right:0;bottom:0;height:26px;
+    background:linear-gradient(to top,var(--surface) 15%,transparent);pointer-events:none}
+  .body.tight{padding:0 16px}
+  .stack{display:flex;flex-direction:column;gap:10px}
+  .stack.sm{gap:8px}
+  .stack.lg{gap:14px}
+
+  .card{background:var(--surface-container);border-radius:18px;padding:14px 16px;border:1px solid transparent}
+  .card.low{background:var(--surface-container-low);border-color:var(--outline-variant)}
+  .card.high{background:var(--surface-container-high)}
+  .card.out{background:transparent;border-color:var(--outline-variant)}
+  .card.hero{background:var(--primary-container);color:var(--on-primary-container);border-color:transparent;position:relative;overflow:hidden}
+  .card.hero::after{content:"";position:absolute;right:-46px;top:-60px;width:190px;height:190px;border-radius:50%;
+    background:radial-gradient(circle at 40% 40%, var(--glow), transparent 65%);pointer-events:none}
+  .card.tonal{background:var(--secondary-container);color:var(--on-secondary-container)}
+
+  .row{display:flex;align-items:center;gap:10px}
+  .row.top{align-items:flex-start}
+  .grow{flex:1;min-width:0}
+  .between{display:flex;align-items:center;justify-content:space-between;gap:10px}
+
+  .ic{width:20px;height:20px;flex-shrink:0;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+  .ic.sm{width:16px;height:16px}
+  .ic.lg{width:24px;height:24px}
+
+  .icon-btn{width:40px;height:40px;border-radius:999px;display:grid;place-items:center;color:var(--on-surface-variant);background:transparent;border:0;flex-shrink:0}
+  .icon-btn.tonal{background:var(--secondary-container);color:var(--on-secondary-container)}
+
+  .btn{height:40px;padding:0 18px;border-radius:999px;border:0;display:inline-flex;align-items:center;justify-content:center;gap:7px;
+    font:inherit;font-size:13px;font-weight:650;letter-spacing:.01em;flex-shrink:0}
+  .btn .ic{width:17px;height:17px}
+  .btn.filled{background:var(--primary);color:var(--on-primary)}
+  .btn.tonal{background:var(--secondary-container);color:var(--on-secondary-container)}
+  .btn.out{background:transparent;border:1px solid var(--outline);color:var(--primary)}
+  .btn.text{background:transparent;color:var(--primary);padding:0 12px}
+  .btn.sm{height:34px;padding:0 14px;font-size:12px}
+
+  .chiprow{display:flex;gap:7px;overflow:hidden}
+  .chip{height:32px;padding:0 12px;border-radius:9px;border:1px solid var(--outline-variant);color:var(--on-surface-variant);
+    font-size:12px;font-weight:600;display:inline-flex;align-items:center;gap:6px;white-space:nowrap;background:transparent}
+  .chip .ic{width:14px;height:14px}
+  .chip.on{background:var(--secondary-container);border-color:transparent;color:var(--on-secondary-container)}
+  .chip.prim{background:var(--primary-container);border-color:transparent;color:var(--on-primary-container)}
+
+  .pill{height:24px;padding:0 9px;border-radius:999px;display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:650;
+    background:var(--secondary-container);color:var(--on-secondary-container);white-space:nowrap}
+  .pill.live{background:color-mix(in srgb,var(--primary) 16%,transparent);color:var(--primary)}
+  .pill.warn{background:var(--tertiary-container);color:var(--on-tertiary-container)}
+  .pill.err{background:var(--error-container);color:var(--on-error-container)}
+  .dot{width:7px;height:7px;border-radius:50%;background:currentColor;flex-shrink:0}
+  .dot.pulse{animation:pulse 2.2s cubic-bezier(0.2,0,0,1) infinite}
+  @keyframes pulse{0%,100%{opacity:1;box-shadow:0 0 0 0 currentColor}55%{opacity:.6;box-shadow:0 0 0 5px transparent}}
+
+  .label{font-size:11px;letter-spacing:.06em;text-transform:uppercase;font-weight:650;color:var(--on-surface-variant)}
+  .t-title{font-size:15px;font-weight:650;letter-spacing:-.01em}
+  .t-body{font-size:13px;color:var(--on-surface-variant)}
+  .t-meta{font-size:11.5px;color:var(--on-surface-variant)}
+  .t-num-xl{font-size:34px;font-weight:700;letter-spacing:-.03em;line-height:1.05}
+  .t-num-lg{font-size:24px;font-weight:680;letter-spacing:-.02em;line-height:1.1}
+  .t-num-md{font-size:17px;font-weight:650;letter-spacing:-.01em}
+
+  .prog{height:8px;border-radius:999px;background:var(--surface-container-highest);overflow:hidden}
+  .prog>i{display:block;height:100%;border-radius:999px;background:var(--primary)}
+  .prog.up>i{background:var(--tertiary)}
+  .prog.thin{height:5px}
+  .prog.thin>i{background:var(--primary)}
+
+  .divider{height:1px;background:var(--outline-variant);opacity:.7;margin:0}
+
+  .field{height:48px;border-radius:14px;background:var(--surface-container-high);display:flex;align-items:center;gap:10px;padding:0 14px;
+    color:var(--on-surface-variant);font-size:13px;border:1px solid transparent}
+  .field .ic{color:var(--on-surface-variant)}
+
+  .filetile{width:42px;height:42px;border-radius:13px;display:grid;place-items:center;background:var(--secondary-container);color:var(--on-secondary-container);flex-shrink:0}
+  .filetile.t{background:var(--tertiary-container);color:var(--on-tertiary-container)}
+  .filetile.p{background:var(--primary-container);color:var(--on-primary-container)}
+
+  .qr{width:92px;height:92px;border-radius:14px;background:#fff;padding:5px;flex-shrink:0}
+  .qr svg{width:100%;height:100%;display:block}
+
+  /* 하단 내비게이션 */
+  .nav{
+    height:76px;display:flex;align-items:center;justify-content:space-around;padding:6px 8px 10px;
+    background:var(--surface-container);border-top:1px solid var(--hairline);
+  }
+  .nav a{display:flex;flex-direction:column;align-items:center;gap:3px;font-size:10.5px;color:var(--on-surface-variant);
+    text-decoration:none;font-weight:600;letter-spacing:.01em;flex:1}
+  .nav .ind{width:58px;height:30px;border-radius:999px;display:grid;place-items:center;transition:background .2s}
+  .nav a.on{color:var(--on-secondary-container)}
+  .nav a.on .ind{background:var(--secondary-container)}
+  .fab{position:absolute;right:18px;bottom:92px;height:56px;padding:0 20px;border-radius:18px;background:var(--primary-container);
+    color:var(--on-primary-container);display:flex;align-items:center;gap:8px;font-size:13.5px;font-weight:700;
+    box-shadow:0 10px 24px -12px rgba(0,0,0,.6)}
+
+  .spark{width:100%;height:38px;display:block;overflow:visible}
+  .spark path.line{fill:none;stroke:var(--primary);stroke-width:2;stroke-linecap:round}
+  .spark path.area{fill:color-mix(in srgb,var(--primary) 14%,transparent);stroke:none}
+  .spark .grid{stroke:var(--outline-variant);stroke-width:.6;opacity:.5}
+
+  /* 설정 리스트 */
+  .setrow{display:flex;align-items:center;gap:12px;padding:13px 2px}
+  .setrow+.setrow{border-top:1px solid var(--hairline)}
+  .setrow .ic{color:var(--on-surface-variant)}
+  .switch{width:44px;height:26px;border-radius:999px;background:var(--surface-container-highest);position:relative;flex-shrink:0;border:1px solid var(--outline-variant)}
+  .switch i{position:absolute;top:3px;left:3px;width:18px;height:18px;border-radius:50%;background:var(--outline);transition:.2s}
+  .switch.on{background:var(--primary);border-color:transparent}
+  .switch.on i{left:21px;transform:scale(1.05);background:var(--on-primary)}
+  .seg{display:flex;background:var(--surface-container-high);border-radius:999px;padding:3px;gap:3px}
+  .seg span{flex:1;text-align:center;height:32px;line-height:32px;border-radius:999px;font-size:12px;font-weight:600;color:var(--on-surface-variant)}
+  .seg span.on{background:var(--secondary-container);color:var(--on-secondary-container)}
+
+  /* 바 차트 */
+  .bars{display:flex;align-items:flex-end;gap:5px;height:118px}
+  .bars .b{flex:1;display:flex;flex-direction:column;justify-content:flex-end;gap:2px;height:100%}
+  .bars .b i{display:block;border-radius:3px 3px 1px 1px;background:var(--primary);min-height:3px}
+  .bars .b i.up{background:var(--tertiary);height:4px!important;opacity:.85}
+  .axis{display:flex;justify-content:space-between;font-size:10px;color:var(--on-surface-variant);margin-top:6px}
+
+  .footer-note{color:var(--page-dim);font-size:12px;line-height:1.7;border-top:1px solid var(--page-line);margin-top:60px;padding-top:18px}
+  .footer-note b{color:#c8e8dc}
+</style>
+</head>
+<body>
+<div class="page">
+  <header class="page-head">
+    <div class="eyebrow"><span class="mark">◈</span> DroidRelay · Design v0.59</div>
+    <h1>DroidRelay — 안드로이드 리디자인</h1>
+    <p class="lede">
+      Material 3 Expressive 토큰을 그대로 쓰되, <b>측정기(instrument) 같은 밀도</b>로 다시 그렸습니다.
+      시드 컬러는 릴레이/신호를 뜻하는 <b>딥 파인 #006B56</b>, 숫자는 <b>tabular numeral</b>로 고정해 값이 흔들리지 않게 했습니다.
+      모든 화면은 <b>라이트/다크 동일 구조</b>이며, 하단 내비게이션은 6개 → <b>5개</b>로 줄이고 통계·설정은 “더보기”로 묶었습니다.
+    </p>
+  </header>
+
+  <div class="section-head">
+    <h2>Light <span>라이트 테마 · 대비 표준</span></h2>
+    <div class="hint">390 × 844 · 8dp 그리드 · M3 shape (16/18/28)</div>
+  </div>
+  <div class="grid" id="lightGrid"></div>
+
+  <div class="section-head">
+    <h2>Dark <span>다크 테마 · 같은 토큰 역할, 반전된 톤</span></h2>
+    <div class="hint">순수 검정 대신 초록빛이 섞인 surface #0E1513</div>
+  </div>
+  <div class="grid" id="darkGrid"></div>
+
+  <p class="footer-note">
+    <b>메모</b> — 이 문서는 구현 전 디자인 합의용 목업입니다. 실제 Compose 구현 시
+    <b>MaterialTheme(colorScheme = …)</b> 에 같은 hex 를 넣고, 폰트는 Roboto Flex(숫자 tabular),
+    모양은 16/18/28dp 를 사용합니다. 상태바·펀치홀은 목업 장식이며 앱 UI 가 아닙니다.
+  </p>
+</div>
+
+<!-- 아이콘 스프라이트 -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-home" viewBox="0 0 24 24"><path d="M3.5 10.7 12 4l8.5 6.7V20a1 1 0 0 1-1 1h-5v-6h-5v6h-5a1 1 0 0 1-1-1z"/></symbol>
+  <symbol id="i-down" viewBox="0 0 24 24"><path d="M12 3v11m0 0 4.5-4.5M12 14 7.5 9.5M4 20h16"/></symbol>
+  <symbol id="i-magnet" viewBox="0 0 24 24"><path d="M6 4v8a6 6 0 0 0 12 0V4h-4v8a2 2 0 0 1-4 0V4z"/><path d="M6 8h4M14 8h4"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/></symbol>
+  <symbol id="i-more" viewBox="0 0 24 24"><path d="M5 5h5v5H5zM14 5h5v5h-5zM5 14h5v5H5zM14 14h5v5h-5z"/></symbol>
+  <symbol id="i-qr" viewBox="0 0 24 24"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h2v2h-2zM18 14h2v2h-2zM14 18h2v2h-2zM18 18h2v2h-2z"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a1 1 0 0 1 1-1h10"/></symbol>
+  <symbol id="i-share" viewBox="0 0 24 24"><circle cx="18" cy="6" r="2.5"/><circle cx="18" cy="18" r="2.5"/><circle cx="6" cy="12" r="2.5"/><path d="m8.2 10.7 7.6-3.4M8.2 13.3l7.6 3.4"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+  <symbol id="i-pause" viewBox="0 0 24 24"><path d="M9 5v14M15 5v14"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5l11 7-11 7z"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M4 12.5l5 5L20 6.5"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 4 2.5 20h19z"/><path d="M12 10v4"/><path d="M12 17h.01"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4.4-4.4"/></symbol>
+  <symbol id="i-chev" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></symbol>
+  <symbol id="i-chevd" viewBox="0 0 24 24"><path d="M5 9l7 7 7-7"/></symbol>
+  <symbol id="i-back" viewBox="0 0 24 24"><path d="M20 12H4m0 0 6-6m-6 6 6 6"/></symbol>
+  <symbol id="i-tune" viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></symbol>
+  <symbol id="i-chart" viewBox="0 0 24 24"><path d="M5 20v-6M11 20V6M17 20v-9"/><path d="M3 20h18"/></symbol>
+  <symbol id="i-wifi" viewBox="0 0 24 24"><path d="M2.5 8.5a14 14 0 0 1 19 0M6 12a9 9 0 0 1 12 0M9.5 15.5a4 4 0 0 1 5 0"/><path d="M12 19h.01"/></symbol>
+  <symbol id="i-battery" viewBox="0 0 24 24"><rect x="3" y="8" width="16" height="8" rx="2.5"/><path d="M21 11v2"/></symbol>
+  <symbol id="i-server" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="6" rx="2"/><rect x="4" y="14" width="16" height="6" rx="2"/><path d="M8 7h.01M8 17h.01"/></symbol>
+  <symbol id="i-file" viewBox="0 0 24 24"><path d="M6 3h7l5 5v13H6z"/><path d="M13 3v5h5"/></symbol>
+  <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 20V9m0 0 4.5 4.5M12 9 7.5 13.5M4 4h16"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M9 7V5h6v2M6 7l1 13h10l1-13"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></symbol>
+  <symbol id="i-palette" viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 0 18h1.5a2.5 2.5 0 0 0 0-5H12a2 2 0 0 1 0-4h5a4 4 0 0 0-4-4z"/><path d="M8 9h.01M7 14h.01M12 7h.01"/></symbol>
+  <symbol id="i-bug" viewBox="0 0 24 24"><rect x="8" y="8" width="8" height="11" rx="4"/><path d="M9 5l1.5 3M15 5l-1.5 3M4 11h4M16 11h4M4 17h4M16 17h4M12 8v11"/></symbol>
+  <symbol id="i-link" viewBox="0 0 24 24"><path d="M9.5 14.5 14.5 9.5"/><path d="M8 12l-2 2a3.5 3.5 0 0 0 5 5l2-2M16 12l2-2a3.5 3.5 0 0 0-5-5l-2 2"/></symbol>
+  <symbol id="i-activity" viewBox="0 0 24 24"><path d="M3 12h4l3-8 4 16 3-8h4"/></symbol>
+  <symbol id="i-zip" viewBox="0 0 24 24"><path d="M6 3h12v18H6z"/><path d="M11 3v3h2V3M12 6v2M12 8v2M12 10v2"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></symbol>
+</svg>
+
+<script>
+const icon = (n, cls) => '<svg class="ic ' + (cls || '') + '" aria-hidden="true"><use href="#i-' + n + '"></use></svg>';
+
+/* ── 가짜 QR (결정적 패턴) ─────────────────────────────────── */
+function qrSvg() {
+  const n = 21, cell = 100 / n;
+  let seed = 20261021;
+  const rnd = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
+  const inFinder = (x, y) =>
+    (x < 7 && y < 7) || (x > 13 && y < 7) || (x < 7 && y > 13);
+  let out = '<svg viewBox="0 0 100 100" shape-rendering="crispEdges">';
+  out += '<rect width="100" height="100" fill="#fff"/>';
+  for (let y = 0; y < n; y++) {
+    for (let x = 0; x < n; x++) {
+      if (inFinder(x, y)) continue;
+      if (rnd() > 0.52) out += '<rect x="' + (x*cell) + '" y="' + (y*cell) + '" width="' + cell + '" height="' + cell + '" fill="#101614"/>';
+    }
+  }
+  const finder = (fx, fy) => {
+    const s = cell;
+    return '<rect x="' + (fx*s) + '" y="' + (fy*s) + '" width="' + (7*s) + '" height="' + (7*s) + '" fill="#101614"/>' +
+           '<rect x="' + ((fx+1)*s) + '" y="' + ((fy+1)*s) + '" width="' + (5*s) + '" height="' + (5*s) + '" fill="#fff"/>' +
+           '<rect x="' + ((fx+2)*s) + '" y="' + ((fy+2)*s) + '" width="' + (3*s) + '" height="' + (3*s) + '" fill="#101614"/>';
+  };
+  out += finder(0, 0) + finder(14, 0) + finder(0, 14);
+  out += '</svg>';
+  return out;
+}
+
+/* ── 공통 조각 ────────────────────────────────────────────── */
+const sb = `
+  <div class="sb">
+    <span class="num">9:41</span>
+    <span class="right">
+      ${icon('wifi','sm')}${icon('battery','sm')}
+    </span>
+  </div>`;
+
+function nav(active) {
+  const items = [
+    ['home', '홈'], ['down', '받기'], ['magnet', '토렌트'], ['folder', '보관함'], ['more', '더보기'],
+  ];
+  return '<nav class="nav">' + items.map(([id, label]) =>
+    '<a class="' + (active === id ? 'on' : '') + '"><span class="ind">' + icon(id) + '</span>' + label + '</a>'
+  ).join('') + '</nav>';
+}
+
+function topbar(title, kicker, actions) {
+  return '<div class="topbar"><div class="tb-text">' +
+    (kicker ? '<div class="tb-kicker">' + kicker + '</div>' : '') +
+    '<h1 class="tb-title">' + title + '</h1></div>' +
+    '<div class="tb-actions">' + (actions || '') + '</div></div>';
+}
+
+function topbarSecondary(title) {
+  return '<div class="topbar compact">' +
+    '<button class="icon-btn">' + icon('back') + '</button>' +
+    '<div class="tb-text"><h1 class="tb-title">' + title + '</h1></div>' +
+    '<div class="tb-actions"><button class="icon-btn">' + icon('more') + '</button></div></div>';
+}
+
+const spark = `
+  <svg class="spark" viewBox="0 0 300 38" preserveAspectRatio="none" aria-hidden="true">
+    <path class="grid" d="M0 34H300M0 22H300M0 10H300"/>
+    <path class="area" d="M0 34V26l22-5 20 3 22-12 24 6 22-9 22 4 24-7 22 10 22-5 24 3 22-8 24 5 22-3 16 4v14z"/>
+    <path class="line" d="M0 26l22-5 20 3 22-12 24 6 22-9 22 4 24-7 22 10 22-5 24 3 22-8 24 5 22-3 16 4"/>
+  </svg>`;
+
+/* ── 1. 홈 / 상태 ─────────────────────────────────────────── */
+const home = `
+  ${sb}
+  <div class="app">
+    ${topbar('릴레이', 'DROIDRELAY · S22', '<button class="icon-btn">' + icon('bug') + '</button>')}
+    <div class="body">
+      <div class="stack">
+
+        <div class="card hero">
+          <div class="between" style="margin-bottom:12px">
+            <span class="pill live"><span class="dot pulse"></span>서버 실행 중</span>
+            <span class="t-meta num" style="opacity:.75">02:14:33</span>
+          </div>
+          <div class="row top">
+            <div class="grow">
+              <div class="label" style="color:inherit;opacity:.62">HTTP · 테더링 주소</div>
+              <div class="num" style="font-size:19px;font-weight:700;letter-spacing:-.02em;margin-top:2px">192.168.86.49:3000</div>
+              <div class="t-meta num" style="color:inherit;opacity:.7;margin-top:3px">HTTPS 8443 · 켜짐</div>
+              <div class="row" style="gap:8px;margin-top:12px">
+                <button class="btn filled"><span class="ic" style="color:inherit">${icon('copy')}</span>복사</button>
+                <button class="btn out" style="border-color:color-mix(in srgb,var(--on-primary-container) 35%,transparent);color:inherit">공유</button>
+              </div>
+            </div>
+            <div class="qr">${qrSvg()}</div>
+          </div>
+        </div>
+
+        <div class="card low">
+          <div class="between" style="margin-bottom:8px">
+            <span class="label">지금 흐르는 것</span>
+            <span class="pill"><span class="dot" style="background:var(--primary)"></span>활성 3</span>
+          </div>
+          <div class="row" style="gap:18px">
+            <div class="grow">
+              <div class="t-meta">내려받기</div>
+              <div class="t-num-xl num" style="color:var(--primary)">42.8<span style="font-size:13px;font-weight:600;margin-left:3px">MB/s</span></div>
+            </div>
+            <div style="width:1px;height:38px;background:var(--outline-variant);opacity:.6"></div>
+            <div class="grow">
+              <div class="t-meta">올리기</div>
+              <div class="t-num-xl num" style="color:var(--tertiary)">1.2<span style="font-size:13px;font-weight:600;margin-left:3px">MB/s</span></div>
+            </div>
+          </div>
+          ${spark}
+          <div class="t-meta" style="margin-top:2px">대기 2 · 완료 128 · 오늘 82.4 GB</div>
+        </div>
+
+        <div class="card low">
+          <div class="between" style="margin-bottom:6px">
+            <span class="label">보관함</span>
+            <span class="t-meta num">여유 132.4 / 256 GB</span>
+          </div>
+          <div class="prog thin"><i style="width:48%"></i></div>
+          <div class="row" style="gap:8px;margin-top:12px">
+            <button class="btn tonal sm">${icon('plus')}URL</button>
+            <button class="btn tonal sm">${icon('magnet')}magnet</button>
+            <button class="btn tonal sm">${icon('folder')}폴더</button>
+            <div class="grow"></div>
+            <button class="icon-btn">${icon('chev')}</button>
+          </div>
+        </div>
+
+        <div class="row" style="gap:8px">
+          <span class="chip">${icon('wifi')}Wi-Fi 5GHz</span>
+          <span class="chip">${icon('battery')}가드 20%</span>
+          <span class="chip">${icon('activity')}발열 정상</span>
+        </div>
+
+        <div class="card out" style="padding:10px 14px">
+          <div class="row" style="gap:10px">
+            <span class="filetile" style="width:34px;height:34px;background:var(--surface-container-high);color:var(--on-surface-variant)">${icon('check')}</span>
+            <div class="grow">
+              <div class="t-title" style="font-size:13px">EXAONE gguf · md5 일치</div>
+              <div class="t-meta num">18.01 GB · 14:02 완료</div>
+            </div>
+            <button class="icon-btn" style="width:32px;height:32px">${icon('chev')}</button>
+          </div>
+        </div>
+
+      </div>
+    </div>
+    ${nav('home')}
+  </div>`;
+
+/* ── 2. 다운로드 ──────────────────────────────────────────── */
+const downloads = `
+  ${sb}
+  <div class="app">
+    ${topbar('받기', 'DOWNLOADS', '<button class="icon-btn">' + icon('tune') + '</button>')}
+    <div class="body">
+      <div class="chiprow" style="margin-bottom:12px">
+        <span class="chip on">전체 8</span>
+        <span class="chip">받는 중 3</span>
+        <span class="chip">대기 2</span>
+        <span class="chip">완료</span>
+      </div>
+      <div class="stack">
+
+        <div class="card low">
+          <div class="row top">
+            <div class="filetile p">${icon('file')}</div>
+            <div class="grow">
+              <div class="t-title" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">EXAONE-3.5-32B-Instruct-Q4_K_M.gguf</div>
+              <div class="t-meta num">8.42 GB / 18.01 GB · 3분 12초 남음</div>
+            </div>
+            <button class="icon-btn">${icon('pause')}</button>
+          </div>
+          <div class="row" style="margin-top:10px;gap:10px">
+            <div class="prog grow"><i style="width:47%"></i></div>
+            <span class="t-num-md num" style="color:var(--primary)">47%</span>
+          </div>
+          <div class="between" style="margin-top:8px">
+            <span class="t-meta num">42.8 MB/s · hf.co</span>
+            <span class="chip" style="height:26px;font-size:11px">취소</span>
+          </div>
+        </div>
+
+        <div class="card low">
+          <div class="row top">
+            <div class="filetile t">${icon('file')}</div>
+            <div class="grow">
+              <div class="t-title" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">ubuntu-24.04.1-live-server-amd64.iso</div>
+              <div class="t-meta num">1.31 GB / 2.61 GB · 1분 04초 남음</div>
+            </div>
+            <button class="icon-btn">${icon('pause')}</button>
+          </div>
+          <div class="row" style="margin-top:10px;gap:10px">
+            <div class="prog grow"><i style="width:50%"></i></div>
+            <span class="t-num-md num" style="color:var(--primary)">50%</span>
+          </div>
+          <div class="between" style="margin-top:8px">
+            <span class="t-meta num">18.4 MB/s · releases.ubuntu.com</span>
+            <span class="t-meta">재시도 0</span>
+          </div>
+        </div>
+
+        <div class="card out" style="padding:12px 14px">
+          <div class="row">
+            <span class="pill warn"><span class="dot"></span>대기 2</span>
+            <div class="grow t-body" style="font-size:12.5px">동시 다운로드 1 · 다음: Qwen2.5-32B…</div>
+            <button class="icon-btn">${icon('chevd')}</button>
+          </div>
+        </div>
+
+        <div class="card out" style="padding:12px 14px">
+          <div class="row">
+            <span class="filetile" style="width:36px;height:36px;background:var(--surface-container-high);color:var(--on-surface-variant)">${icon('zip')}</span>
+            <div class="grow">
+              <div class="t-title" style="font-size:13.5px">Tools.zip</div>
+              <div class="t-meta num">54.3 MB · 완료 14:02</div>
+            </div>
+            <button class="icon-btn" style="color:var(--primary)">${icon('check')}</button>
+          </div>
+        </div>
+
+      </div>
+    </div>
+    <div class="fab">${icon('plus')}URL 추가</div>
+    ${nav('down')}
+  </div>`;
+
+/* ── 3. 토렌트 ────────────────────────────────────────────── */
+const torrent = `
+  ${sb}
+  <div class="app">
+    ${topbar('토렌트', 'TORRENT', '<button class="icon-btn">' + icon('search') + '</button>')}
+    <div class="body">
+      <div class="stack">
+
+        <div class="field">
+          ${icon('magnet')}
+          <span class="grow" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">magnet:?xt=urn:btih:9f2c…</span>
+          <span class="pill">붙여넣기</span>
+        </div>
+
+        <div class="card tonal" style="padding:12px 14px">
+          <div class="row" style="gap:14px">
+            <div class="grow">
+              <div class="t-meta" style="color:inherit;opacity:.7">내려받기</div>
+              <div class="t-num-md num">8.4 MB/s</div>
+            </div>
+            <div class="grow">
+              <div class="t-meta" style="color:inherit;opacity:.7">올리기</div>
+              <div class="t-num-md num">240 KB/s</div>
+            </div>
+            <div class="grow">
+              <div class="t-meta" style="color:inherit;opacity:.7">시드 / 피어</div>
+              <div class="t-num-md num">18 / 42</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card low">
+          <div class="between">
+            <span class="t-title" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">debian-12.7.0-amd64-netinst.iso</span>
+            <span class="pill"><span class="dot" style="background:var(--primary)"></span>배포 중</span>
+          </div>
+          <div class="row" style="margin-top:10px;gap:10px">
+            <div class="prog grow"><i style="width:78%"></i></div>
+            <span class="t-num-md num" style="color:var(--primary)">78%</span>
+          </div>
+          <div class="between" style="margin-top:8px">
+            <span class="t-meta num">시드 18 · 피어 42 · 비율 0.42</span>
+            <span class="t-meta num">↓ 8.4 MB/s ↑ 240 KB/s</span>
+          </div>
+        </div>
+
+        <div class="card low">
+          <div class="between">
+            <span class="t-title" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Fedora-Workstation-Live-x86_64-41</span>
+            <span class="pill warn"><span class="dot"></span>시더 찾는 중</span>
+          </div>
+          <div class="row" style="margin-top:10px;gap:10px">
+            <div class="prog grow"><i style="width:12%;background:var(--tertiary)"></i></div>
+            <span class="t-num-md num">12%</span>
+          </div>
+          <div class="t-meta num" style="margin-top:8px">시드 0 · 피어 3 · 3분 뒤 자동 재시도</div>
+        </div>
+
+        <div class="card low" style="padding:12px 14px">
+          <div class="row">
+            <span class="filetile" style="width:34px;height:34px;background:var(--surface-container-high);color:var(--on-surface-variant)">${icon('check')}</span>
+            <div class="grow">
+              <div class="t-title" style="font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">ubuntu-24.04-desktop-amd64.iso</div>
+              <div class="t-meta num">완료 · 시드 중 · 비율 1.2</div>
+            </div>
+            <span class="pill live"><span class="dot pulse"></span>배포</span>
+          </div>
+        </div>
+
+        <div class="card out" style="padding:12px 14px">
+          <div class="row">
+            <span class="icon-btn" style="width:32px;height:32px">${icon('search')}</span>
+            <div class="grow t-body" style="font-size:13px">토렌트 검색 · Jackett / Prowlarr</div>
+            <button class="icon-btn">${icon('chevd')}</button>
+          </div>
+        </div>
+
+      </div>
+    </div>
+    ${nav('magnet')}
+  </div>`;
+
+/* ── 4. 보관함 ────────────────────────────────────────────── */
+const files = `
+  ${sb}
+  <div class="app">
+    ${topbar('보관함', 'STORAGE', '<button class="icon-btn">' + icon('search') + '</button>')}
+    <div class="body">
+      <div class="stack">
+
+        <div class="card low" style="padding:12px 14px">
+          <div class="between" style="margin-bottom:6px">
+            <span class="label">기기 저장공간</span>
+            <span class="t-meta num">여유 132.4 GB</span>
+          </div>
+          <div class="prog thin"><i style="width:48%"></i></div>
+        </div>
+
+        <div class="row" style="gap:6px">
+          <span class="chip">${icon('folder')}루트</span>
+          <span class="t-meta">/</span>
+          <span class="chip on">AI Model</span>
+          <div class="grow"></div>
+          <button class="icon-btn" style="width:34px;height:34px">${icon('tune')}</button>
+        </div>
+
+        <div class="stack sm">
+          <div class="row" style="padding:2px 2px">
+            <div class="filetile">${icon('folder')}</div>
+            <div class="grow">
+              <div class="t-title" style="font-size:14px">Models</div>
+              <div class="t-meta num">3개 항목 · 54.2 GB</div>
+            </div>
+            <button class="icon-btn">${icon('chev')}</button>
+          </div>
+          <div class="row" style="padding:2px 2px">
+            <div class="filetile">${icon('folder')}</div>
+            <div class="grow">
+              <div class="t-title" style="font-size:14px">Datasets</div>
+              <div class="t-meta num">12개 항목 · 8.8 GB</div>
+            </div>
+            <button class="icon-btn">${icon('chev')}</button>
+          </div>
+          <div class="divider" style="margin:2px 0"></div>
+          <div class="row" style="padding:2px 2px">
+            <div class="filetile p">${icon('file')}</div>
+            <div class="grow">
+              <div class="t-title" style="font-size:13.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">EXAONE-3.5-32B-Instruct-Q4_K_M.gguf</div>
+              <div class="t-meta num">18.01 GB · 10월 18일</div>
+            </div>
+            <button class="icon-btn" style="color:var(--primary)">${icon('down')}</button>
+          </div>
+          <div class="row" style="padding:2px 2px">
+            <div class="filetile p">${icon('file')}</div>
+            <div class="grow">
+              <div class="t-title" style="font-size:13.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Qwen2.5-32B-Instruct-Q4_K_M.gguf</div>
+              <div class="t-meta num">18.49 GB · 10월 18일</div>
+            </div>
+            <button class="icon-btn" style="color:var(--primary)">${icon('down')}</button>
+          </div>
+          <div class="row" style="padding:2px 2px">
+            <div class="filetile t">${icon('zip')}</div>
+            <div class="grow">
+              <div class="t-title" style="font-size:13.5px">Tools.zip</div>
+              <div class="t-meta num">54.3 MB · 10월 18일</div>
+            </div>
+            <button class="icon-btn" style="color:var(--primary)">${icon('down')}</button>
+          </div>
+          <div class="row" style="padding:2px 2px">
+            <div class="filetile" style="background:var(--surface-container-high);color:var(--on-surface-variant)">${icon('file')}</div>
+            <div class="grow">
+              <div class="t-title" style="font-size:13.5px">notes.md</div>
+              <div class="t-meta num">2.1 KB · 10월 17일</div>
+            </div>
+            <button class="icon-btn" style="color:var(--primary)">${icon('down')}</button>
+          </div>
+        </div>
+
+        <div class="card out" style="padding:11px 14px">
+          <div class="row">
+            ${icon('trash','sm')}
+            <span class="t-body grow" style="font-size:12.5px">휴지통 · 3개 파일 · 1.2 GB</span>
+            <span class="pill">비우기</span>
+          </div>
+        </div>
+
+      </div>
+    </div>
+    ${nav('folder')}
+  </div>`;
+
+/* ── 5. 통계 ──────────────────────────────────────────────── */
+const stats = `
+  ${sb}
+  <div class="app">
+    ${topbarSecondary('통계')}
+    <div class="body">
+      <div class="stack">
+
+        <div class="card hero" style="padding:16px">
+          <div class="between">
+            <div>
+              <div class="label" style="color:inherit;opacity:.62">이번 달 전송량</div>
+              <div class="num" style="font-size:38px;font-weight:720;letter-spacing:-.035em;line-height:1.1;margin-top:2px">1.24<span style="font-size:16px;font-weight:600"> TB</span></div>
+            </div>
+            <span class="pill" style="background:color-mix(in srgb,var(--on-primary-container) 12%,transparent);color:inherit">+12%</span>
+          </div>
+          <div class="t-meta" style="color:inherit;opacity:.7;margin-top:6px">다운로드 1.02 TB · 업로드 0.22 TB</div>
+        </div>
+
+        <div class="card low">
+          <div class="between" style="margin-bottom:10px">
+            <span class="label">최근 30일</span>
+            <span class="t-meta">■받기 □올리기</span>
+          </div>
+          <div class="bars">
+            ${[38,52,44,61,32,48,70,58,30,42].map((h,i)=>'<div class="b"><i style="height:'+h+'%"></i><i class="up" style="height:'+(6+i%4*2)+'%"></i></div>').join('')}
+            ${[66,74,51,80,62,44,71,88,57,63].map((h,i)=>'<div class="b"><i style="height:'+h+'%"></i><i class="up" style="height:'+(5+i%3*3)+'%"></i></div>').join('')}
+            ${[48,36,58,66,72,44,54,68,82,76].map((h,i)=>'<div class="b"><i style="height:'+h+'%"></i><i class="up" style="height:'+(7+i%4*2)+'%"></i></div>').join('')}
+          </div>
+          <div class="axis"><span>9월 22일</span><span>10월 6일</span><span>10월 21일</span></div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div class="card low" style="padding:12px 14px">
+            <div class="t-meta">최고 속도</div>
+            <div class="t-num-md num" style="color:var(--primary);margin-top:2px">68.2 MB/s</div>
+          </div>
+          <div class="card low" style="padding:12px 14px">
+            <div class="t-meta">평균 속도</div>
+            <div class="t-num-md num" style="margin-top:2px">21.4 MB/s</div>
+          </div>
+          <div class="card low" style="padding:12px 14px">
+            <div class="t-meta">완료</div>
+            <div class="t-num-md num" style="margin-top:2px">1,284</div>
+          </div>
+          <div class="card low" style="padding:12px 14px">
+            <div class="t-meta">실패</div>
+            <div class="t-num-md num" style="color:var(--error);margin-top:2px">3</div>
+          </div>
+        </div>
+
+        <div class="card out" style="padding:12px 14px">
+          <div class="row">
+            ${icon('server','sm')}
+            <div class="grow t-body" style="font-size:12.5px">가동 14일 6시간 · 이번 주 재시작 0회</div>
+            <span class="pill">정상</span>
+          </div>
+        </div>
+
+        <div class="card low" style="padding:12px 14px">
+          <div class="between" style="margin-bottom:6px">
+            <span class="label">월 예상 전송량</span>
+            <span class="t-meta num">1.24 / 1.60 TB</span>
+          </div>
+          <div class="prog thin"><i style="width:78%"></i></div>
+          <div class="t-meta" style="margin-top:6px">남은 10일 · 이 속도면 1.58 TB</div>
+        </div>
+
+      </div>
+    </div>
+    ${nav('more')}
+  </div>`;
+
+/* ── 6. 설정 ──────────────────────────────────────────────── */
+const settings = `
+  ${sb}
+  <div class="app">
+    ${topbarSecondary('설정')}
+    <div class="body">
+      <div class="stack lg">
+
+        <div class="card tonal" style="padding:14px 16px">
+          <div class="row">
+            <div class="filetile" style="background:color-mix(in srgb,var(--on-secondary-container) 12%,transparent);color:inherit">${icon('server')}</div>
+            <div class="grow">
+              <div class="t-title">Galaxy S22</div>
+              <div class="t-meta" style="color:inherit;opacity:.72">SM-S901N · 0.59.0 (41)</div>
+            </div>
+            <button class="btn out sm" style="border-color:color-mix(in srgb,var(--on-secondary-container) 26%,transparent);color:inherit">확인</button>
+          </div>
+        </div>
+
+        <div>
+          <div class="label" style="margin:0 4px 6px">서버</div>
+          <div class="card low" style="padding:2px 14px">
+            <div class="setrow"><div class="grow"><div class="t-title" style="font-size:14px">HTTP 포트</div></div><span class="t-body num">3000</span>${icon('chev','sm')}</div>
+            <div class="setrow"><div class="grow"><div class="t-title" style="font-size:14px">HTTPS</div><div class="t-meta">8443 · 자체 서명</div></div><div class="switch on"><i></i></div></div>
+            <div class="setrow"><div class="grow"><div class="t-title" style="font-size:14px">접속 범위</div></div><span class="t-body">승인된 기기</span>${icon('chev','sm')}</div>
+          </div>
+        </div>
+
+        <div>
+          <div class="label" style="margin:0 4px 6px">다운로드</div>
+          <div class="card low" style="padding:2px 14px">
+            <div class="setrow"><div class="grow"><div class="t-title" style="font-size:14px">동시 다운로드</div><div class="t-meta">1개 (LTE 안정 우선)</div></div><span class="t-body num">1</span>${icon('chev','sm')}</div>
+            <div class="setrow"><div class="grow"><div class="t-title" style="font-size:14px">자동 분류</div><div class="t-meta">받은 파일을 종류별 폴더로</div></div><div class="switch on"><i></i></div></div>
+            <div class="setrow"><div class="grow"><div class="t-title" style="font-size:14px">속도 제한</div></div><span class="t-body">해제</span>${icon('chev','sm')}</div>
+          </div>
+        </div>
+
+        <div>
+          <div class="label" style="margin:0 4px 6px">디자인</div>
+          <div class="card low" style="padding:10px 14px">
+            <div class="seg" style="margin-bottom:10px"><span class="on">시스템</span><span>라이트</span><span>다크</span></div>
+            <div class="setrow" style="padding:10px 2px"><div class="grow"><div class="t-title" style="font-size:14px">동적 색상</div><div class="t-meta">배경화면에서 팔레트 추출</div></div><div class="switch on"><i></i></div></div>
+          </div>
+        </div>
+
+        <div>
+          <div class="label" style="margin:0 4px 6px">고급</div>
+          <div class="card low" style="padding:2px 14px">
+            <div class="setrow"><div class="grow"><div class="t-title" style="font-size:14px">디버그 로그</div></div>${icon('bug','sm')}${icon('chev','sm')}</div>
+            <div class="setrow"><div class="grow"><div class="t-title" style="font-size:14px">백업 · 복원</div></div>${icon('chev','sm')}</div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+    ${nav('more')}
+  </div>`;
+
+/* ── 렌더 ─────────────────────────────────────────────────── */
+const screens = [
+  ['home', '홈 · 상태', home],
+  ['downloads', '받기', downloads],
+  ['torrent', '토렌트', torrent],
+  ['files', '보관함', files],
+  ['stats', '통계', stats],
+  ['settings', '설정', settings],
+];
+
+function phone(theme, [id, label, html]) {
+  return '<div class="slot">' +
+    '<div class="device"><div class="screen ' + theme + '">' + html + '</div></div>' +
+    '<div class="cap"><b>' + label + '</b><span class="tag">' + theme + '</span></div>' +
+    '</div>';
+}
+
+document.getElementById('lightGrid').innerHTML = screens.map(s => phone('light', s)).join('');
+document.getElementById('darkGrid').innerHTML = screens.map(s => phone('dark', s)).join('');
+</script>
+</body>
+</html>

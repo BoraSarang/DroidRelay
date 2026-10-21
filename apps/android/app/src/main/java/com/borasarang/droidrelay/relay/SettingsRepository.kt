@@ -34,7 +34,7 @@ data class AppSettings(
     val port: Int = SettingsConstraints.DEFAULT_HTTP_PORT,
     val httpsPort: Int = SettingsConstraints.DEFAULT_HTTPS_PORT,
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
-    val dynamicColor: Boolean = true,
+    val dynamicColor: Boolean = false,
     val concurrency: Int = SettingsConstraints.DEFAULT_CONCURRENCY,
     val autoStart: Boolean = true,
     // v0.36 서버 제어 분리 — boot/launch 개별 + HTTPS 개별 (autoStart는 마이그레이션 소스로 유지)
@@ -226,7 +226,7 @@ class SettingsRepository(private val context: Context) {
             port = SettingsMigration.clampPort(p[Keys.PORT]),
             httpsPort = SettingsMigration.clampPort(p[Keys.HTTPS_PORT], SettingsConstraints.DEFAULT_HTTPS_PORT),
             themeMode = SettingsMigration.parseThemeMode(p[Keys.THEME]),
-            dynamicColor = p[Keys.DYNAMIC] ?: true,
+            dynamicColor = p[Keys.DYNAMIC] ?: false,
             concurrency = (p[Keys.CONCURRENCY] ?: SettingsConstraints.DEFAULT_CONCURRENCY)
                 .coerceIn(SettingsConstraints.CONCURRENCY_MIN, SettingsConstraints.CONCURRENCY_MAX),
             autoStart = p[Keys.AUTO_START] ?: true,

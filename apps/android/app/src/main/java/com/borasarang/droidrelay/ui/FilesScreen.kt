@@ -16,17 +16,17 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.ContentCut
-import androidx.compose.material.icons.filled.CreateNewFolder
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.Folder
-import androidx.compose.material.icons.filled.InsertDriveFile
-import androidx.compose.material.icons.filled.Share
-import androidx.compose.material.icons.filled.Sort
+import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.ContentCut
+import androidx.compose.material.icons.outlined.CreateNewFolder
+import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.Folder
+import androidx.compose.material.icons.outlined.InsertDriveFile
+import androidx.compose.material.icons.outlined.Share
+import androidx.compose.material.icons.outlined.Sort
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -201,6 +201,41 @@ fun FilesScreen(onShowSnack: (String) -> Unit = {}) {
     fun toast(msg: String) { onShowSnack(msg) }
 
     Column(Modifier.fillMaxSize()) {
+        // v0.59: 저장공간 헤더 — 보관함이 "얼마나 남았는지" 먼저 보여준다
+        val stat = runCatching { android.os.StatFs(DL_ROOT.path) }.getOrNull()
+        val freeBytes = stat?.availableBytes ?: 0L
+        val totalBytes = stat?.totalBytes ?: 0L
+        if (totalBytes > 0) {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = cs.surfaceContainerLow),
+                shape = MaterialTheme.shapes.medium,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+            ) {
+                Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 11.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            "저장공간",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = cs.onSurfaceVariant,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Text(
+                            "여유 ${fmtBytesS(freeBytes)} / ${fmtBytesS(totalBytes)}",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = cs.onSurfaceVariant,
+                        )
+                    }
+                    Spacer(Modifier.height(7.dp))
+                    androidx.compose.material3.LinearProgressIndicator(
+                        progress = { ((totalBytes - freeBytes).toFloat() / totalBytes).coerceIn(0f, 1f) },
+                        modifier = Modifier.fillMaxWidth().height(5.dp),
+                        color = cs.primary,
+                        trackColor = cs.surfaceContainerHighest,
+                    )
+                }
+            }
+        }
+
         // 상단 브레드크럼
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
@@ -210,7 +245,7 @@ fun FilesScreen(onShowSnack: (String) -> Unit = {}) {
                 IconButton(onClick = {
                     currentPath.value = currentPath.value.substringBeforeLast('/')
                 }) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, "뒤로")
+                    Icon(Icons.AutoMirrored.Outlined.ArrowBack, "뒤로")
                 }
             }
             val parts = currentPath.value.split('/').filter { it.isNotEmpty() }
@@ -235,7 +270,7 @@ fun FilesScreen(onShowSnack: (String) -> Unit = {}) {
         // 도구 모음
         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             IconButton(onClick = { showNewFolder.value = true }) {
-                Icon(Icons.Filled.CreateNewFolder, "폴더 만들기", tint = cs.primary)
+                Icon(Icons.Outlined.CreateNewFolder, "폴더 만들기", tint = cs.primary)
             }
             if (cutItem.value != null) {
                 IconButton(onClick = {
@@ -253,14 +288,14 @@ fun FilesScreen(onShowSnack: (String) -> Unit = {}) {
                         }.onFailure { toast("이동 실패") }
                     }
                 }) {
-                    Icon(Icons.Filled.Add, "붙여넣기", tint = cs.tertiary)
+                    Icon(Icons.Outlined.Add, "붙여넣기", tint = cs.tertiary)
                 }
             }
             Spacer(Modifier.weight(1f))
             // 정렬 기준 선택 (최신순·이름순·용량순·디렉토리순)
             Box {
                 IconButton(onClick = { sortMenuOpen.value = true }) {
-                    Icon(Icons.Filled.Sort, "정렬", tint = cs.primary)
+                    Icon(Icons.Outlined.Sort, "정렬", tint = cs.primary)
                 }
                 DropdownMenu(expanded = sortMenuOpen.value, onDismissRequest = { sortMenuOpen.value = false }) {
                     SortMode.entries.forEach { mode ->
@@ -273,7 +308,7 @@ fun FilesScreen(onShowSnack: (String) -> Unit = {}) {
                                 )
                             },
                             leadingIcon = {
-                                if (sortMode.value == mode) Icon(Icons.Filled.Check, null, tint = cs.primary)
+                                if (sortMode.value == mode) Icon(Icons.Outlined.Check, null, tint = cs.primary)
                                 else Spacer(Modifier.size(24.dp))
                             },
                         onClick = {
@@ -294,7 +329,9 @@ fun FilesScreen(onShowSnack: (String) -> Unit = {}) {
             items(items.size, key = { items[it].name + items[it].isDir }) { idx ->
                 val item = items[idx]
                 Card(
-                    colors = CardDefaults.cardColors(containerColor = cs.surfaceContainer),
+                    colors = CardDefaults.cardColors(containerColor = cs.surfaceContainerLow),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, cs.outlineVariant.copy(alpha = 0.55f)),
+                    shape = MaterialTheme.shapes.medium,
                     modifier = Modifier.fillMaxWidth().clickable {
                         if (item.isDir) {
                             currentPath.value = fullPath(item.name)
@@ -303,7 +340,7 @@ fun FilesScreen(onShowSnack: (String) -> Unit = {}) {
                 ) {
                     Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                         Icon(
-                            if (item.isDir) Icons.Filled.Folder else Icons.Filled.InsertDriveFile,
+                            if (item.isDir) Icons.Outlined.Folder else Icons.Outlined.InsertDriveFile,
                             null,
                             tint = if (item.isDir) cs.tertiary else cs.onSurfaceVariant,
                             modifier = Modifier.size(28.dp),
@@ -323,7 +360,7 @@ fun FilesScreen(onShowSnack: (String) -> Unit = {}) {
                         }
                         // 이름 변경
                         IconButton(onClick = { renameTarget.value = item; renameText.value = item.name }) {
-                            Icon(Icons.Filled.Edit, "이름변경", tint = cs.onSurfaceVariant, modifier = Modifier.size(24.dp))
+                            Icon(Icons.Outlined.Edit, "이름변경", tint = cs.onSurfaceVariant, modifier = Modifier.size(24.dp))
                         }
                         // 폴더 ZIP 공유 (T-938 — 서버 /dl-folder와 동일 level 0 패스스루)
                         if (item.isDir) {
@@ -340,18 +377,18 @@ fun FilesScreen(onShowSnack: (String) -> Unit = {}) {
                                         }
                                 }
                             }) {
-                                Icon(Icons.Filled.Share, "폴더 ZIP 공유", tint = cs.onSurfaceVariant, modifier = Modifier.size(24.dp))
+                                Icon(Icons.Outlined.Share, "폴더 ZIP 공유", tint = cs.onSurfaceVariant, modifier = Modifier.size(24.dp))
                             }
                         }
                         // 잘라내기 (파일만)
                         if (!item.isDir) {
                             IconButton(onClick = { cutItem.value = item; toast("${item.name} 잘라냄") }) {
-                                Icon(Icons.Filled.ContentCut, "잘라내기", tint = cs.onSurfaceVariant, modifier = Modifier.size(24.dp))
+                                Icon(Icons.Outlined.ContentCut, "잘라내기", tint = cs.onSurfaceVariant, modifier = Modifier.size(24.dp))
                             }
                         }
                         // 삭제
                         IconButton(onClick = { deleteTarget.value = item }) {
-                            Icon(Icons.Filled.Delete, "삭제", tint = cs.error, modifier = Modifier.size(24.dp))
+                            Icon(Icons.Outlined.Delete, "삭제", tint = cs.error, modifier = Modifier.size(24.dp))
                         }
                     }
                 }
@@ -362,7 +399,7 @@ fun FilesScreen(onShowSnack: (String) -> Unit = {}) {
                         Modifier.fillMaxWidth().padding(top = 48.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
-                        Icon(Icons.Filled.InsertDriveFile, null, tint = cs.outline, modifier = Modifier.size(36.dp))
+                        Icon(Icons.Outlined.InsertDriveFile, null, tint = cs.outline, modifier = Modifier.size(36.dp))
                         Spacer(Modifier.height(8.dp))
                         Text("비어 있습니다", color = cs.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
                     }

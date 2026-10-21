@@ -1234,15 +1234,26 @@ function refreshSearchVisibility(){
   }).catch(function(){});
 }
 refreshSearchVisibility();
+function drSystemDark(){
+  try{return !!(window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches);}catch(e){return false;}
+}
 function applyTheme(){
-  var t='toxic';
-  try{t=localStorage.getItem('dr_theme')||'toxic';}catch(e){}
-  if(t!=='toxic'&&t!=='midnight'&&t!=='navy')t='toxic';
-  document.body.dataset.theme=t;
+  var t='system';
+  try{t=localStorage.getItem('dr_theme')||'system';}catch(e){}
+  if(t!=='light'&&t!=='dark'&&t!=='system')t='system';
+  var resolved=(t==='system')?(drSystemDark()?'dark':'light'):t;
+  document.body.dataset.theme=resolved;
+  document.documentElement.style.colorScheme=resolved;
   var s=document.getElementById('themeSel');
   if(s)s.value=t;
+  var m=document.querySelector('meta[name=theme-color]');
+  if(m)m.setAttribute('content',resolved==='dark'?'#0E1513':'#F6FBF7');
 }
 applyTheme();
+try{
+  var mq=window.matchMedia?window.matchMedia('(prefers-color-scheme: dark)'):null;
+  if(mq&&mq.addEventListener)mq.addEventListener('change',function(){applyTheme();});
+}catch(e){}
 
 // ── 토렌트 상세 모달 ──
 function openTorrentModal(id){

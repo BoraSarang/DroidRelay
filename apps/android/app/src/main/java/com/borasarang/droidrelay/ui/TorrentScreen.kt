@@ -22,12 +22,12 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.CloudDownload
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Link
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.CloudDownload
+import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Link
+import androidx.compose.material.icons.outlined.PlayArrow
+import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -114,7 +114,7 @@ fun TorrentScreen(onShowSnack: (String) -> Unit = {}) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     Icon(
-                        Icons.Filled.CloudDownload,
+                        Icons.Outlined.CloudDownload,
                         contentDescription = null,
                         modifier = Modifier.size(64.dp),
                         tint = MaterialTheme.colorScheme.outline,
@@ -139,6 +139,9 @@ fun TorrentScreen(onShowSnack: (String) -> Unit = {}) {
                 Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
+                item {
+                    TorrentSummary(dlSum, upSum, seedSum, peerSum, activeCount, torrents.size)
+                }
                 item {
                     if (searchEnabled) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -172,15 +175,15 @@ fun TorrentScreen(onShowSnack: (String) -> Unit = {}) {
                                 enabled = !searching,
                                 shape = MaterialTheme.shapes.small,
                             ) {
-                                Icon(Icons.Filled.Search, "검색")
+                                Icon(Icons.Outlined.Search, "검색")
                             }
                             Spacer(Modifier.width(8.dp))
                             OutlinedButton(onClick = { showMagnetDialog = true }) {
-                                Icon(Icons.Filled.Link, "magnet 추가")
+                                Icon(Icons.Outlined.Link, "magnet 추가")
                             }
                             Spacer(Modifier.width(8.dp))
                             OutlinedButton(onClick = { filePicker.launch(arrayOf("application/x-bittorrent")) }) {
-                                Icon(Icons.Filled.Add, "torrent 파일 추가")
+                                Icon(Icons.Outlined.Add, "torrent 파일 추가")
                             }
                         }
                     } else {
@@ -382,11 +385,11 @@ private fun TorrentItem(
                     job.state == TorrentState.STALLED || job.state == TorrentState.QUEUED
                 ) {
                     IconButton(onClick = onResume, modifier = Modifier.size(32.dp)) {
-                        Icon(Icons.Filled.PlayArrow, "재개", modifier = Modifier.size(20.dp))
+                        Icon(Icons.Outlined.PlayArrow, "재개", modifier = Modifier.size(20.dp))
                     }
                 }
                 IconButton(onClick = onDelete, modifier = Modifier.size(32.dp)) {
-                    Icon(Icons.Filled.Delete, "삭제", modifier = Modifier.size(20.dp))
+                    Icon(Icons.Outlined.Delete, "삭제", modifier = Modifier.size(20.dp))
                 }
             }
             // 제한 + 파일선택 한 줄 (웹 작업별 제한 select와 동일)
@@ -543,6 +546,58 @@ private fun MagnetInputDialog(
             }
         },
     )
+}
+
+/** 상단 3분할 요약 — ↓/↑ 속도와 시드·피어 (v0.59) */
+@Composable
+private fun TorrentSummary(
+    downBps: Long,
+    upBps: Long,
+    seeds: Int,
+    peers: Int,
+    active: Int,
+    total: Int,
+) {
+    val cs = MaterialTheme.colorScheme
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = cs.secondaryContainer,
+            contentColor = cs.onSecondaryContainer,
+        ),
+        shape = MaterialTheme.shapes.large,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
+            Text(
+                "활성 $active / 전체 $total",
+                style = MaterialTheme.typography.labelSmall,
+                color = cs.onSecondaryContainer.copy(alpha = 0.72f),
+            )
+            Spacer(Modifier.height(6.dp))
+            Row(Modifier.fillMaxWidth()) {
+                SummaryCell("내려받기", fmtSpeed(downBps), Modifier.weight(1f))
+                SummaryCell("올리기", fmtSpeed(upBps), Modifier.weight(1f))
+                SummaryCell("시드 / 피어", "$seeds / $peers", Modifier.weight(1f))
+            }
+        }
+    }
+}
+
+@Composable
+private fun SummaryCell(label: String, value: String, modifier: Modifier = Modifier) {
+    val cs = MaterialTheme.colorScheme
+    Column(modifier) {
+        Text(
+            label,
+            style = MaterialTheme.typography.labelSmall,
+            color = cs.onSecondaryContainer.copy(alpha = 0.68f),
+        )
+        Text(
+            value,
+            style = MaterialTheme.typography.titleMedium,
+            color = cs.onSecondaryContainer,
+        )
+    }
 }
 
 private fun stateLabel(job: TorrentJob): String = when (job.state) {

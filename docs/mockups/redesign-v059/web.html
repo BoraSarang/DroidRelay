@@ -1,0 +1,705 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DroidRelay 리디자인 목업 v0.59 — Web Dashboard (Light / Dark)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Roboto+Flex:opsz,wdth,wght@8..144,75..125,300..800&family=Noto+Sans+KR:wght@300..800&family=Roboto+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --page-bg:#060a09;--page-fg:#e7f0eb;--page-dim:#8ea39a;--page-line:#1d2a25;
+    --mono:"Roboto Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0;padding:36px 28px 96px;color:var(--page-fg);
+    background:
+      radial-gradient(1100px 560px at 12% -8%, #0f2b23 0%, transparent 60%),
+      radial-gradient(900px 520px at 92% 2%, #1a2a1f 0%, transparent 55%),
+      var(--page-bg);
+    font-family:"Roboto Flex","Noto Sans KR","Pretendard","Apple SD Gothic Neo",sans-serif;
+  }
+  .page{max-width:1240px;margin:0 auto}
+  .page-head{border-bottom:1px solid var(--page-line);padding-bottom:22px;margin-bottom:30px}
+  .eyebrow{display:flex;align-items:center;gap:10px;font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:#6fe3c1;font-weight:600}
+  .eyebrow .mark{width:22px;height:22px;border-radius:7px;background:#006b56;display:grid;place-items:center;color:#7ff8d8;font-size:12px}
+  h1{font-size:clamp(28px,3.4vw,42px);line-height:1.1;letter-spacing:-.03em;font-weight:680;margin:14px 0 10px;font-variation-settings:"wdth" 92}
+  .lede{color:var(--page-dim);font-size:14px;line-height:1.75;max-width:80ch;margin:0}
+  .lede b{color:#c8e8dc;font-weight:600}
+  .section-head{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;margin:48px 0 18px}
+  .section-head h2{font-size:20px;margin:0;font-weight:650;letter-spacing:-.01em}
+  .section-head h2 span{color:var(--page-dim);font-weight:400;font-size:13px;margin-left:10px}
+  .section-head .hint{color:var(--page-dim);font-size:12px}
+  .cap{font-size:12px;color:var(--page-dim);margin-top:10px;padding:0 4px}
+  .cap b{color:#cfe4da}
+
+  /* ── 브라우저 프레임 ─────────────────────────────────────── */
+  .browser{width:1160px;max-width:100%;border-radius:18px;overflow:hidden;border:1px solid #26332d;
+    box-shadow:0 40px 80px -40px rgba(0,0,0,.9);background:#0b0f0d}
+  .chrome{height:42px;display:flex;align-items:center;gap:8px;padding:0 14px;background:#121917;border-bottom:1px solid #22302a}
+  .chrome .lights{display:flex;gap:6px}
+  .chrome .lights i{width:9px;height:9px;border-radius:50%;background:#31413a;display:block}
+  .chrome .lights i:nth-child(1){background:#ff8f7a}.chrome .lights i:nth-child(2){background:#ffd166}.chrome .lights i:nth-child(3){background:#6fe3b0}
+  .chrome .addr{flex:1;height:26px;border-radius:999px;background:#0b1210;border:1px solid #22302a;display:flex;align-items:center;
+    gap:8px;padding:0 12px;font-size:11.5px;color:#7d948a;font-family:var(--mono)}
+  .chrome .addr b{color:#9fb8ac;font-weight:500}
+
+  /* ── M3 토큰 scoped ─────────────────────────────────────── */
+  .dash{
+    height:760px;display:flex;overflow:hidden;background:var(--surface);color:var(--on-surface);
+    font-size:14px;line-height:1.45;
+  }
+  .dash.light{
+    color-scheme:light;
+    --primary:#006b56;--on-primary:#fff;--primary-container:#7ff8d8;--on-primary-container:#00201a;
+    --secondary:#4a635c;--on-secondary:#fff;--secondary-container:#cce8df;--on-secondary-container:#06201a;
+    --tertiary:#7c5800;--on-tertiary:#fff;--tertiary-container:#ffdf9e;--on-tertiary-container:#261a00;
+    --error:#ba1a1a;--on-error:#fff;--error-container:#ffdad6;--on-error-container:#410002;
+    --surface:#f6fbf7;--on-surface:#171d1a;--surface-variant:#dbe5df;--on-surface-variant:#3f4945;
+    --outline:#6f7974;--outline-variant:#bfc9c3;
+    --surface-container-lowest:#fff;--surface-container-low:#f0f5f0;
+    --surface-container:#eaeFEA;--surface-container-high:#e4eae4;--surface-container-highest:#dee4de;
+    --surface-dim:#d6dbd7;--surface-bright:#f6fbf7;
+    --inverse-surface:#2b322e;--inverse-on-surface:#ecf1ec;
+    --hairline:rgba(23,29,26,.08);--glow:rgba(0,107,86,.16);
+  }
+  .dash.dark{
+    color-scheme:dark;
+    --primary:#62dcbe;--on-primary:#00382d;--primary-container:#005141;--on-primary-container:#80f8d9;
+    --secondary:#b1ccc3;--on-secondary:#1c352f;--secondary-container:#334b44;--on-secondary-container:#cce8df;
+    --tertiary:#f5bf48;--on-tertiary:#412d00;--tertiary-container:#5d4200;--on-tertiary-container:#ffdf9e;
+    --error:#ffb4ab;--on-error:#690005;--error-container:#93000a;--on-error-container:#ffdad6;
+    --surface:#0e1513;--on-surface:#dde4df;--surface-variant:#3f4945;--on-surface-variant:#bfc9c3;
+    --outline:#89938e;--outline-variant:#3f4945;
+    --surface-container-lowest:#090f0d;--surface-container-low:#171d1b;
+    --surface-container:#1b211f;--surface-container-high:#252b29;--surface-container-highest:#303634;
+    --surface-dim:#0e1513;--surface-bright:#343b38;
+    --inverse-surface:#dde4df;--inverse-on-surface:#2b322e;
+    --hairline:rgba(221,228,223,.08);--glow:rgba(98,220,190,.16);
+  }
+  .dash .num{font-variant-numeric:tabular-nums;font-feature-settings:"tnum";font-variation-settings:"wdth" 92}
+  .dash .mono{font-family:var(--mono);font-variant-ligatures:none}
+  .ic{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
+  .ic.sm{width:16px;height:16px}.ic.lg{width:24px;height:24px}
+
+  /* 레일 */
+  .rail{width:78px;flex-shrink:0;border-right:1px solid var(--outline-variant);background:var(--surface-container-low);
+    display:flex;flex-direction:column;align-items:center;padding:16px 0 14px;gap:6px}
+  .rail .brand{width:42px;height:42px;border-radius:14px;background:var(--primary);color:var(--on-primary);display:grid;place-items:center;
+    font-size:17px;font-weight:800;margin-bottom:14px;letter-spacing:-.04em}
+  .rail a{width:60px;height:52px;border-radius:16px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;
+    color:var(--on-surface-variant);text-decoration:none;font-size:10.5px;font-weight:600}
+  .rail a.on{background:var(--secondary-container);color:var(--on-secondary-container)}
+  .rail .spacer{flex:1}
+  .rail .ver{font-size:9.5px;color:var(--on-surface-variant);font-family:var(--mono);opacity:.75}
+
+  /* 메인 */
+  .main{flex:1;display:flex;flex-direction:column;min-width:0}
+  .topbar{height:68px;display:flex;align-items:center;gap:14px;padding:0 26px;border-bottom:1px solid var(--hairline);flex-shrink:0}
+  .topbar .title{font-size:22px;font-weight:700;letter-spacing:-.02em;margin:0}
+  .topbar .crumbs{font-size:11.5px;color:var(--on-surface-variant);margin-top:2px}
+  .topbar .grow{flex:1}
+  .searchbox{width:260px;height:40px;border-radius:999px;background:var(--surface-container-high);display:flex;align-items:center;gap:9px;
+    padding:0 14px;font-size:12.5px;color:var(--on-surface-variant)}
+  .iconbtn{width:40px;height:40px;border-radius:999px;display:grid;place-items:center;color:var(--on-surface-variant);border:0;background:transparent}
+  .iconbtn.tonal{background:var(--secondary-container);color:var(--on-secondary-container)}
+  .pill{height:26px;padding:0 10px;border-radius:999px;display:inline-flex;align-items:center;gap:6px;font-size:11.5px;font-weight:650;
+    background:var(--secondary-container);color:var(--on-secondary-container);white-space:nowrap}
+  .pill.live{background:color-mix(in srgb,var(--primary) 16%,transparent);color:var(--primary)}
+  .pill.warn{background:var(--tertiary-container);color:var(--on-tertiary-container)}
+  .pill.err{background:var(--error-container);color:var(--on-error-container)}
+  .dot{width:7px;height:7px;border-radius:50%;background:currentColor;flex-shrink:0}
+  .dot.pulse{animation:pulse 2.2s cubic-bezier(.2,0,0,1) infinite}
+  @keyframes pulse{0%,100%{opacity:1;box-shadow:0 0 0 0 currentColor}55%{opacity:.6;box-shadow:0 0 0 5px transparent}}
+
+  .content{flex:1;display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:22px;padding:22px 26px;min-height:0}
+  .col{display:flex;flex-direction:column;gap:16px;min-height:0;overflow:hidden}
+  .side{display:flex;flex-direction:column;gap:14px;min-height:0}
+
+  .card{background:var(--surface-container);border-radius:18px;padding:16px;border:1px solid transparent}
+  .card.low{background:var(--surface-container-low);border-color:var(--outline-variant)}
+  .card.out{background:transparent;border-color:var(--outline-variant)}
+  .card.hero{background:var(--primary-container);color:var(--on-primary-container);position:relative;overflow:hidden}
+  .card.hero::after{content:"";position:absolute;right:-40px;top:-50px;width:170px;height:170px;border-radius:50%;
+    background:radial-gradient(circle at 40% 40%,var(--glow),transparent 65%)}
+  .card.tonal{background:var(--secondary-container);color:var(--on-secondary-container)}
+
+  .statstrip{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+  .stat{padding:13px 15px}
+  .stat .k{font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;font-weight:650;color:var(--on-surface-variant)}
+  .stat .v{font-size:23px;font-weight:700;letter-spacing:-.025em;margin-top:3px;line-height:1.1}
+  .stat .v small{font-size:11px;font-weight:600;margin-left:3px;letter-spacing:0}
+  .stat .sub{font-size:11px;color:var(--on-surface-variant);margin-top:3px}
+
+  .row{display:flex;align-items:center;gap:10px}
+  .grow{flex:1;min-width:0}
+  .label{font-size:11px;letter-spacing:.07em;text-transform:uppercase;font-weight:650;color:var(--on-surface-variant)}
+  .title{font-size:14.5px;font-weight:650;letter-spacing:-.01em}
+  .meta{font-size:11.5px;color:var(--on-surface-variant)}
+  .num-xl{font-size:32px;font-weight:700;letter-spacing:-.035em;line-height:1.05}
+  .num-lg{font-size:20px;font-weight:680;letter-spacing:-.02em}
+
+  .field{height:48px;border-radius:14px;background:var(--surface-container-high);display:flex;align-items:center;gap:10px;padding:0 16px;
+    color:var(--on-surface-variant);font-size:13px;border:1px solid transparent;flex:1;min-width:0}
+  .field.kbd{justify-content:space-between}
+  .kbdchip{font-family:var(--mono);font-size:10.5px;padding:3px 7px;border-radius:6px;background:var(--surface-container-highest);color:var(--on-surface-variant)}
+  .btn{height:44px;padding:0 20px;border-radius:999px;border:0;display:inline-flex;align-items:center;justify-content:center;gap:7px;
+    font:inherit;font-size:13px;font-weight:650;flex-shrink:0}
+  .btn.filled{background:var(--primary);color:var(--on-primary)}
+  .btn.tonal{background:var(--secondary-container);color:var(--on-secondary-container)}
+  .btn.out{background:transparent;border:1px solid var(--outline);color:var(--primary)}
+  .btn.sm{height:36px;padding:0 14px;font-size:12px}
+  .btn .ic{width:17px;height:17px}
+
+  .job{background:var(--surface-container-low);border:1px solid var(--outline-variant);border-radius:16px;padding:14px 16px}
+  .job.active{border-color:color-mix(in srgb,var(--primary) 34%,var(--outline-variant))}
+  .tile{width:40px;height:40px;border-radius:12px;display:grid;place-items:center;background:var(--secondary-container);
+    color:var(--on-secondary-container);flex-shrink:0}
+  .tile.p{background:var(--primary-container);color:var(--on-primary-container)}
+  .tile.t{background:var(--tertiary-container);color:var(--on-tertiary-container)}
+  .prog{height:8px;border-radius:999px;background:var(--surface-container-highest);overflow:hidden}
+  .prog>i{display:block;height:100%;border-radius:999px;background:var(--primary)}
+  .prog.up>i{background:var(--tertiary)}
+  .prog.thin{height:5px}.prog.thin>i{background:var(--primary)}
+  .filehead{display:grid;grid-template-columns:34px minmax(0,1fr) 110px 90px 64px;gap:12px;align-items:center;
+    font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;font-weight:650;color:var(--on-surface-variant);
+    padding:0 10px 6px;border-bottom:1px solid var(--hairline)}
+  .filerow{display:grid;grid-template-columns:34px minmax(0,1fr) 110px 90px 64px;gap:12px;align-items:center;padding:9px 10px;border-radius:12px}
+  .filerow:hover{background:var(--surface-container)}
+  .filerow .fname{display:flex;flex-direction:column;min-width:0}
+  .filerow .fname b{font-size:13.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .filerow .fname span{font-size:11px;color:var(--on-surface-variant);margin-top:1px}
+  .ficon{width:32px;height:32px;border-radius:10px;display:grid;place-items:center;background:var(--surface-container-high);color:var(--on-surface-variant)}
+  .ficon.folder{background:var(--tertiary-container);color:var(--on-tertiary-container)}
+  .ficon.model{background:var(--primary-container);color:var(--on-primary-container)}
+
+  .tree{display:flex;flex-direction:column;gap:2px;width:190px;flex-shrink:0;border-right:1px solid var(--hairline);padding-right:14px}
+  .tree .t-item{display:flex;align-items:center;gap:8px;height:34px;border-radius:10px;padding:0 10px;font-size:12.5px;color:var(--on-surface-variant)}
+  .tree .t-item.on{background:var(--secondary-container);color:var(--on-secondary-container);font-weight:650}
+  .tree .t-item .ic{width:16px;height:16px}
+
+  .qr{width:96px;height:96px;border-radius:14px;background:#fff;padding:6px;flex-shrink:0}
+  .qr svg{width:100%;height:100%;display:block}
+  .setrow{display:flex;align-items:center;gap:10px;padding:10px 0}
+  .setrow+.setrow{border-top:1px solid var(--hairline)}
+  .switch{width:40px;height:24px;border-radius:999px;background:var(--surface-container-highest);position:relative;flex-shrink:0;border:1px solid var(--outline-variant)}
+  .switch i{position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:50%;background:var(--outline)}
+  .switch.on{background:var(--primary);border-color:transparent}
+  .switch.on i{left:19px;background:var(--on-primary)}
+
+  /* 좁은 웹 */
+  .narrow{width:390px;height:780px;border-radius:38px;overflow:hidden;border:1px solid #26332d;background:var(--surface);
+    display:flex;flex-direction:column;box-shadow:0 30px 60px -30px #000}
+  .narrow .ntop{display:flex;align-items:center;gap:10px;padding:18px 16px 12px;border-bottom:1px solid var(--hairline)}
+  .narrow .nbody{flex:1;overflow:hidden;padding:14px 14px 0;display:flex;flex-direction:column;gap:10px}
+  .narrow .nav{height:68px;display:flex;background:var(--surface-container);border-top:1px solid var(--hairline);flex-shrink:0}
+  .narrow .nav a{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;font-size:10px;
+    font-weight:650;color:var(--on-surface-variant);text-decoration:none}
+  .narrow .nav a.on{color:var(--on-secondary-container)}
+  .narrow .nav .ind{width:52px;height:28px;border-radius:999px;display:grid;place-items:center}
+  .narrow .nav a.on .ind{background:var(--secondary-container)}
+
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start}
+  @media (max-width:900px){.grid2{grid-template-columns:1fr}}
+
+  /* 디자인 시스템 */
+  .swatches{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+  .sw{border-radius:14px;overflow:hidden;border:1px solid #22302a}
+  .sw .bar{height:64px}
+  .sw .txt{padding:8px 10px;background:#0d1412;font-size:10.5px;color:#9fb8ac;font-family:var(--mono);line-height:1.5}
+  .sw .txt b{display:block;color:#d8e8e0;font-weight:600;font-size:11.5px}
+  .typescale{display:flex;flex-direction:column;gap:10px}
+  .ts{display:flex;align-items:baseline;gap:16px;border-bottom:1px dashed var(--page-line);padding-bottom:8px}
+  .ts .demo{color:#e9f3ee;flex-shrink:0;width:320px}
+  .ts .spec{font-family:var(--mono);font-size:11px;color:#7d948a}
+  .footer-note{color:var(--page-dim);font-size:12px;line-height:1.7;border-top:1px solid var(--page-line);margin-top:56px;padding-top:18px}
+  .footer-note b{color:#c8e8dc}
+</style>
+</head>
+<body>
+<div class="page">
+  <header class="page-head">
+    <div class="eyebrow"><span class="mark">◈</span> DroidRelay · Design v0.59</div>
+    <h1>DroidRelay — 웹 대시보드 리디자인</h1>
+    <p class="lede">
+      안드로이드와 <b>같은 토큰</b>을 쓰는 데스크톱 대시보드. 상단 탭 4개를 <b>좌측 레일</b>로 옮겨 화면 폭을 콘텐츠에 내주고,
+      서버 상태·저장공간·가드는 <b>우측 레일</b>로 분리했습니다. 현재의 3가지 테마(Toxic/Midnight/Navy)는
+      <b>라이트/다크 2모드 + 시스템 추종</b>으로 통합합니다.
+    </p>
+  </header>
+
+  <div class="section-head">
+    <h2>Desktop · Dark <span>다운로드 패널 · 1160 × 760</span></h2>
+    <div class="hint">좌측 레일 내비게이션 · 우측 상태 레일 · 8dp 그리드</div>
+  </div>
+  <div class="browser">
+    <div class="chrome">
+      <div class="lights"><i></i><i></i><i></i></div>
+      <div class="addr"><b>http://192.168.86.49:3000</b><span style="opacity:.6">/ 대시보드</span></div>
+      <div class="addr" style="flex:0 0 auto;padding:0 10px">HTTPS 8443</div>
+    </div>
+    <div class="dash dark">
+      <aside class="rail">
+        <div class="brand">DR</div>
+        <a class="on"><svg class="ic"><use href="#i-down"/></svg>다운로드</a>
+        <a><svg class="ic"><use href="#i-magnet"/></svg>토렌트</a>
+        <a><svg class="ic"><use href="#i-folder"/></svg>보관함</a>
+        <a><svg class="ic"><use href="#i-chart"/></svg>통계</a>
+        <div class="spacer"></div>
+        <a><svg class="ic"><use href="#i-tune"/></svg>설정</a>
+        <div class="ver">0.59.0</div>
+      </aside>
+      <div class="main">
+        <header class="topbar">
+          <div>
+            <h2 class="title">다운로드</h2>
+            <div class="crumbs">활성 3 · 대기 2 · 완료 128</div>
+          </div>
+          <div class="grow"></div>
+          <span class="pill live"><span class="dot pulse"></span>192.168.86.49</span>
+          <div class="searchbox"><svg class="ic sm"><use href="#i-search"/></svg>파일·작업 검색<span class="grow"></span><span class="kbdchip">/</span></div>
+          <button class="iconbtn" title="테마"><svg class="ic"><use href="#i-palette"/></svg></button>
+          <button class="iconbtn" title="디버그"><svg class="ic"><use href="#i-bug"/></svg></button>
+        </header>
+
+        <div class="content">
+          <div class="col">
+            <div class="statstrip">
+              <div class="card low stat">
+                <div class="k">내려받기</div>
+                <div class="v num" style="color:var(--primary)">42.8<small>MB/s</small></div>
+                <div class="sub num">최고 68.2</div>
+              </div>
+              <div class="card low stat">
+                <div class="k">올리기</div>
+                <div class="v num" style="color:var(--tertiary)">1.2<small>MB/s</small></div>
+                <div class="sub num">시드 18</div>
+              </div>
+              <div class="card low stat">
+                <div class="k">활성 작업</div>
+                <div class="v num">3</div>
+                <div class="sub">대기 2</div>
+              </div>
+              <div class="card low stat">
+                <div class="k">보관함 여유</div>
+                <div class="v num">132.4<small>GB</small></div>
+                <div class="sub num">/ 256 GB</div>
+              </div>
+            </div>
+
+            <div class="card low" style="padding:12px">
+              <div class="row">
+                <div class="field kbd"><svg class="ic sm"><use href="#i-link"/></svg>URL 붙여넣기 — 여러 개는 줄바꿈으로<span class="kbdchip">Ctrl V</span></div>
+                <button class="btn filled"><svg class="ic"><use href="#i-plus"/></svg>추가</button>
+              </div>
+              <div class="row" style="margin-top:8px;gap:6px">
+                <span class="pill" style="background:var(--surface-container-high);color:var(--on-surface-variant)">magnet</span>
+                <span class="pill" style="background:var(--surface-container-high);color:var(--on-surface-variant)">.torrent</span>
+                <span class="pill" style="background:var(--surface-container-high);color:var(--on-surface-variant)">SHA-256 검증</span>
+                <span class="meta" style="margin-left:auto">동시 1 · 속도 제한 없음</span>
+              </div>
+            </div>
+
+            <div class="job active">
+              <div class="row">
+                <div class="tile p"><svg class="ic"><use href="#i-file"/></svg></div>
+                <div class="grow">
+                  <div class="title" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">EXAONE-3.5-32B-Instruct-Q4_K_M.gguf</div>
+                  <div class="meta num">8.42 GB / 18.01 GB · 42.8 MB/s · 3분 12초 남음</div>
+                </div>
+                <button class="iconbtn" title="일시정지"><svg class="ic"><use href="#i-pause"/></svg></button>
+                <button class="iconbtn" title="취소"><svg class="ic"><use href="#i-close"/></svg></button>
+              </div>
+              <div class="row" style="margin-top:12px;gap:12px">
+                <div class="prog grow"><i style="width:47%"></i></div>
+                <span class="num-lg num" style="color:var(--primary)">47%</span>
+              </div>
+            </div>
+
+            <div class="job">
+              <div class="row">
+                <div class="tile t"><svg class="ic"><use href="#i-file"/></svg></div>
+                <div class="grow">
+                  <div class="title">ubuntu-24.04.1-live-server-amd64.iso</div>
+                  <div class="meta num">1.31 GB / 2.61 GB · 18.4 MB/s · 재시도 0</div>
+                </div>
+                <button class="iconbtn"><svg class="ic"><use href="#i-pause"/></svg></button>
+                <button class="iconbtn"><svg class="ic"><use href="#i-close"/></svg></button>
+              </div>
+              <div class="row" style="margin-top:12px;gap:12px">
+                <div class="prog grow"><i style="width:50%"></i></div>
+                <span class="num-lg num" style="color:var(--primary)">50%</span>
+              </div>
+            </div>
+
+            <div class="job" style="padding:11px 16px">
+              <div class="row">
+                <span class="pill warn"><span class="dot"></span>대기 2</span>
+                <span class="meta grow">Qwen2.5-32B-Instruct-Q4_K_M.gguf · 다음 순서</span>
+                <button class="btn out sm">앞으로</button>
+              </div>
+            </div>
+          </div>
+
+          <aside class="side">
+            <div class="card hero">
+              <div class="row" style="margin-bottom:10px">
+                <span class="pill live" style="background:color-mix(in srgb,var(--on-primary-container) 12%,transparent);color:inherit"><span class="dot pulse"></span>실행 중</span>
+                <div class="grow"></div>
+                <span class="meta num" style="color:inherit;opacity:.7">02:14:33</span>
+              </div>
+              <div class="row">
+                <div class="grow">
+                  <div class="label" style="color:inherit;opacity:.62">접속 주소</div>
+                  <div class="num" style="font-size:14.5px;font-weight:700;margin-top:2px">192.168.86.49:3000</div>
+                  <div class="meta num" style="color:inherit;opacity:.7;margin-top:2px">HTTPS 8443 · 켜짐</div>
+                </div>
+                <div class="qr" style="width:80px;height:80px" id="qr1"></div>
+              </div>
+              <div class="row" style="margin-top:12px;gap:8px">
+                <button class="btn filled sm" style="background:var(--on-primary-container);color:var(--primary-container)">주소 복사</button>
+                <button class="btn out sm" style="border-color:color-mix(in srgb,var(--on-primary-container) 30%,transparent);color:inherit">공유</button>
+              </div>
+            </div>
+
+            <div class="card low">
+              <div class="row" style="margin-bottom:6px">
+                <span class="label grow">저장공간</span>
+                <span class="meta num">132.4 / 256 GB</span>
+              </div>
+              <div class="prog thin"><i style="width:48%"></i></div>
+              <div class="row" style="margin-top:8px;gap:6px">
+                <span class="pill" style="background:var(--tertiary-container);color:var(--on-tertiary-container)">모델 54.2 GB</span>
+                <span class="pill" style="background:var(--surface-container-high);color:var(--on-surface-variant)">기타 69.4 GB</span>
+              </div>
+            </div>
+
+            <div class="card low">
+              <div class="row" style="margin-bottom:2px"><span class="label grow">가드</span><span class="pill live"><span class="dot"></span>정상</span></div>
+              <div class="setrow"><span class="meta grow">배터리 한계</span><span class="num" style="font-size:12.5px">20%</span></div>
+              <div class="setrow"><span class="meta grow">발열</span><span class="num" style="font-size:12.5px">41.2°C</span></div>
+              <div class="setrow"><span class="meta grow">저장공간 한계</span><span class="num" style="font-size:12.5px">2 GB</span></div>
+            </div>
+
+            <div class="card out" style="padding:12px 14px">
+              <div class="row"><svg class="ic sm"><use href="#i-wifi"/></svg><span class="meta grow">Wi-Fi 5GHz · swlan0</span><span class="pill">LTE</span></div>
+            </div>
+          </aside>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="cap"><b>다크</b> — 처리량은 primary, 업로드는 tertiary. 카드 외곽선은 outline-variant, 그림자 없음(톤으로 깊이 표현).</div>
+
+  <div class="section-head">
+    <h2>Desktop · Light <span>보관함 패널 · 같은 토큰, 반전된 톤</span></h2>
+    <div class="hint">파일 트리 + 목록 · 숨김 디렉터리는 표시하지 않음</div>
+  </div>
+  <div class="browser">
+    <div class="chrome">
+      <div class="lights"><i></i><i></i><i></i></div>
+      <div class="addr"><b>http://192.168.86.49:3000</b><span style="opacity:.6">/ 보관함 / AI Model</span></div>
+      <div class="addr" style="flex:0 0 auto;padding:0 10px">HTTPS 8443</div>
+    </div>
+    <div class="dash light">
+      <aside class="rail">
+        <div class="brand">DR</div>
+        <a><svg class="ic"><use href="#i-down"/></svg>다운로드</a>
+        <a><svg class="ic"><use href="#i-magnet"/></svg>토렌트</a>
+        <a class="on"><svg class="ic"><use href="#i-folder"/></svg>보관함</a>
+        <a><svg class="ic"><use href="#i-chart"/></svg>통계</a>
+        <div class="spacer"></div>
+        <a><svg class="ic"><use href="#i-tune"/></svg>설정</a>
+        <div class="ver">0.59.0</div>
+      </aside>
+      <div class="main">
+        <header class="topbar">
+          <div>
+            <h2 class="title">보관함</h2>
+            <div class="crumbs">루트 / AI Model · 4개 항목 · 90.9 GB</div>
+          </div>
+          <div class="grow"></div>
+          <span class="pill live"><span class="dot"></span>서버 실행 중</span>
+          <div class="searchbox"><svg class="ic sm"><use href="#i-search"/></svg>파일 검색<span class="grow"></span><span class="kbdchip">/</span></div>
+          <button class="iconbtn" title="테마"><svg class="ic"><use href="#i-palette"/></svg></button>
+          <button class="iconbtn" title="디버그"><svg class="ic"><use href="#i-bug"/></svg></button>
+        </header>
+
+        <div class="content">
+          <div class="col">
+            <div class="statstrip">
+              <div class="card low stat"><div class="k">여유 공간</div><div class="v num">132.4<small>GB</small></div><div class="sub num">/ 256 GB</div></div>
+              <div class="card low stat"><div class="k">현재 폴더</div><div class="v num">90.9<small>GB</small></div><div class="sub">4개 항목</div></div>
+              <div class="card low stat"><div class="k">휴지통</div><div class="v num">1.2<small>GB</small></div><div class="sub">3개 파일</div></div>
+              <div class="card low stat"><div class="k">업로드</div><div class="v num">0</div><div class="sub">진행 중 없음</div></div>
+            </div>
+
+            <div class="card low" style="padding:12px">
+              <div class="row" style="gap:8px">
+                <button class="btn tonal sm"><svg class="ic"><use href="#i-plus"/></svg>폴더</button>
+                <button class="btn tonal sm"><svg class="ic"><use href="#i-upload"/></svg>업로드</button>
+                <div class="grow"></div>
+                <span class="meta">정렬 · 이름</span>
+                <button class="iconbtn" style="width:34px;height:34px"><svg class="ic sm"><use href="#i-tune"/></svg></button>
+              </div>
+            </div>
+
+            <div class="card low" style="padding:14px 12px;display:flex;gap:14px;min-height:0;flex:1;overflow:hidden">
+              <div class="tree">
+                <div class="t-item"><svg class="ic"><use href="#i-folder"/></svg>루트</div>
+                <div class="t-item on" style="margin-left:8px"><svg class="ic"><use href="#i-folder"/></svg>AI Model</div>
+                <div class="t-item" style="margin-left:8px"><svg class="ic"><use href="#i-folder"/></svg>Downloads</div>
+                <div class="t-item" style="margin-left:8px"><svg class="ic"><use href="#i-folder"/></svg>Photos</div>
+                <div class="t-item" style="opacity:.7"><svg class="ic"><use href="#i-trash"/></svg>휴지통</div>
+              </div>
+              <div style="flex:1;min-width:0;display:flex;flex-direction:column">
+                <div class="filehead"><span></span><span>이름</span><span>크기</span><span>수정</span><span></span></div>
+                <div style="overflow:hidden">
+                  <div class="filerow">
+                    <div class="ficon folder"><svg class="ic sm"><use href="#i-folder"/></svg></div>
+                    <div class="fname"><b>Models</b><span>3개 항목</span></div>
+                    <span class="meta num">54.2 GB</span><span class="meta num">10월 18일</span>
+                    <button class="iconbtn" style="width:30px;height:30px"><svg class="ic sm"><use href="#i-chev"/></svg></button>
+                  </div>
+                  <div class="filerow">
+                    <div class="ficon folder"><svg class="ic sm"><use href="#i-folder"/></svg></div>
+                    <div class="fname"><b>Datasets</b><span>12개 항목</span></div>
+                    <span class="meta num">8.8 GB</span><span class="meta num">10월 17일</span>
+                    <button class="iconbtn" style="width:30px;height:30px"><svg class="ic sm"><use href="#i-chev"/></svg></button>
+                  </div>
+                  <div class="filerow">
+                    <div class="ficon model"><svg class="ic sm"><use href="#i-file"/></svg></div>
+                    <div class="fname"><b>EXAONE-3.5-32B-Instruct-Q4_K_M.gguf</b><span>10월 18일 · 18,343,747,520 B</span></div>
+                    <span class="meta num">18.01 GB</span><span class="meta num">10월 18일</span>
+                    <button class="iconbtn" style="width:30px;height:30px;color:var(--primary)"><svg class="ic sm"><use href="#i-down"/></svg></button>
+                  </div>
+                  <div class="filerow">
+                    <div class="ficon model"><svg class="ic sm"><use href="#i-file"/></svg></div>
+                    <div class="fname"><b>Qwen2.5-32B-Instruct-Q4_K_M.gguf</b><span>10월 18일 · 18,851,336,576 B</span></div>
+                    <span class="meta num">18.49 GB</span><span class="meta num">10월 18일</span>
+                    <button class="iconbtn" style="width:30px;height:30px;color:var(--primary)"><svg class="ic sm"><use href="#i-down"/></svg></button>
+                  </div>
+                  <div class="filerow">
+                    <div class="ficon"><svg class="ic sm"><use href="#i-zip"/></svg></div>
+                    <div class="fname"><b>Tools.zip</b><span>10월 18일 · 압축</span></div>
+                    <span class="meta num">54.3 MB</span><span class="meta num">10월 18일</span>
+                    <button class="iconbtn" style="width:30px;height:30px;color:var(--primary)"><svg class="ic sm"><use href="#i-down"/></svg></button>
+                  </div>
+                  <div class="filerow">
+                    <div class="ficon"><svg class="ic sm"><use href="#i-file"/></svg></div>
+                    <div class="fname"><b>notes.md</b><span>10월 17일 · 텍스트</span></div>
+                    <span class="meta num">2.1 KB</span><span class="meta num">10월 17일</span>
+                    <button class="iconbtn" style="width:30px;height:30px;color:var(--primary)"><svg class="ic sm"><use href="#i-down"/></svg></button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <aside class="side">
+            <div class="card tonal">
+              <div class="row" style="margin-bottom:8px"><span class="label" style="color:inherit;opacity:.7">다운로드 안내</span></div>
+              <div style="font-size:13px;line-height:1.6">대용량 파일은 <b>Range 이어받기</b>로 내려받습니다. Chrome·Edge 데스크톱은 폴더 선택 후 디스크에 바로 기록합니다.</div>
+              <div class="row" style="margin-top:12px;gap:8px">
+                <button class="btn filled sm">폴더 ZIP</button>
+                <button class="btn out sm" style="border-color:color-mix(in srgb,var(--on-secondary-container) 30%,transparent);color:inherit">공유 링크</button>
+              </div>
+            </div>
+
+            <div class="card low">
+              <div class="row" style="margin-bottom:6px"><span class="label grow">저장공간</span><span class="meta num">48% 사용</span></div>
+              <div class="prog thin"><i style="width:48%"></i></div>
+              <div class="setrow"><span class="meta grow">모델</span><span class="num" style="font-size:12.5px">54.2 GB</span></div>
+              <div class="setrow"><span class="meta grow">다운로드</span><span class="num" style="font-size:12.5px">28.4 GB</span></div>
+              <div class="setrow"><span class="meta grow">사진</span><span class="num" style="font-size:12.5px">8.3 GB</span></div>
+            </div>
+
+            <div class="card low">
+              <div class="label" style="margin-bottom:4px">최근 활동</div>
+              <div class="setrow"><svg class="ic sm"><use href="#i-check"/></svg><span class="meta grow">EXAONE md5 일치</span><span class="meta num">14:02</span></div>
+              <div class="setrow"><svg class="ic sm"><use href="#i-upload"/></svg><span class="meta grow">Tools.zip 업로드</span><span class="meta num">13:40</span></div>
+              <div class="setrow"><svg class="ic sm"><use href="#i-folder"/></svg><span class="meta grow">Models 폴더 생성</span><span class="meta num">11:12</span></div>
+            </div>
+
+            <div class="card out" style="padding:12px 14px">
+              <div class="row"><svg class="ic sm"><use href="#i-lock"/></svg><span class="meta grow">승인된 기기만 접속</span><span class="pill">범위</span></div>
+            </div>
+          </aside>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="cap"><b>라이트</b> — 파일 행은 hover 시 surface-container, 폴더는 tertiary-container. QR은 테마와 무관하게 흰 바탕(스캔 대비).</div>
+
+  <div class="section-head">
+    <h2>Narrow <span>좁은 화면 · 390px</span></h2>
+    <div class="hint">레일 → 하단 내비게이션, 우측 레일 → 접이식 상태 카드</div>
+  </div>
+  <div class="narrow dash dark">
+    <div class="ntop">
+      <div class="brand" style="width:34px;height:34px;border-radius:11px;background:var(--primary);color:var(--on-primary);display:grid;place-items:center;font-weight:800;font-size:14px">DR</div>
+      <div class="grow">
+        <div style="font-size:15px;font-weight:700;letter-spacing:-.01em">다운로드</div>
+        <div class="meta num">활성 3 · 42.8 MB/s</div>
+      </div>
+      <button class="iconbtn" style="width:34px;height:34px"><svg class="ic sm"><use href="#i-search"/></svg></button>
+      <button class="iconbtn" style="width:34px;height:34px"><svg class="ic sm"><use href="#i-palette"/></svg></button>
+    </div>
+    <div class="nbody">
+      <div class="card hero" style="padding:12px 14px;border-radius:16px">
+        <div class="row">
+          <div class="grow">
+            <div class="label" style="color:inherit;opacity:.62">접속 주소</div>
+            <div class="num" style="font-size:13px;font-weight:700;margin-top:2px">192.168.86.49:3000</div>
+          </div>
+          <span class="pill live" style="background:color-mix(in srgb,var(--on-primary-container) 12%,transparent);color:inherit"><span class="dot pulse"></span>실행</span>
+        </div>
+      </div>
+      <div class="card low" style="padding:10px 12px">
+        <div class="row" style="margin-bottom:8px"><span class="label grow">받는 중 3</span><span class="meta num">42.8 MB/s</span></div>
+        <div class="job" style="padding:10px 12px;background:var(--surface-container)">
+          <div class="row">
+            <div class="tile p" style="width:32px;height:32px"><svg class="ic sm"><use href="#i-file"/></svg></div>
+            <div class="grow" style="min-width:0">
+              <div style="font-size:12.5px;font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">EXAONE…Q4_K_M.gguf</div>
+              <div class="meta num">8.42 / 18.01 GB</div>
+            </div>
+            <span class="num" style="font-size:13px;color:var(--primary);font-weight:650">47%</span>
+          </div>
+          <div class="prog" style="margin-top:8px"><i style="width:47%"></i></div>
+        </div>
+        <div class="job" style="padding:10px 12px;background:var(--surface-container);margin-top:8px">
+          <div class="row">
+            <div class="tile t" style="width:32px;height:32px"><svg class="ic sm"><use href="#i-file"/></svg></div>
+            <div class="grow" style="min-width:0">
+              <div style="font-size:12.5px;font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">ubuntu-24.04.1…iso</div>
+              <div class="meta num">1.31 / 2.61 GB</div>
+            </div>
+            <span class="num" style="font-size:13px;font-weight:650">50%</span>
+          </div>
+          <div class="prog" style="margin-top:8px"><i style="width:50%"></i></div>
+        </div>
+      </div>
+      <div class="card out" style="padding:10px 12px">
+        <div class="row"><svg class="ic sm"><use href="#i-folder"/></svg><span class="meta grow">보관함 · 여유 132.4 GB</span><svg class="ic sm"><use href="#i-chev"/></svg></div>
+      </div>
+      <div class="row" style="gap:8px">
+        <div class="field" style="height:44px;font-size:12px"><svg class="ic sm"><use href="#i-link"/></svg>URL 추가</div>
+        <button class="btn filled" style="height:44px;width:44px;padding:0;border-radius:14px"><svg class="ic"><use href="#i-plus"/></svg></button>
+      </div>
+    </div>
+    <nav class="nav">
+      <a class="on"><span class="ind"><svg class="ic sm"><use href="#i-down"/></svg></span>다운로드</a>
+      <a><span class="ind"><svg class="ic sm"><use href="#i-magnet"/></svg></span>토렌트</a>
+      <a><span class="ind"><svg class="ic sm"><use href="#i-folder"/></svg></span>보관함</a>
+      <a><span class="ind"><svg class="ic sm"><use href="#i-chart"/></svg></span>통계</a>
+      <a><span class="ind"><svg class="ic sm"><use href="#i-tune"/></svg></span>설정</a>
+    </nav>
+  </div>
+  <div class="cap"><b>반응형</b> — 600px 미만에서 레일·우측 상태 패널을 하단 내비와 접이식 카드로 전환. 콘텐츠 최대 폭은 1040px.</div>
+
+  <div class="section-head">
+    <h2>Tokens <span>안드로이드 · 웹 공통</span></h2>
+    <div class="hint">Material 3 역할(role) 이름 그대로 — Compose / CSS 양쪽에 같은 값</div>
+  </div>
+  <div class="swatches" id="swatches"></div>
+
+  <div class="section-head">
+    <h2>Type &amp; Shape</h2>
+    <div class="hint">Roboto Flex · 숫자는 tabular·wdth 92</div>
+  </div>
+  <div class="card" style="background:#0b1210;border:1px solid #22302a">
+    <div class="typescale">
+      <div class="ts"><div class="demo num" style="font-size:42px;font-weight:720;letter-spacing:-.035em;line-height:1">42.8 MB/s</div><div class="spec">display / 42 · 720 · tabular</div></div>
+      <div class="ts"><div class="demo" style="font-size:26px;font-weight:700;letter-spacing:-.02em">릴레이 상태</div><div class="spec">headline-small / 26 · 700</div></div>
+      <div class="ts"><div class="demo" style="font-size:16px;font-weight:650">EXAONE-3.5-32B-Instruct-Q4_K_M.gguf</div><div class="spec">title-medium / 16 · 650</div></div>
+      <div class="ts"><div class="demo" style="font-size:13px;font-weight:400;color:#b9c8c1">8.42 GB / 18.01 GB · 42.8 MB/s · 3분 12초 남음</div><div class="spec">body-medium / 13 · 400</div></div>
+      <div class="ts"><div class="demo" style="font-size:11px;font-weight:650;letter-spacing:.08em;text-transform:uppercase;color:#9fb8ac">STORAGE · DROIDRELAY</div><div class="spec">label-small / 11 · 650 · tracking .08em</div></div>
+    </div>
+    <div class="row" style="gap:10px;margin-top:18px;flex-wrap:wrap">
+      <span class="pill" style="background:#005141;color:#80f8d9">shape 4 · xs</span>
+      <span class="pill" style="background:#005141;color:#80f8d9">shape 8 · small</span>
+      <span class="pill" style="background:#005141;color:#80f8d9">shape 12 · medium</span>
+      <span class="pill" style="background:#005141;color:#80f8d9">shape 16 · large</span>
+      <span class="pill" style="background:#005141;color:#80f8d9">shape 28 · xl</span>
+      <span class="pill" style="background:#005141;color:#80f8d9">shape full</span>
+      <span class="pill" style="background:#334b44;color:#cce8df">간격 8dp · 12dp · 16dp · 24dp</span>
+      <span class="pill" style="background:#5d4200;color:#ffdf9e">motion emphasized 500ms cubic-bezier(.2,0,0,1)</span>
+    </div>
+  </div>
+
+  <p class="footer-note">
+    <b>메모</b> — 웹은 @material/web(유지보수 모드) 대신 <b>CSS 커스텀 프로퍼티 + 순수 HTML/CSS</b>로 구현합니다.
+    현재 대시보드의 문자열 기반 계약 테스트가 있으므로, 구현 시 <b>ID·핸들러 이름은 유지</b>하고 스타일/마크업만 교체해야 합니다.
+  </p>
+</div>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-down" viewBox="0 0 24 24"><path d="M12 3v11m0 0 4.5-4.5M12 14 7.5 9.5M4 20h16"/></symbol>
+  <symbol id="i-magnet" viewBox="0 0 24 24"><path d="M6 4v8a6 6 0 0 0 12 0V4h-4v8a2 2 0 0 1-4 0V4z"/><path d="M6 8h4M14 8h4"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4.4-4.4"/></symbol>
+  <symbol id="i-bug" viewBox="0 0 24 24"><rect x="8" y="8" width="8" height="11" rx="4"/><path d="M9 5l1.5 3M15 5l-1.5 3M4 11h4M16 11h4M4 17h4M16 17h4M12 8v11"/></symbol>
+  <symbol id="i-palette" viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 0 18h1.5a2.5 2.5 0 0 0 0-5H12a2 2 0 0 1 0-4h5a4 4 0 0 0-4-4z"/><path d="M8 9h.01M7 14h.01M12 7h.01"/></symbol>
+  <symbol id="i-chev" viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M4 12.5l5 5L20 6.5"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-link" viewBox="0 0 24 24"><path d="M9.5 14.5 14.5 9.5"/><path d="M8 12l-2 2a3.5 3.5 0 0 0 5 5l2-2M16 12l2-2a3.5 3.5 0 0 0-5-5l-2 2"/></symbol>
+  <symbol id="i-file" viewBox="0 0 24 24"><path d="M6 3h7l5 5v13H6z"/><path d="M13 3v5h5"/></symbol>
+  <symbol id="i-zip" viewBox="0 0 24 24"><path d="M6 3h12v18H6z"/><path d="M11 3v3h2V3M12 6v2M12 8v2M12 10v2"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M9 7V5h6v2M6 7l1 13h10l1-13"/></symbol>
+  <symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 20V9m0 0 4.5 4.5M12 9 7.5 13.5M4 4h16"/></symbol>
+  <symbol id="i-pause" viewBox="0 0 24 24"><path d="M9 5v14M15 5v14"/></symbol>
+  <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+  <symbol id="i-chart" viewBox="0 0 24 24"><path d="M5 20v-6M11 20V6M17 20v-9"/><path d="M3 20h18"/></symbol>
+  <symbol id="i-tune" viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></symbol>
+  <symbol id="i-wifi" viewBox="0 0 24 24"><path d="M2.5 8.5a14 14 0 0 1 19 0M6 12a9 9 0 0 1 12 0M9.5 15.5a4 4 0 0 1 5 0"/><path d="M12 19h.01"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></symbol>
+</svg>
+
+<script>
+function qrSvg() {
+  const n = 21, cell = 100 / n;
+  let seed = 20261021;
+  const rnd = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
+  const inFinder = (x, y) => (x < 7 && y < 7) || (x > 13 && y < 7) || (x < 7 && y > 13);
+  let out = '<svg viewBox="0 0 100 100" shape-rendering="crispEdges"><rect width="100" height="100" fill="#fff"/>';
+  for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
+    if (inFinder(x, y)) continue;
+    if (rnd() > 0.52) out += '<rect x="' + (x*cell) + '" y="' + (y*cell) + '" width="' + cell + '" height="' + cell + '" fill="#101614"/>';
+  }
+  const f = (fx, fy) => '<rect x="' + (fx*cell) + '" y="' + (fy*cell) + '" width="' + (7*cell) + '" height="' + (7*cell) + '" fill="#101614"/>' +
+    '<rect x="' + ((fx+1)*cell) + '" y="' + ((fy+1)*cell) + '" width="' + (5*cell) + '" height="' + (5*cell) + '" fill="#fff"/>' +
+    '<rect x="' + ((fx+2)*cell) + '" y="' + ((fy+2)*cell) + '" width="' + (3*cell) + '" height="' + (3*cell) + '" fill="#101614"/>';
+  out += f(0,0) + f(14,0) + f(0,14) + '</svg>';
+  return out;
+}
+document.getElementById('qr1').innerHTML = qrSvg();
+
+const tokens = [
+  ['primary', '#006B56', '#62DCBE'],
+  ['on-primary', '#FFFFFF', '#00382D'],
+  ['primary-container', '#7FF8D8', '#005141'],
+  ['on-primary-container', '#00201A', '#80F8D9'],
+  ['secondary-container', '#CCE8DF', '#334B44'],
+  ['tertiary', '#7C5800', '#F5BF48'],
+  ['tertiary-container', '#FFDF9E', '#5D4200'],
+  ['error', '#BA1A1A', '#FFB4AB'],
+  ['surface', '#F6FBF7', '#0E1513'],
+  ['surface-container', '#EAEFEA', '#1B211F'],
+  ['surface-container-high', '#E4EAE4', '#252B29'],
+  ['on-surface-variant', '#3F4945', '#BFC9C3'],
+  ['outline', '#6F7974', '#89938E'],
+  ['outline-variant', '#BFC9C3', '#3F4945'],
+  ['inverse-surface', '#2B322E', '#DDE4DF'],
+  ['surface-bright', '#F6FBF7', '#343B38'],
+];
+document.getElementById('swatches').innerHTML = tokens.map(([n, l, d]) =>
+  '<div class="sw"><div class="bar" style="background:linear-gradient(90deg,' + l + ' 50%,' + d + ' 50%)"></div>' +
+  '<div class="txt"><b>' + n + '</b>' + l + ' / ' + d + '</div></div>'
+).join('');
+</script>
+</body>
+</html>
