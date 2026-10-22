@@ -60,6 +60,23 @@
   `TrafficLedger.addDownHttp` 에 더한다.
 - 테스트 `DownloadRangeTest` 3건(총량 파싱 · 누락/`*` · 0 이하/비숫자).
 
+### Fixed [android] — HTTP 대용량 안내 문구 (T-1145)
+
+- **증상(T-1129d 실측)** — S22 대시보드를 `http://192.168.86.49:3000`(HTTPS 미사용)으로 열고 18.01GB
+  `EXAONE…gguf` 📥 를 누르면, 2초 안에 **명시 실패 카드**가 뜬다(무음 절단 아님 · `~/Downloads` 신규 0건).
+  그런데 문구가 *"이 브라우저는 대용량 디스크 저장(File System Access)을 지원하지 않습니다 —
+  Chrome·Edge 데스크톱으로 열거나 …"* 라서, **이미 Chrome 155 데스크톱인 사용자**를 헛걸음시킨다.
+- **원인** — `showSaveFilePicker` 는 **보안 컨텍스트에서만 노출**된다. 같은 브라우저에서
+  `https://example.com` → `isSecureContext=true`·`typeof showSaveFilePicker='function'`,
+  `http://192.168.86.49:3000` → `false`·`'undefined'`(실측). 그래서 `!showSaveFilePicker` 판정이
+  HTTP 에서도 먼저 걸려 `!isSecureContext` 분기는 **도달 불가 죽은 코드**였다.
+- **수정** — `tooBigAdvice()` 의 첫 분기를 `!window.isSecureContext` 로 올리고, HTTP 문구를
+  *"지금은 HTTP 접속이라 대용량 디스크 저장이 꺼져 있습니다 — Chrome·Edge 데스크톱에서 앱 설정의
+  HTTPS 를 켜고 다시 열거나, 맥 앱·Finder(DAV)로 받으세요"* 로 통합. **미지원 브라우저(Safari·Firefox)에는
+  여전히 HTTPS 를 처방하지 않는다**(켜도 그대로 막힘).
+- 계약 테스트를 **분기 순서 검증**으로 교체(`HTTP 판정 < 미지원 판정`, 미지원 분기의 HTTPS 문구 금지).
+  구코드(`insecure_idx=146` > `unsupported_idx=7`)에서 **실패함을 확인** — 회귀 가드로 유효. 테스트 **427/0**.
+
 ### Changed [web]
 
 - **테마 3종(Toxic/Midnight/Navy) → 라이트/다크/시스템** — `:root` 라이트 기본, `body[data-theme=dark]` 다크.
