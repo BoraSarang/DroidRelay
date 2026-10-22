@@ -873,9 +873,9 @@ T-001~T-008 전부 완료 (커밋 7574486).
 | T-번호 | 내용 | 상태 |
 |--------|------|------|
 | T-1128 | Range 루프 다운로더 — `dlRange`/`dlLoop`(WebDashboardScript): **Chromium 데스크톱(Chrome·Edge·웨일)+HTTPS**면 File System Access 디스크 기록(18GB 가능), 그 외(HTTP LAN·Safari·Firefox·모바일)는 Blob 폴백+256MB 가드+**브라우저 능력별** 대안 안내(`tooBigAdvice`). 배선: 보관함 파일📥·잡📥. 계약 테스트 9건 | ✅ |
-| T-1128b | **폴더 ZIP 📦 대용량 미해결(범위 밖 기록)** — `/dl-folder` 는 요청마다 ZIP 재빌드라 슬라이스 루프 폭주 위험 → 기존 앵커 유지(32MB 한계 잔존). 해결책: ZIP 완성 후 일정 시간 캐시해 Range 재요청에 재사용 | 📝 |
-| T-1128c | **만료 공유 링크 `/s/{token}` 32MB 한계(범위 밖 기록)** — 대시보드 밖 독립 페이지라 다운로더 미적용. HTTPS+대시보드 다운로더와 동일 로직 붙이기 가능 | 📝 |
-| T-1128d | **실기 검증 — 프로토콜은 완료, 브라우저 클릭은 보류** — 2026-10-18 S22(0.58.0/40): HTTPS(8443) 활성화 후 대시보드 200 · `content-range: bytes 0-0/19343747520` · `dlRange`/`tooBigAdvice` 실림 확인, 18GB 로 Range 전량 이어받기 → **기기 원본 md5 일치**. **브라우저에서 📥 직접 클릭하는 E2E 는 사용자 판단으로 보류**(자동 환경 브라우저 도구는 LAN 접속 불가). HTTPS 는 켜 둔 상태 | 🔄 |
+| T-1128b | **폴더 ZIP 📦 대용량 — 종결(미실시)** — `/dl-folder` 는 요청마다 ZIP 재빌드라 슬라이스 루프 폭주 위험 → 기존 앵커 유지(32MB 한계 잔존). 해결책: ZIP 완성 후 일정 시간 캐시해 Range 재요청에 재사용. **2026-10-22 사용자 판단: 중요도 낮아 미실시로 종결**(32MB 초과 폴더 ZIP 은 여전히 제한) | 📝 |
+| T-1128c | **만료 공유 링크 `/s/{token}` 32MB 한계 — 종결(미실시)** — 대시보드 밖 독립 페이지라 다운로더 미적용. HTTPS+대시보드 다운로더와 동일 로직 붙이기 가능. **2026-10-22 사용자 판단: 미실시로 종결** | 📝 |
+| T-1128d | **실기 검증 — 프로토콜 완료 · 클릭 E2E 미실시로 종결** — 2026-10-18 S22(0.58.0/40): HTTPS(8443) 활성화 후 대시보드 200 · `content-range: bytes 0-0/19343747520` · `dlRange`/`tooBigAdvice` 실림 확인, 18GB 로 Range 전량 이어받기 → **기기 원본 md5 일치**. 브라우저 📥 직접 클릭(E2E)은 미실시 — **2026-10-22 사용자 판단: 미실시로 종결**(HTTPS 저장 위치 다이얼로그는 네이티브 창이라 수동 1회 영역) | 📝 |
 | T-1128e | **모바일·Safari 웹 대용량은 구조적 한계** — `showSaveFilePicker`(File System Access)는 **Chromium 데스크톱 전용**(MDN/caniuse)이라 iOS·Android 브라우저는 HTTPS 여도 256MB 가드에 막힌다. 그 경우의 대안은 맥 앱 `받기`(T-1129)·Finder DAV. 안내 문구는 브라우저 능력별(`tooBigAdvice`)로 이미 갈라 두었다 | 📝 |
 
 ### 같은 뿌리 — macOS 맥 앱 `받기` 32MB 절단 (T-1129, 2026-10-18 발견)
@@ -887,8 +887,8 @@ T-001~T-008 전부 완료 (커밋 7574486).
 | T-번호 | 내용 | 상태 |
 |--------|------|------|
 | T-1129 | 맥 앱 네이티브 Range 이어받기 — `RangeDownload`(Core): `Content-Range` 전체 크기 필수, `.part` 조립, 같은 offset 재시도 3회, 취소 시 `.part` 보존, 이름 `(1)` 회피, `~/Downloads` 저장. 좌우: 저장 중 진행률%+취소. 테스트 22건 | ✅ |
-| T-1129b | **맥 앱 실기 E2E — 사용자 직접 확인 완료(2026-10-22)** — `~/Applications/DroidRelay.app`(0.58.0, 2026-10-18 설치)에서 보관함 `받기` 대용량 다운로드가 **동작함**을 사용자가 직접 확인. 단 **세부 수치·md5 는 미기록**("동작 확인 수준") — 파일 크기·해시 일치 근거가 필요하면 재측정. 자동검증 `RangeDownloadTests` 22건 유지 | ✅ |
-| T-1129c | **Doze 정지(실측 기록)** — 2026-10-18 S22: 18GB 이어받기 중 화면이 꺼져 Doze 로 들어가자 2.7GB 지점에서 전송 정지(오프셋 고정), 화면을 켜자 같은 offset 재요청으로 이어짐. 클라이언트 재시도로 버텼으나 **서버측 대책**(서빙 중 Wi-Fi/partial wake lock) 검토 가치 | 📝 |
+| T-1129b | **맥 앱 실기 E2E — 사용자 직접 확인 완료(2026-10-22)** — `~/Applications/DroidRelay.app`(0.58.0, 2026-10-18 설치)에서 보관함 `받기` 대용량 다운로드가 **동작함**을 사용자가 직접 확인. 세부 수치·md5 는 미기록("동작 확인 수준") — **근거 보강(크기·md5 재측정)은 2026-10-22 사용자 판단으로 미실시 종결**. 자동검증 `RangeDownloadTests` 22건 유지 | ✅ |
+| T-1129c | **Doze 정지 — 종결(대책 이미 존재 · 코드 작업 불필요)** — 2026-10-18 S22 실측: 18GB 이어받기 중 화면 꺼짐 → Doze 진입 → 2.7GB 지점 전송 정지, 화면 켜자 같은 offset 이어짐. **정정(2026-10-22 확인)**: ①`RelayService` 는 이미 `WifiLock(FULL_HIGH_PERF)`+`PARTIAL_WAKE_LOCK` 을 서빙 중 보유(2026-10-14 `9eb870c` 도입 — 즉 10-18 정지 시점에도 락이 있었음) ②그럼에도 멈춘 이유는 **Doze 가 예외 허용 앱이 아니면 wake lock 을 무시**하기 때문 ③실제 대책은 **배터리 최적화 예외**이며 앱이 설정 UI 로 요청 경로를 이미 제공(`REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` → `Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`) ④S22 는 예외 등록됨(`dumpsys deviceidle whitelist` = `user,com.borasarang.droidrelay`) · A90 은 미등록. 남은 것은 기기 설정이며 미등록 기기에서도 **재시도 3회 + 명시 실패(무음 절단 없음)** 로 끝난다 → **2026-10-22 사용자 판단으로 종결** | 📝 |
 | T-1129d | **HTTP LAN 웹 256MB 가드 실측 확인** — 2026-10-22 Chrome 155(S22 `http://192.168.86.49:3000`)에서 18.01GB `EXAONE…gguf` 📥 클릭 → **2초 내 명시 실패 카드**(`.dlbar`) 표시 · `~/Downloads` 신규 파일 0건 = **무음 절단 없음**. 다만 문구가 "이 브라우저는 File System Access 를 지원하지 않습니다 — Chrome·Edge 데스크톱으로 열거나" 로 나와 **이미 Chrome 데스크톱인 사용자를 헛걸음시킴** → 원인: `showSaveFilePicker` 는 **보안 컨텍스트에서만 노출**(https=function / http=undefined 실측)이라 `!isSecureContext` 분기가 죽은 코드였음 → **T-1145 에서 수정** | ✅ |
 
 ## v0.59 (2026-10-21) — DroidRelay 리디자인 (android + web)
