@@ -76,9 +76,12 @@ function spd(bps){return bps>0?(bps/1024).toFixed(0)+' KB/s':'-';}
 //   그 이상은 **무음 절단 대신 대안 안내**(tooBigAdvice).
 var DL_MEM_MAX=268435456;
 // 대용량이 막혔을 때 **무엇을 하면 되는지**를 브라우저 능력에 맞춰 말한다.
+// 순서 주의(T-1145 실측, Chrome 155): showSaveFilePicker 는 **보안 컨텍스트에서만 노출**된다
+// (https → function, http LAN → undefined). 미지원 판정을 먼저 두면 HTTP 로 접속한
+// Chrome 데스크톱 사용자에게 "Chrome·Edge 로 열라" 는 헛걸음 처방이 나간다.
 function tooBigAdvice(){
+  if(!window.isSecureContext)return '지금은 HTTP 접속이라 대용량 디스크 저장이 꺼져 있습니다 — Chrome·Edge 데스크톱에서 앱 설정의 HTTPS 를 켜고 다시 열거나, 맥 앱·Finder(DAV)로 받으세요';
   if(!window.showSaveFilePicker)return '이 브라우저는 대용량 디스크 저장(File System Access)을 지원하지 않습니다 — Chrome·Edge 데스크톱으로 열거나 맥 앱·Finder(DAV)로 받으세요';
-  if(!window.isSecureContext)return '앱 설정에서 HTTPS 를 켜면 이 파일도 저장할 수 있습니다(지금은 HTTP 접속)';
   return '맥 앱·Finder(DAV)로 받으세요';
 }
 function dlProgressCard(name,onCancel){

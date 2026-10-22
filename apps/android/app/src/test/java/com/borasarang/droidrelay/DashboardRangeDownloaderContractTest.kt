@@ -22,7 +22,8 @@ import org.junit.Test
  *    File System Access 가 없어 메모리 누적으로만 받으므로 대용량 가드가 필수
  * 5. 대용량 안내 문구가 **브라우저 능력별로 갈린다** — showSaveFilePicker 는
  *    Chromium 데스크톱 전용이라 Safari·Firefox·모바일 브라우저에 "HTTPS 켜기" 는
- *    처방이 아니다(켜도 그대로 막힌다)
+ *    처방이 아니다(켜도 그대로 막힌다). 또 showSaveFilePicker 노출 자체가
+ *    **보안 컨텍스트 조건**이라 HTTP 판정이 미지원 판정보다 앞서야 한다(T-1145)
  */
 class DashboardRangeDownloaderContractTest {
 
@@ -54,18 +55,26 @@ class DashboardRangeDownloaderContractTest {
     // ── 1b. 대용량 안내 문구 (브라우저 능력별) ──────────────────────
 
     @Test
-    fun `대용량 안내가 미지원 브라우저에 HTTPS 를 처방하지 않는다`() {
-        // Safari(macOS/iOS)·Firefox·모바일 브라우저는 showSaveFilePicker 자체가 없다
-        // (Chromium 데스크톱 전용). 그 브라우저에 "HTTPS 켜기" 라고 말하면
-        // 사용자를 **무의미한 왕복**으로 보낸다 — 켜도 그대로 막힌다.
+    fun `대용량 안내는 HTTP(비보안 컨텍스트)를 미지원 판정보다 먼저 한다`() {
+        // 2026-10-22 실측(Chrome 155 · S22 대시보드): 같은 브라우저에서
+        //   https://example.com        → isSecureContext=true,  showSaveFilePicker=function
+        //   http://192.168.86.49:3000  → isSecureContext=false, showSaveFilePicker=undefined
+        // File System Access 노출 자체가 보안 컨텍스트에 걸린다. 그래서 미지원 판정을 앞에 두면
+        // **이미 Chrome 데스크톱인데 "Chrome·Edge 로 열라"** 는 헛걸음 처방이 나간다(T-1129d 실측).
         assertTrue(html.contains("function tooBigAdvice()"))
         val fn = html.substringAfter("function tooBigAdvice()").substringBefore("\n}")
-        assertTrue("미지원 브라우저용 안내 없음: $fn", "Chrome·Edge 데스크톱" in fn)
-        assertTrue("HTTP(비보안 컨텍스트)용 HTTPS 처방 없음: $fn", "HTTPS 를 켜면" in fn)
-        val unsupported = fn.indexOf("!window.showSaveFilePicker")
         val insecure = fn.indexOf("!window.isSecureContext")
-        assertTrue("미지원 판정이 있어야 한다", unsupported >= 0)
-        assertTrue("미지원 브라우저에는 HTTPS 를 처방하지 않는다(먼저 반환)", unsupported < insecure)
+        val unsupported = fn.indexOf("!window.showSaveFilePicker")
+        assertTrue("보안 컨텍스트 판정 없음: $fn", insecure >= 0)
+        assertTrue("미지원 판정 없음: $fn", unsupported >= 0)
+        assertTrue("HTTP 판정이 미지원 판정보다 먼저여야 한다: $fn", insecure < unsupported)
+
+        val httpText = fn.substring(insecure, unsupported)
+        assertTrue("HTTP(비보안) 안내에 HTTPS 처방 없음: $httpText", "HTTPS" in httpText)
+        // Safari(macOS/iOS)·Firefox 는 **HTTPS 를 켜도** File System Access 가 없다 —
+        // 그 브라우저에 "HTTPS 켜기" 를 처방하면 무의미한 왕복이 된다.
+        val unsupportedText = fn.substring(unsupported)
+        assertFalse("미지원 브라우저에 HTTPS 처방 금지: $unsupportedText", "HTTPS 를 켜면" in unsupportedText)
     }
 
     @Test
